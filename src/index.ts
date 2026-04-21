@@ -1,15 +1,14 @@
 import { serve } from '@hono/node-server'
-import { Hono } from 'hono'
+import { app } from './app.js'
+import { env } from './config/env.js'
+import { logger } from './lib/logging/logger.js'
 
-const app = new Hono()
-
-app.get('/', (c) => {
-  return c.text('Hello Hono!')
-})
-
-serve({
-  fetch: app.fetch,
-  port: 3000
-}, (info) => {
-  console.log(`Server is running on http://localhost:${info.port}`)
-})
+serve(
+  {
+    fetch: app.fetch,
+    port: env.port,
+  },
+  (info) => {
+    logger.info({ port: info.port, tenantKey: env.tenantKey }, 'BFF server started')
+  },
+)

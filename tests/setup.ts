@@ -1,0 +1,10 @@
+// Test environment setup — provide minimal valid env before any module imports
+process.env['NODE_ENV'] = 'test'
+process.env['TENANT_KEY'] = 'test-school'
+process.env['TENANT_NAME'] = 'Test School'
+process.env['SUPABASE_URL'] = 'https://test.supabase.co'
+process.env['SUPABASE_ANON_KEY'] = 'test-anon-key'
+process.env['SUPABASE_SERVICE_ROLE_KEY'] = 'test-service-role-key'
+process.env['SUPABASE_JWT_SECRET'] = 'test-jwt-secret-that-is-long-enough'
+process.env['SUPABASE_JWT_ISSUER'] = 'https://test.supabase.co/auth/v1'
+process.env['ROBIN_BASE_URL'] = 'http://localhost:8000'

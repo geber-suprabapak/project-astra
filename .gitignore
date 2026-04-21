@@ -26,3 +26,18 @@ lerna-debug.log*
 
 # misc
 .DS_Store
+dist/
+# Build output
+dist/
+build/
+
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Logs
+*.log
