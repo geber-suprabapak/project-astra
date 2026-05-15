@@ -48,6 +48,7 @@ export const auth: MiddlewareHandler<AppEnv> = async (c, next) => {
 
     c.set('userId', userId)
     c.set('rawToken', token)
+    c.set('tenantKey', env.tenantKey)
   } catch (err) {
     if (err instanceof AppError) throw err
     throw AppError.authInvalid()

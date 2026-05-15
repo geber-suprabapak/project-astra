@@ -33,6 +33,9 @@ const schema = z
     ROBIN_READY_TIMEOUT_MS: positiveInt.default(3000),
     ROBIN_IDENTIFY_TIMEOUT_MS: positiveInt.default(30000),
     ROBIN_ENROLL_TIMEOUT_MS: positiveInt.default(60000),
+    ROBIN_ENROLL_STATUS_TIMEOUT_MS: positiveInt.default(5000),
+    SUPABASE_QUERY_TIMEOUT_MS: positiveInt.default(5000),
+    SUPABASE_STORAGE_UPLOAD_TIMEOUT_MS: positiveInt.default(15000),
   })
   .superRefine((data, ctx) => {
     if (!data.SUPABASE_JWT_SECRET && !data.SUPABASE_JWKS_URL) {
@@ -78,4 +81,7 @@ export const env = {
   robinReadyTimeoutMs: raw.ROBIN_READY_TIMEOUT_MS,
   robinIdentifyTimeoutMs: raw.ROBIN_IDENTIFY_TIMEOUT_MS,
   robinEnrollTimeoutMs: raw.ROBIN_ENROLL_TIMEOUT_MS,
+  robinEnrollStatusTimeoutMs: raw.ROBIN_ENROLL_STATUS_TIMEOUT_MS,
+  supabaseQueryTimeoutMs: raw.SUPABASE_QUERY_TIMEOUT_MS,
+  supabaseStorageUploadTimeoutMs: raw.SUPABASE_STORAGE_UPLOAD_TIMEOUT_MS,
 } as const

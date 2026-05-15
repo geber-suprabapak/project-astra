@@ -6,6 +6,7 @@ export interface AppContextVariables {
   userId: string
   rawToken: string
   abortSignal: AbortSignal
+  tenantKey: string
 }
 
 export type AppEnv = { Variables: AppContextVariables }

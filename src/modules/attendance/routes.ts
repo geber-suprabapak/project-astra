@@ -14,6 +14,8 @@ attendanceRouter.use('*', auth)
 // POST /v1/mobile/attendance/precheck
 attendanceRouter.post('/precheck', rateLimits.attendancePrecheck, async (c) => {
   const userId = c.get('userId')
+  const token = c.get('rawToken')
+  const requestId = c.get('requestId')
   const body = await c.req.json() as unknown
   const parsed = PrecheckBodySchema.safeParse(body)
   if (!parsed.success) throw AppError.validationError(parsed.error.flatten())
@@ -22,6 +24,8 @@ attendanceRouter.post('/precheck', rateLimits.attendancePrecheck, async (c) => {
     userId,
     latitude: parsed.data.latitude,
     longitude: parsed.data.longitude,
+    token,
+    requestId,
   })
   return successResponse(c, result, 'Attendance precheck completed.')
 })

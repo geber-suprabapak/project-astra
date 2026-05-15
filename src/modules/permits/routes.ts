@@ -15,7 +15,7 @@ permitsRouter.use('*', auth)
 permitsRouter.get('/', rateLimits.permitsGet, async (c) => {
   const userId = c.get('userId')
   const permits = await listPermits(userId)
-  return successResponse(c, permits, 'Permits retrieved.')
+  return successResponse(c, { items: permits }, 'Permits loaded.')
 })
 
 // POST /v1/mobile/permits

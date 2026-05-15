@@ -8,6 +8,7 @@ import {
 } from '../../clients/supabase/admin.js'
 import { getSignedAvatarUrl } from '../../clients/supabase/storage.js'
 import { robinClient } from '../../clients/robin/client.js'
+import { env } from '../../config/env.js'
 
 // ---------------------------------------------------------------------------
 // WIB time utilities
@@ -86,12 +87,12 @@ export function computeAttendanceStatus(absences: Absence[]): AttendanceStatus {
 }
 
 // ---------------------------------------------------------------------------
-// Schedule window check
+// Schedule window check (shared with attendance module)
 // ---------------------------------------------------------------------------
 
 export interface ScheduleWindow {
-  start: string
-  end: string
+  start_at: string
+  end_at: string
   action: 'check_in' | 'check_out'
   late_deadline: string | null
 }
@@ -119,8 +120,8 @@ export function getScheduleWindowForAction(
       inWindow,
       isLate,
       window: {
-        start: start.toISOString(),
-        end: lateDeadline.toISOString(),
+        start_at: start.toISOString(),
+        end_at: lateDeadline.toISOString(),
         action: 'check_in',
         late_deadline: lateDeadline.toISOString(),
       },
@@ -135,8 +136,8 @@ export function getScheduleWindowForAction(
       inWindow,
       isLate: false,
       window: {
-        start: start.toISOString(),
-        end: end.toISOString(),
+        start_at: start.toISOString(),
+        end_at: end.toISOString(),
         action: 'check_out',
         late_deadline: null,
       },
@@ -149,8 +150,8 @@ export function getScheduleWindowForAction(
 // ---------------------------------------------------------------------------
 
 export type PrimaryAction =
-  | { allowed: false; type: null; reason_code: string; label: string }
-  | { allowed: true; type: 'check_in' | 'check_out'; reason_code: null; label: string }
+  | { allowed: false; type: null; reason_code: string; label: string; reason_message: string }
+  | { allowed: true; type: 'check_in' | 'check_out'; reason_code: null; label: string; reason_message: null }
 
 export function computePrimaryAction(params: {
   robinHealthy: boolean
@@ -163,32 +164,32 @@ export function computePrimaryAction(params: {
   const { robinHealthy, enrollmentStatus, hasActivePermit, schedule, attendanceStatus, baseDateWIB } = params
 
   if (!robinHealthy) {
-    return { allowed: false, type: null, reason_code: 'DEPENDENCY_UNAVAILABLE', label: 'Layanan tidak tersedia' }
+    return { allowed: false, type: null, reason_code: 'DEPENDENCY_UNAVAILABLE', label: 'Layanan tidak tersedia', reason_message: 'Face recognition service is unavailable.' }
   }
 
   if (enrollmentStatus !== 'enrolled') {
-    return { allowed: false, type: null, reason_code: 'ENROLLMENT_REQUIRED', label: 'Absensi wajah belum terdaftar' }
+    return { allowed: false, type: null, reason_code: 'ENROLLMENT_REQUIRED', label: 'Absensi wajah belum terdaftar', reason_message: 'Face enrollment is required before attendance.' }
   }
 
   if (hasActivePermit) {
-    return { allowed: false, type: null, reason_code: 'ATTENDANCE_BLOCKED', label: 'Izin aktif hari ini' }
+    return { allowed: false, type: null, reason_code: 'ATTENDANCE_BLOCKED', label: 'Izin aktif hari ini', reason_message: 'You have an active permit for today.' }
   }
 
   if (!schedule) {
-    return { allowed: false, type: null, reason_code: 'ATTENDANCE_BLOCKED', label: 'Tidak ada jadwal aktif' }
+    return { allowed: false, type: null, reason_code: 'ATTENDANCE_BLOCKED', label: 'Tidak ada jadwal aktif', reason_message: 'No active schedule for today.' }
   }
 
   const { hasCheckedIn, hasCheckedOut } = attendanceStatus
 
   if (hasCheckedIn && hasCheckedOut) {
-    return { allowed: false, type: null, reason_code: 'ATTENDANCE_BLOCKED', label: 'Absensi hari ini sudah lengkap' }
+    return { allowed: false, type: null, reason_code: 'ATTENDANCE_BLOCKED', label: 'Absensi hari ini sudah lengkap', reason_message: 'Attendance for today is already complete.' }
   }
 
   const actionType: 'check_in' | 'check_out' = hasCheckedIn ? 'check_out' : 'check_in'
   const { inWindow } = getScheduleWindowForAction(schedule, baseDateWIB, actionType)
 
   if (!inWindow) {
-    return { allowed: false, type: null, reason_code: 'ATTENDANCE_BLOCKED', label: 'Di luar jam absensi' }
+    return { allowed: false, type: null, reason_code: 'ATTENDANCE_BLOCKED', label: 'Di luar jam absensi', reason_message: 'Outside of attendance window.' }
   }
 
   return {
@@ -196,27 +197,71 @@ export function computePrimaryAction(params: {
     type: actionType,
     reason_code: null,
     label: actionType === 'check_in' ? 'PRESENSI' : 'PRESENSI PULANG',
+    reason_message: null,
   }
 }
 
 // ---------------------------------------------------------------------------
-// Dashboard orchestrator
+// Helpers to compute total work hours from absence records
+// ---------------------------------------------------------------------------
+
+function computeTotalWorkHours(absences: Absence[]): number | null {
+  const checkIn = absences.find((r) => r.status === 'Hadir' || r.status === 'Terlambat')
+  const checkOut = absences.find((r) => r.status === 'Pulang')
+  if (!checkIn || !checkOut) return null
+
+  const inTime = new Date(checkIn.created_at).getTime()
+  const outTime = new Date(checkOut.created_at).getTime()
+  if (outTime <= inTime) return null
+  return Math.round(((outTime - inTime) / (1000 * 60 * 60)) * 100) / 100
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard orchestrator — matches plan.md §7.1 response shape
 // ---------------------------------------------------------------------------
 
 export interface DashboardResponse {
   profile: {
     user_id: string
     full_name: string | null
+    email: string | null | undefined
     nis: string | null | undefined
     class_name: string | null | undefined
-    role: string | null | undefined
+    absence_number: string | null | undefined
     avatar_url: string | null
+    role: string | null | undefined
   }
-  today_date: string
-  today_status: AttendanceStatus
+  attendance: {
+    today_status: 'pending' | 'present' | 'absent' | 'leave'
+    has_checked_in: boolean
+    has_checked_out: boolean
+    check_in_time: string | null
+    check_out_time: string | null
+    total_work_hours: number | null
+  }
+  schedule: {
+    day_key: string
+    start_check_in_at: string | null
+    end_check_in_at: string | null
+    start_check_out_at: string | null
+    end_check_out_at: string | null
+    compensation_minutes: number | null
+  } | null
+  face: {
+    server_status: 'healthy' | 'unhealthy'
+    enrollment_status: 'enrolled' | 'not_enrolled'
+    message: string
+  }
+  permit: {
+    has_active_permit: boolean
+    active_category: string | null
+  }
   primary_action: PrimaryAction
-  schedule: Schedule | null
-  service_operational: boolean
+  server_time: {
+    now: string
+    timezone: string
+    source: 'bff'
+  }
 }
 
 export async function getDashboard(
@@ -246,7 +291,7 @@ export async function getDashboard(
 
   const attendanceStatus = computeAttendanceStatus(absences)
 
-  // Active permit check
+  // Active permit overrides status
   if (activePermits.length > 0) {
     attendanceStatus.today = 'leave'
   }
@@ -264,19 +309,56 @@ export async function getDashboard(
     baseDateWIB: todayWIB,
   })
 
+  // Compute normalized schedule
+  const normalizedSchedule = schedule
+    ? {
+        day_key: schedule.hari,
+        start_check_in_at: parseScheduleTime(schedule.mulai_masuk, todayWIB)?.toISOString() ?? null,
+        end_check_in_at: parseScheduleTime(schedule.selesai_masuk, todayWIB)?.toISOString() ?? null,
+        start_check_out_at: parseScheduleTime(schedule.mulai_pulang, todayWIB)?.toISOString() ?? null,
+        end_check_out_at: parseScheduleTime(schedule.selesai_pulang, todayWIB)?.toISOString() ?? null,
+        compensation_minutes: schedule.kompensasi_waktu,
+      }
+    : null
+
+  // Extract check-in/out times and total hours
+  const checkInRecord = absences.find((r) => r.status === 'Hadir' || r.status === 'Terlambat')
+  const checkOutRecord = absences.find((r) => r.status === 'Pulang')
+
   return {
     profile: {
       user_id: profile.user_id,
       full_name: profile.full_name,
+      email: profile.email,
       nis: profile.nis,
       class_name: profile.class_name,
-      role: profile.role,
+      absence_number: profile.absence_number,
       avatar_url: avatarUrl,
+      role: profile.role,
     },
-    today_date: todayWIB,
-    today_status: attendanceStatus,
+    attendance: {
+      today_status: attendanceStatus.today,
+      has_checked_in: attendanceStatus.hasCheckedIn,
+      has_checked_out: attendanceStatus.hasCheckedOut,
+      check_in_time: checkInRecord?.created_at ?? null,
+      check_out_time: checkOutRecord?.created_at ?? null,
+      total_work_hours: computeTotalWorkHours(absences),
+    },
+    schedule: normalizedSchedule,
+    face: {
+      server_status: robinReady.healthy ? 'healthy' : 'unhealthy',
+      enrollment_status: enrollStatus.status,
+      message: enrollStatus.message ?? (enrollStatus.status === 'enrolled' ? 'Ready' : 'Not enrolled.'),
+    },
+    permit: {
+      has_active_permit: activePermits.length > 0,
+      active_category: activePermits.length > 0 ? activePermits[0].kategori_izin : null,
+    },
     primary_action: primaryAction,
-    schedule,
-    service_operational: robinReady.healthy,
+    server_time: {
+      now: now.toISOString(),
+      timezone: env.businessTimezone,
+      source: 'bff' as const,
+    },
   }
 }

@@ -9,7 +9,7 @@ import {
   type RobinEnrollStatus,
 } from './schemas.js'
 
-const ENROLL_STATUS_TIMEOUT_MS = 5000 // plan.md §6.4
+const ENROLL_STATUS_TIMEOUT_MS = () => env.robinEnrollStatusTimeoutMs
 
 async function fetchWithTimeout(
   url: string,
@@ -116,7 +116,7 @@ export class RobinClient {
       res = await fetchWithTimeout(
         `${this.baseUrl}/v1/enroll/status`,
         { method: 'GET', headers: robinHeaders(token, requestId) },
-        ENROLL_STATUS_TIMEOUT_MS,
+        ENROLL_STATUS_TIMEOUT_MS(),
       )
     } catch (err) {
       if (err instanceof AppError && err.code === 'UPSTREAM_TIMEOUT') throw err

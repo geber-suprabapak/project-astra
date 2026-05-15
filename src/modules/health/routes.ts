@@ -20,7 +20,7 @@ healthRouter.get('/ready', async (c) => {
 const mobileHealthRouter = new Hono<AppEnv>()
 mobileHealthRouter.get('/', async (c) => {
   const result = await getReadiness()
-  return successResponse(c, { operational: result.healthy }, 'Health check completed.')
+  return successResponse(c, { status: result.healthy ? 'healthy' : 'unhealthy' }, 'Service healthy.')
 })
 
 export { healthRouter, mobileHealthRouter }

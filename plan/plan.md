@@ -143,21 +143,21 @@ The new repo must start with a ready-to-run service baseline, not a blank Hono s
 - Native `fetch` for Robin integration
 - `vitest` for tests
 - `eslint` and `prettier`
-- `tsx` for local development
+- Bun watch mode for local development
 
 ### 5.2 Canonical package management and scripts
 
-Use `npm` as the canonical package manager to simplify Docker and CI.
+Use `bun` as the canonical package manager for local development, Docker, and CI.
 
 Required scripts:
 
-- `npm run dev`
-- `npm run build`
-- `npm run start`
-- `npm run typecheck`
-- `npm run lint`
-- `npm run test`
-- `npm run test:integration`
+- `bun run dev`
+- `bun run build`
+- `bun run start`
+- `bun run typecheck`
+- `bun run lint`
+- `bun run test`
+- `bun run test:integration`
 
 ### 5.3 File and module structure
 

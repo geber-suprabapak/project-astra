@@ -18,6 +18,7 @@ export interface PermitResponse {
   attachment_url: string | null
   created_at: string | undefined
   rejection_reason: string | null | undefined
+  rejected_at: string | null | undefined
 }
 
 function toPermitResponse(permit: Permit, attachmentUrl: string | null): PermitResponse {
@@ -31,6 +32,7 @@ function toPermitResponse(permit: Permit, attachmentUrl: string | null): PermitR
     attachment_url: attachmentUrl,
     created_at: permit.created_at,
     rejection_reason: permit.rejection_reason,
+    rejected_at: permit.rejected_at,
   }
 }
 
