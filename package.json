@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
     "test": "vitest run tests/unit",
-    "test:integration": "vitest run tests/integration"
+    "test:integration": "vitest run tests/integration",
+    "auth:token": "bun scripts/get-jwt-token.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.14",
