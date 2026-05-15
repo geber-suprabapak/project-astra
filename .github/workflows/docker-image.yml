@@ -18,7 +18,7 @@ permissions:
 jobs:
   docker:
     name: Build Docker image
-    runs-on: self-hosted
+    runs-on: big-boy
     steps:
       - name: Checkout
         uses: actions/checkout@v4
