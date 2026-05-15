@@ -415,7 +415,13 @@ Public endpoints:
 
 ```bash
 curl "http://localhost:3000/live"
+```
+
+```bash
 curl "http://localhost:3000/ready"
+```
+
+```bash
 curl "http://localhost:3000/v1/mobile/health"
 ```
 
@@ -423,20 +429,28 @@ Auth-protected endpoints:
 
 ```bash
 curl -H "Authorization: Bearer $JWT_TOKEN" "http://localhost:3000/v1/mobile/dashboard"
+```
 
+```bash
 curl -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"latitude":-7.123,"longitude":112.123}' \
   "http://localhost:3000/v1/mobile/attendance/precheck"
+```
 
+```bash
 curl -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"action_type":"check_in","image_base64":"<base64>","latitude":-7.123,"longitude":112.123}' \
   "http://localhost:3000/v1/mobile/attendance/submit"
+```
 
+```bash
 curl -H "Authorization: Bearer $JWT_TOKEN" \
   "http://localhost:3000/v1/mobile/face/enrollment/status"
+```
 
+```bash
 curl -H "Authorization: Bearer $JWT_TOKEN" \
   -F "files=@./photo-1.jpg" \
   -F "files=@./photo-2.jpg" \
@@ -449,37 +463,51 @@ curl -H "Authorization: Bearer $JWT_TOKEN" \
   -F "files=@./photo-9.jpg" \
   -F "files=@./photo-10.jpg" \
   "http://localhost:3000/v1/mobile/face/enrollment"
+```
 
+```bash
 curl -H "Authorization: Bearer $JWT_TOKEN" \
   "http://localhost:3000/v1/mobile/permits"
+```
 
+```bash
 curl -H "Authorization: Bearer $JWT_TOKEN" \
   -F "category=sakit" \
   -F "description=Demam dan perlu istirahat" \
   -F "date=2026-05-15" \
   -F "attachment=@./note.jpg" \
   "http://localhost:3000/v1/mobile/permits"
+```
 
+```bash
 curl -H "Authorization: Bearer $JWT_TOKEN" \
   "http://localhost:3000/v1/mobile/profile"
+```
 
+```bash
 curl -H "Authorization: Bearer $JWT_TOKEN" \
   -X PATCH \
   -F "file=@./avatar.jpg" \
   "http://localhost:3000/v1/mobile/profile/avatar"
+```
 
+```bash
 curl -H "Authorization: Bearer $JWT_TOKEN" \
   -X PATCH \
   -H "Content-Type: application/json" \
   -d '{"clear":true}' \
   "http://localhost:3000/v1/mobile/profile/avatar"
+```
 
+```bash
 curl -H "Authorization: Bearer $JWT_TOKEN" \
   -X PATCH \
   -H "Content-Type: application/json" \
   -d '{"current_password":"old-pass","new_password":"new-pass-123"}' \
   "http://localhost:3000/v1/mobile/profile/password"
+```
 
+```bash
 curl -H "Authorization: Bearer $JWT_TOKEN" \
   "http://localhost:3000/v1/mobile/time"
 ```
