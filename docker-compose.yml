@@ -1,8 +1,7 @@
 services:
   bff:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${ASTRA_IMAGE:-ghcr.io/geber-suprabapak/project-astra:latest}
+    pull_policy: always
     env_file: .env
     ports:
       - "3000:3000"

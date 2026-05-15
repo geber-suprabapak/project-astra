@@ -358,11 +358,14 @@ bun run test:integration -- --pool=forks --maxWorkers=1
 
 ## Docker
 
-Build and run with Docker Compose:
+Run the prebuilt GHCR image with Docker Compose:
 
 ```bash
-docker compose up --build
+docker compose pull
+docker compose up -d
 ```
+
+The default image is `ghcr.io/geber-suprabapak/project-astra:latest`. Override it with `ASTRA_IMAGE` when deploying a pinned tag or SHA image.
 
 The container listens on port `3000` and exposes a Docker healthcheck through `/live`.
 
