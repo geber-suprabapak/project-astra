@@ -397,6 +397,99 @@ bun run test -- --pool=forks --maxWorkers=1
 bun run test:integration -- --pool=forks --maxWorkers=1
 ```
 
+## Curl Test Guide
+
+Set the base URL once:
+
+```bash
+export BASE_URL=http://localhost:3000
+```
+
+Get a JWT with the interactive helper:
+
+```bash
+bun run auth:token
+```
+
+Store the token in your shell:
+
+```bash
+export JWT_TOKEN="<paste access token>"
+```
+
+Public endpoints:
+
+```bash
+curl "$BASE_URL/live"
+curl "$BASE_URL/ready"
+curl "$BASE_URL/v1/mobile/health"
+```
+
+Auth-protected endpoints:
+
+```bash
+curl -H "Authorization: Bearer $JWT_TOKEN" "$BASE_URL/v1/mobile/dashboard"
+
+curl -H "Authorization: Bearer $JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"latitude":-7.123,"longitude":112.123}' \
+  "$BASE_URL/v1/mobile/attendance/precheck"
+
+curl -H "Authorization: Bearer $JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"action_type":"check_in","image_base64":"<base64>","latitude":-7.123,"longitude":112.123}' \
+  "$BASE_URL/v1/mobile/attendance/submit"
+
+curl -H "Authorization: Bearer $JWT_TOKEN" \
+  "$BASE_URL/v1/mobile/face/enrollment/status"
+
+curl -H "Authorization: Bearer $JWT_TOKEN" \
+  -F "files=@./photo-1.jpg" \
+  -F "files=@./photo-2.jpg" \
+  -F "files=@./photo-3.jpg" \
+  -F "files=@./photo-4.jpg" \
+  -F "files=@./photo-5.jpg" \
+  -F "files=@./photo-6.jpg" \
+  -F "files=@./photo-7.jpg" \
+  -F "files=@./photo-8.jpg" \
+  -F "files=@./photo-9.jpg" \
+  -F "files=@./photo-10.jpg" \
+  "$BASE_URL/v1/mobile/face/enrollment"
+
+curl -H "Authorization: Bearer $JWT_TOKEN" \
+  "$BASE_URL/v1/mobile/permits"
+
+curl -H "Authorization: Bearer $JWT_TOKEN" \
+  -F "category=sakit" \
+  -F "description=Demam dan perlu istirahat" \
+  -F "date=2026-05-15" \
+  -F "attachment=@./note.jpg" \
+  "$BASE_URL/v1/mobile/permits"
+
+curl -H "Authorization: Bearer $JWT_TOKEN" \
+  "$BASE_URL/v1/mobile/profile"
+
+curl -H "Authorization: Bearer $JWT_TOKEN" \
+  -X PATCH \
+  -F "file=@./avatar.jpg" \
+  "$BASE_URL/v1/mobile/profile/avatar"
+
+curl -H "Authorization: Bearer $JWT_TOKEN" \
+  -X PATCH \
+  -H "Content-Type: application/json" \
+  -d '{"clear":true}' \
+  "$BASE_URL/v1/mobile/profile/avatar"
+
+curl -H "Authorization: Bearer $JWT_TOKEN" \
+  -X PATCH \
+  -H "Content-Type: application/json" \
+  -d '{"current_password":"old-pass","new_password":"new-pass-123"}' \
+  "$BASE_URL/v1/mobile/profile/password"
+
+curl -H "Authorization: Bearer $JWT_TOKEN" \
+  "$BASE_URL/v1/mobile/time"
+```
+
 ## Implementation Status
 
 The implementation covers the v1 plan surface:
