@@ -18,7 +18,7 @@ permissions:
 jobs:
   docker:
     name: Build Docker image
-    runs-on: big-boy
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
