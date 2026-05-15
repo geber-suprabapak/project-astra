@@ -4,6 +4,11 @@ import { env } from '../config/env.js'
 import { AppError } from '../lib/errors/app-error.js'
 import type { AppEnv } from '../types/context.js'
 
+const jwtVerifyOptions = {
+  audience: env.supabaseJwtAudience,
+  ...(env.supabaseJwtIssuer ? { issuer: env.supabaseJwtIssuer } : {}),
+}
+
 // Cache JWKS fetcher (initialized lazily)
 let jwksGetter: ReturnType<typeof createRemoteJWKSet> | null = null
 
@@ -27,17 +32,11 @@ export const auth: MiddlewareHandler<AppEnv> = async (c, next) => {
 
     if (env.supabaseJwtSecret) {
       const secret = new TextEncoder().encode(env.supabaseJwtSecret)
-      const { payload: p } = await jwtVerify(token, secret, {
-        issuer: env.supabaseJwtIssuer,
-        audience: env.supabaseJwtAudience,
-      })
+      const { payload: p } = await jwtVerify(token, secret, jwtVerifyOptions)
       payload = p
     } else {
       const jwks = getJwksGetter()!
-      const { payload: p } = await jwtVerify(token, jwks, {
-        issuer: env.supabaseJwtIssuer,
-        audience: env.supabaseJwtAudience,
-      })
+      const { payload: p } = await jwtVerify(token, jwks, jwtVerifyOptions)
       payload = p
     }
 

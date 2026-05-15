@@ -10,6 +10,20 @@ export const supabaseAdmin = createClient(env.supabaseUrl, env.supabaseServiceRo
   },
 })
 
+function createUserScopedClient(token: string) {
+  return createClient(env.supabaseUrl, env.supabaseAnonKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+    global: {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Type definitions (aligned to actual mobile schema)
 // ---------------------------------------------------------------------------
@@ -195,8 +209,9 @@ export async function validateAttendanceAction(params: {
   userId: string
   latitude: number
   longitude: number
+  token: string
 }): Promise<AttendanceActionRpcResponse> {
-  const response = await supabaseAdmin.rpc('get_and_validate_attendance_action', {
+  const response = await createUserScopedClient(params.token).rpc('get_and_validate_attendance_action', {
     p_user_id: params.userId,
     p_user_lat: params.latitude,
     p_user_lon: params.longitude,
@@ -216,8 +231,9 @@ export async function saveAttendanceRecord(params: {
   actionType: 'check_in' | 'check_out'
   latitude: number
   longitude: number
+  token: string
 }): Promise<SaveAttendanceRecordRpcResponse> {
-  const response = await supabaseAdmin.rpc('save_attendance_record', {
+  const response = await createUserScopedClient(params.token).rpc('save_attendance_record', {
     p_user_id: params.userId,
     p_action_type: params.actionType,
     p_photo_path: null,

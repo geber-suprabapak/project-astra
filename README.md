@@ -300,7 +300,8 @@ SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 SUPABASE_JWT_SECRET=your-jwt-secret
-SUPABASE_JWT_ISSUER=https://your-project.supabase.co/auth/v1
+# Optional. Set only if your Supabase JWT includes an "iss" claim.
+# SUPABASE_JWT_ISSUER=https://your-project.supabase.co/auth/v1
 SUPABASE_JWT_AUDIENCE=authenticated
 SUPABASE_STORAGE_BUCKET_AVATARS=avatars
 SUPABASE_STORAGE_BUCKET_PERMITS=perizinan
@@ -313,7 +314,7 @@ SUPABASE_QUERY_TIMEOUT_MS=5000
 SUPABASE_STORAGE_UPLOAD_TIMEOUT_MS=15000
 ```
 
-JWT verification can use either `SUPABASE_JWT_SECRET` or `SUPABASE_JWKS_URL`. Provide one valid method for the deployment.
+JWT verification can use either `SUPABASE_JWT_SECRET` or `SUPABASE_JWKS_URL`. Provide one valid method for the deployment. `SUPABASE_JWT_ISSUER` is optional because some self-hosted Supabase/GoTrue tokens do not include an `iss` claim.
 
 ## Local Development
 

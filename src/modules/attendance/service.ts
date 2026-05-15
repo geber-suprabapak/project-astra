@@ -178,6 +178,7 @@ async function runGateChecks(params: {
     userId: params.userId,
     latitude: params.latitude,
     longitude: params.longitude,
+    token: params.token,
   })
 
   if (!rpcResult.actionable || rpcResult.action_type === 'none') {
@@ -313,6 +314,7 @@ export async function submit(params: {
     actionType: params.actionType,
     latitude: params.latitude,
     longitude: params.longitude,
+    token: params.token,
   })
 
   if (!saveResult.success) {

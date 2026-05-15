@@ -24,7 +24,7 @@ const schema = z
     SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
     SUPABASE_JWT_SECRET: z.string().min(1).optional(),
     SUPABASE_JWKS_URL: z.string().url().optional(),
-    SUPABASE_JWT_ISSUER: z.string().min(1),
+    SUPABASE_JWT_ISSUER: z.string().min(1).optional(),
     SUPABASE_JWT_AUDIENCE: z.string().min(1).default('authenticated'),
     SUPABASE_STORAGE_BUCKET_AVATARS: z.string().min(1).default('avatars'),
     SUPABASE_STORAGE_BUCKET_PERMITS: z.string().min(1).default('perizinan'),
