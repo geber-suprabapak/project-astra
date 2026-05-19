@@ -1,3 +1,4 @@
+import { checkRedisReady } from '../../clients/redis.js'
 import { supabaseAdmin } from '../../clients/supabase/admin.js'
 import { robinClient } from '../../clients/robin/client.js'
 
@@ -21,15 +22,21 @@ async function checkDatabase(): Promise<'ok' | 'fail'> {
 }
 
 export async function getReadiness(): Promise<ReadinessResult> {
-  const [dbStatus, robin] = await Promise.allSettled([checkDatabase(), robinClient.checkReadiness()])
+  const [dbStatus, robin, redis] = await Promise.allSettled([
+    checkDatabase(),
+    robinClient.checkReadiness(),
+    checkRedisReady(),
+  ])
 
   const database: 'ok' | 'fail' =
     dbStatus.status === 'fulfilled' ? dbStatus.value : 'fail'
   const mlService: 'ok' | 'fail' =
     robin.status === 'fulfilled' && robin.value.healthy ? 'ok' : 'fail'
+  const redisHealthy =
+    redis.status === 'fulfilled' ? redis.value : false
 
   return {
-    healthy: database === 'ok' && mlService === 'ok',
+    healthy: database === 'ok' && mlService === 'ok' && redisHealthy,
     checks: { database, mlService },
   }
 }

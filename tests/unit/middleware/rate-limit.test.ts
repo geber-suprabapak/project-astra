@@ -1,5 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { MemoryRateLimitStore } from '../../../src/middleware/rate-limit.js'
+import { Hono } from 'hono'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  MemoryRateLimitStore,
+  RedisRateLimitStore,
+  createRateLimitStore,
+  rateLimit,
+} from '../../../src/middleware/rate-limit.js'
 
 describe('MemoryRateLimitStore', () => {
   let store: MemoryRateLimitStore
@@ -35,5 +41,91 @@ describe('MemoryRateLimitStore', () => {
     await store.increment('key1', 60_000)
     await store.reset('key1')
     expect(await store.increment('key1', 60_000)).toBe(1)
+  })
+})
+
+describe('RedisRateLimitStore', () => {
+  it('passes prefixed keys and sliding-window args to Redis', async () => {
+    const evalMock = vi.fn().mockResolvedValue(2)
+    const delMock = vi.fn().mockResolvedValue(1)
+    const now = vi.fn(() => 1_717_171_717_000)
+    const store = new RedisRateLimitStore(
+      {
+        eval: evalMock,
+        del: delMock,
+      },
+      'astra:ratelimit',
+      now,
+    )
+
+    await expect(store.increment('tenant:user:dashboard', 60_000)).resolves.toBe(2)
+    await store.reset('tenant:user:dashboard')
+
+    expect(evalMock).toHaveBeenCalledTimes(1)
+    expect(evalMock.mock.calls[0]?.[1]).toEqual({
+      keys: ['astra:ratelimit:tenant:user:dashboard'],
+      arguments: ['1717171717000', '60000'],
+    })
+    expect(delMock).toHaveBeenCalledWith('astra:ratelimit:tenant:user:dashboard')
+    expect(delMock).toHaveBeenCalledWith('astra:ratelimit:tenant:user:dashboard:seq')
+  })
+})
+
+describe('createRateLimitStore', () => {
+  it('falls back to memory when REDIS_URL is absent', () => {
+    const result = createRateLimitStore({
+      nodeEnv: 'test',
+      redisKeyPrefix: 'astra:ratelimit',
+    })
+
+    expect(result.backend).toBe('memory')
+    expect(result.store).toBeInstanceOf(MemoryRateLimitStore)
+  })
+
+  it('uses Redis when REDIS_URL is configured', () => {
+    const result = createRateLimitStore(
+      {
+        nodeEnv: 'production',
+        redisKeyPrefix: 'astra:ratelimit',
+        redisUrl: 'redis://localhost:6379',
+      },
+      {
+        redisClient: {
+          eval: vi.fn().mockResolvedValue(1),
+          del: vi.fn().mockResolvedValue(1),
+        },
+      },
+    )
+
+    expect(result.backend).toBe('redis')
+    expect(result.store).toBeInstanceOf(RedisRateLimitStore)
+  })
+})
+
+describe('rateLimit middleware', () => {
+  it('returns 429 once the limit is exceeded', async () => {
+    const app = new Hono()
+    const store = new MemoryRateLimitStore()
+
+    app.use('*', async (c, next) => {
+      c.set('userId', 'user-1')
+      await next()
+    })
+    app.get('/limited', rateLimit({ windowMs: 60_000, max: 1, routeKey: 'limited', store }), (c) =>
+      c.json({ ok: true }),
+    )
+    app.onError((err, c) => {
+      const status = typeof (err as { httpStatus?: unknown }).httpStatus === 'number'
+        ? (err as { httpStatus: number }).httpStatus
+        : 500
+      const message = err instanceof Error ? err.message : 'error'
+      return c.json({ error: message }, status)
+    })
+
+    const first = await app.request('/limited')
+    const second = await app.request('/limited')
+
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(429)
   })
 })

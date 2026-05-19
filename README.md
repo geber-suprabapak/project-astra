@@ -281,7 +281,7 @@ Returns the canonical BFF time:
 | `PATCH /v1/mobile/profile/password` | 5 requests per hour |
 | `GET /v1/mobile/time` | 30 requests per minute |
 
-Rate limiting is currently in-memory, so limits reset when the process restarts. Use an external store before running multiple replicas.
+Rate limiting uses Redis when `REDIS_URL` is configured. Non-production environments without Redis fall back to the in-process store.
 
 ## Environment
 
@@ -312,9 +312,11 @@ ROBIN_ENROLL_TIMEOUT_MS=60000
 ROBIN_ENROLL_STATUS_TIMEOUT_MS=5000
 SUPABASE_QUERY_TIMEOUT_MS=5000
 SUPABASE_STORAGE_UPLOAD_TIMEOUT_MS=15000
+REDIS_URL=redis://default:password@redis.example.internal:6379
+REDIS_KEY_PREFIX=astra:ratelimit
 ```
 
-JWT verification can use either `SUPABASE_JWT_SECRET` or `SUPABASE_JWKS_URL`. Provide one valid method for the deployment. `SUPABASE_JWT_ISSUER` is optional because some self-hosted Supabase/GoTrue tokens do not include an `iss` claim.
+JWT verification can use either `SUPABASE_JWT_SECRET` or `SUPABASE_JWKS_URL`. Provide one valid method for the deployment. `SUPABASE_JWT_ISSUER` is optional because some self-hosted Supabase/GoTrue tokens do not include an `iss` claim. In production, `REDIS_URL` is required and startup will fail fast when Redis is unreachable.
 
 ## Local Development
 
@@ -349,6 +351,8 @@ http://localhost:3000/v1/mobile/health
 | `bun run lint` | Run ESLint over `src` and `tests` |
 | `bun run test` | Run unit tests |
 | `bun run test:integration` | Run integration tests |
+| `bun run auth:token` | Get a Supabase access token for manual or scripted smoke checks |
+| `bun run smoke:staging` | Run the staging smoke contract against `STAGING_BASE_URL` with `ACCESS_TOKEN` |
 
 On constrained Windows environments, run Vitest with a single fork:
 
@@ -368,13 +372,30 @@ docker compose up -d
 
 The default image is `ghcr.io/geber-suprabapak/project-astra:latest`. Override it with `ASTRA_IMAGE` when deploying a pinned tag or SHA image.
 
-The container listens on port `3000` and exposes a Docker healthcheck through `/live`.
+The container listens on port `3000` and exposes a Docker healthcheck through `/ready`.
 
 ## Health Semantics
 
 - `/live`: process is running; no downstream checks.
-- `/ready`: checks Supabase and Robin; returns `503` when dependencies are unavailable.
+- `/ready`: checks Supabase, Robin, and Redis-backed rate limiting; returns `503` when a required dependency is unavailable.
 - `/v1/mobile/health`: mobile-safe health response with `status: "healthy"` or `status: "unhealthy"`.
+
+## Kubernetes Baseline
+
+Baseline manifests live in [`k8s/`](./k8s):
+
+- `deployment.yaml`: 3-replica deployment with rolling update strategy, resources, and probes
+- `service.yaml`: cluster Service for HTTP traffic
+- `configmap.yaml`: non-secret runtime config
+- `secret.example.yaml`: secret template for Supabase and Redis
+
+Probe contract:
+
+- `startupProbe` -> `/live`
+- `livenessProbe` -> `/live`
+- `readinessProbe` -> `/ready`
+
+Use the manifest probes as the source of truth for K8s readiness. The image `HEALTHCHECK` is only a container-level fallback.
 
 ## Testing Status
 
@@ -400,6 +421,26 @@ bun run lint
 bun run test -- --pool=forks --maxWorkers=1
 bun run test:integration -- --pool=forks --maxWorkers=1
 ```
+
+## Staging Smoke Verification
+
+Manual smoke verification is available through `.github/workflows/staging-smoke.yml`.
+
+Required GitHub secrets:
+
+- `STAGING_BASE_URL`
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `AUTH_EMAIL`
+- `AUTH_PASSWORD`
+- `SMOKE_LATITUDE`
+- `SMOKE_LONGITUDE`
+
+The workflow:
+
+1. generates a staging access token with `bun run auth:token --json`
+2. verifies `/live`, `/ready`, and `/v1/mobile/health`
+3. verifies authenticated staging routes: `/v1/mobile/time`, `/v1/mobile/dashboard`, and `/v1/mobile/attendance/precheck`
 
 ## Curl Test Guide
 
@@ -528,4 +569,4 @@ The implementation covers the v1 plan surface:
 - unit tests and integration harness are present
 - README documents the operational and API contract
 
-Deployment-specific end-to-end validation still depends on real school Supabase and Robin credentials.
+Deployment-specific end-to-end validation still depends on real school Supabase, Robin, and Redis credentials.

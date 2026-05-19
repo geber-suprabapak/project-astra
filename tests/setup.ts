@@ -1,3 +1,5 @@
+import WebSocket from 'ws'
+
 // Test environment setup — provide minimal valid env before any module imports
 process.env['NODE_ENV'] = 'test'
 process.env['TENANT_KEY'] = 'test-school'
@@ -11,3 +13,9 @@ process.env['ROBIN_BASE_URL'] = 'http://localhost:8000'
 process.env['ROBIN_ENROLL_STATUS_TIMEOUT_MS'] = '5000'
 process.env['SUPABASE_QUERY_TIMEOUT_MS'] = '5000'
 process.env['SUPABASE_STORAGE_UPLOAD_TIMEOUT_MS'] = '15000'
+
+// Supabase Realtime on Node <22 expects a WebSocket transport.
+if (!globalThis.WebSocket) {
+  // Align test runtime behavior across Node versions.
+  ;(globalThis as typeof globalThis & { WebSocket: typeof WebSocket }).WebSocket = WebSocket
+}

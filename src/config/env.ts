@@ -6,7 +6,7 @@ const commaSeparated = z
 
 const positiveInt = z.coerce.number().int().positive()
 
-const schema = z
+export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
     PORT: positiveInt.default(3000),
@@ -36,6 +36,8 @@ const schema = z
     ROBIN_ENROLL_STATUS_TIMEOUT_MS: positiveInt.default(5000),
     SUPABASE_QUERY_TIMEOUT_MS: positiveInt.default(5000),
     SUPABASE_STORAGE_UPLOAD_TIMEOUT_MS: positiveInt.default(15000),
+    REDIS_URL: z.string().url().optional(),
+    REDIS_KEY_PREFIX: z.string().min(1).default('astra:ratelimit'),
   })
   .superRefine((data, ctx) => {
     if (!data.SUPABASE_JWT_SECRET && !data.SUPABASE_JWKS_URL) {
@@ -45,9 +47,39 @@ const schema = z
         path: ['SUPABASE_JWT_SECRET'],
       })
     }
+
+    if (data.NODE_ENV === 'production') {
+      if (data.CORS_ALLOWED_ORIGINS.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'CORS_ALLOWED_ORIGINS must be set in production',
+          path: ['CORS_ALLOWED_ORIGINS'],
+        })
+      }
+
+      if (data.CORS_ALLOWED_ORIGINS.includes('*')) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'CORS_ALLOWED_ORIGINS cannot contain wildcard "*" in production',
+          path: ['CORS_ALLOWED_ORIGINS'],
+        })
+      }
+
+      if (!data.REDIS_URL) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'REDIS_URL must be set in production',
+          path: ['REDIS_URL'],
+        })
+      }
+    }
   })
 
-const parsed = schema.safeParse(process.env)
+export function parseEnv(input: Record<string, string | undefined>) {
+  return envSchema.safeParse(input)
+}
+
+const parsed = parseEnv(process.env)
 
 if (!parsed.success) {
   const issues = parsed.error.issues
@@ -84,4 +116,6 @@ export const env = {
   robinEnrollStatusTimeoutMs: raw.ROBIN_ENROLL_STATUS_TIMEOUT_MS,
   supabaseQueryTimeoutMs: raw.SUPABASE_QUERY_TIMEOUT_MS,
   supabaseStorageUploadTimeoutMs: raw.SUPABASE_STORAGE_UPLOAD_TIMEOUT_MS,
+  redisUrl: raw.REDIS_URL,
+  redisKeyPrefix: raw.REDIS_KEY_PREFIX,
 } as const
