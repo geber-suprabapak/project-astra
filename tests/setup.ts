@@ -1,4 +1,4 @@
-import WebSocket from 'ws'
+import NodeWebSocket from 'ws'
 
 // Test environment setup — provide minimal valid env before any module imports
 process.env['NODE_ENV'] = 'test'
@@ -17,5 +17,5 @@ process.env['SUPABASE_STORAGE_UPLOAD_TIMEOUT_MS'] = '15000'
 // Supabase Realtime on Node <22 expects a WebSocket transport.
 if (!globalThis.WebSocket) {
   // Align test runtime behavior across Node versions.
-  ;(globalThis as typeof globalThis & { WebSocket: typeof WebSocket }).WebSocket = WebSocket
+  globalThis.WebSocket = NodeWebSocket as unknown as typeof globalThis.WebSocket
 }

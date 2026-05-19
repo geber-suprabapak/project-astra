@@ -1,11 +1,13 @@
 import { Hono } from 'hono'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { AppError } from '../../../src/lib/errors/app-error.js'
 import {
   MemoryRateLimitStore,
   RedisRateLimitStore,
   createRateLimitStore,
   rateLimit,
 } from '../../../src/middleware/rate-limit.js'
+import type { AppEnv } from '../../../src/types/context.js'
 
 describe('MemoryRateLimitStore', () => {
   let store: MemoryRateLimitStore
@@ -104,7 +106,7 @@ describe('createRateLimitStore', () => {
 
 describe('rateLimit middleware', () => {
   it('returns 429 once the limit is exceeded', async () => {
-    const app = new Hono()
+    const app = new Hono<AppEnv>()
     const store = new MemoryRateLimitStore()
 
     app.use('*', async (c, next) => {
@@ -114,12 +116,13 @@ describe('rateLimit middleware', () => {
     app.get('/limited', rateLimit({ windowMs: 60_000, max: 1, routeKey: 'limited', store }), (c) =>
       c.json({ ok: true }),
     )
-    app.onError((err, c) => {
-      const status = typeof (err as { httpStatus?: unknown }).httpStatus === 'number'
-        ? (err as { httpStatus: number }).httpStatus
-        : 500
+    app.onError((err) => {
+      const status = err instanceof AppError ? err.httpStatus : 500
       const message = err instanceof Error ? err.message : 'error'
-      return c.json({ error: message }, status)
+      return new Response(JSON.stringify({ error: message }), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      })
     })
 
     const first = await app.request('/limited')
