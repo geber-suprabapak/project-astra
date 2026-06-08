@@ -1,6 +1,6 @@
 # Project Astra
 
-Project Astra is the Backend-for-Frontend service for the Skanida mobile app. It owns the mobile-facing application logic for dashboard data, attendance gates, face enrollment, permits, profile updates, health checks, and canonical server time.
+Project Astra is the Backend-for-Frontend service for the Attendance App. It owns the mobile-facing application logic for dashboard data, attendance gates, face enrollment, permits, profile updates, health checks, and canonical server time.
 
 The service sits between the mobile app and the internal systems:
 
