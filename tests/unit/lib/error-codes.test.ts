@@ -21,6 +21,7 @@ describe('ErrorCode', () => {
 
     for (const code of requiredCodes) {
       expect(ErrorCode).toHaveProperty(code)
+      // SAFETY: code is one of the known keys of ErrorCode enum
       expect(ErrorCode[code as keyof typeof ErrorCode]).toBe(code)
     }
   })

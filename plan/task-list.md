@@ -136,9 +136,9 @@ Priority order: P0 = blocks functional correctness, P1 = important but not block
 
 ## Summary
 
-| Priority | Count | Category |
-|---|---|---|
-| P0 | 12 | Response shape & middleware fixes |
-| P1 | 8 | Unit test coverage |
-| P2 | 8 | Integration tests & hardening |
-| **Total** | **28** | |
+| Priority  | Count  | Category                          |
+| --------- | ------ | --------------------------------- |
+| P0        | 12     | Response shape & middleware fixes |
+| P1        | 8      | Unit test coverage                |
+| P2        | 8      | Integration tests & hardening     |
+| **Total** | **28** |                                   |

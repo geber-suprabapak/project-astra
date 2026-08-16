@@ -16,7 +16,9 @@ bun run dev               # watch mode, src/index.ts
 bun run build             # tsc -> dist/
 bun run start             # bun dist/index.js
 bun run typecheck         # tsc --noEmit
-bun run lint              # eslint src tests
+bun run lint              # oxlint
+bun run format            # format files with oxfmt
+bun run format:check      # check formatting with oxfmt
 bun run test              # vitest run tests/unit
 bun run test:integration  # vitest run tests/integration
 bun run auth:token        # interactive helper, prints a Supabase JWT for curl tests
@@ -39,7 +41,7 @@ The local pre-merge gate is `typecheck`, `lint`, `test`, `test:integration` — 
 
 `src/index.ts` (node-server entrypoint) → `src/app.ts` (Hono bootstrap) → `src/routes/v1-mobile.ts` (mounts each module router under `/v1/mobile`) → `src/modules/<feature>/routes.ts`.
 
-`src/app.ts` is the only place global middleware lives: `requestId` → `cors` → request-logging → routes → `errorHandler` (via `app.onError`). Public probes (`/live`, `/ready`) are mounted at the root from `modules/health`. `/v1/mobile/health` is the mobile-safe health route mounted as the *first* sub-route under `/v1/mobile` so it stays public; everything else under `/v1/mobile` requires auth (applied per-module, not globally — this is intentional, do not move it to `routes/v1-mobile.ts`).
+`src/app.ts` is the only place global middleware lives: `requestId` → `cors` → request-logging → routes → `errorHandler` (via `app.onError`). Public probes (`/live`, `/ready`) are mounted at the root from `modules/health`. `/v1/mobile/health` is the mobile-safe health route mounted as the _first_ sub-route under `/v1/mobile` so it stays public; everything else under `/v1/mobile` requires auth (applied per-module, not globally — this is intentional, do not move it to `routes/v1-mobile.ts`).
 
 ### Module pattern
 
@@ -73,7 +75,7 @@ All thrown errors should be `AppError` (see `src/lib/errors/app-error.ts`) const
 
 - TypeScript ESM. 2-space indent. Lowercase filenames and route folders.
 - Imports between local files use the `.js` extension (NodeNext resolution requires it even when the source is `.ts`).
-- ESLint enforces `@typescript-eslint/no-floating-promises` and `consistent-type-imports`. Use `import type { … }` for type-only imports.
+- Oxlint runs anti-slop rules. Prefer parsing external values at their boundary, owner contracts over open dictionaries, and explicit `SAFETY:` invariants for unavoidable type assertions.
 - Keep request/response Zod schemas in each module's `schema.ts`. Don't scatter them.
 - The `.serena/` directory is committed working state for the Serena tooling — treat it like normal source, not scratch. AGENTS.md spells this out.
 - Conventional Commits: `feat(bff): …`, `fix(auth): …`, `chore(serena): …`.

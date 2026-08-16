@@ -1,25 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { createApp } from '../../src/app.js'
 import { ErrorCode } from '../../src/lib/errors/codes.js'
-
-const { getReadinessMock } = vi.hoisted(() => ({
-  getReadinessMock: vi.fn(),
-}))
-
-vi.mock('../../src/modules/health/service.js', () => ({
-  getReadiness: getReadinessMock,
-  getLiveness: () => ({ status: 'ok' }),
-}))
-
-const { app } = await import('../../src/app.js')
+import type { ReadinessResult } from '../../src/modules/health/service.js'
 
 describe('integration: app runtime contract', () => {
-  beforeEach(() => {
-    getReadinessMock.mockReset()
-  })
-
   it('returns liveness payload and security headers on /live', async () => {
+    const app = createApp()
     const res = await app.request('/live')
-    const body = await res.json() as { status: string }
+    // SAFETY: /live endpoint returns standard JSON status object
+    const body = (await res.json()) as { status: string }
 
     expect(res.status).toBe(200)
     expect(body).toEqual({ status: 'ok' })
@@ -28,13 +17,16 @@ describe('integration: app runtime contract', () => {
   })
 
   it('returns 200 on /ready when dependencies are healthy', async () => {
-    getReadinessMock.mockResolvedValueOnce({
-      healthy: true,
-      checks: { database: 'ok', mlService: 'ok' },
+    const app = createApp({
+      getReadiness: async (): Promise<ReadinessResult> => ({
+        healthy: true,
+        checks: { database: 'ok', mlService: 'ok' },
+      }),
     })
 
     const res = await app.request('/ready')
-    const body = await res.json() as {
+    // SAFETY: /ready endpoint returns ReadinessResult shape
+    const body = (await res.json()) as {
       healthy: boolean
       checks: { database: string; mlService: string }
     }
@@ -47,13 +39,16 @@ describe('integration: app runtime contract', () => {
   })
 
   it('returns 503 on /ready when dependencies are unhealthy', async () => {
-    getReadinessMock.mockResolvedValueOnce({
-      healthy: false,
-      checks: { database: 'ok', mlService: 'fail' },
+    const app = createApp({
+      getReadiness: async (): Promise<ReadinessResult> => ({
+        healthy: false,
+        checks: { database: 'ok', mlService: 'fail' },
+      }),
     })
 
     const res = await app.request('/ready')
-    const body = await res.json() as {
+    // SAFETY: /ready endpoint returns ReadinessResult shape
+    const body = (await res.json()) as {
       healthy: boolean
       checks: { database: string; mlService: string }
     }
@@ -66,13 +61,16 @@ describe('integration: app runtime contract', () => {
   })
 
   it('returns mobile-safe health shape on /v1/mobile/health', async () => {
-    getReadinessMock.mockResolvedValueOnce({
-      healthy: false,
-      checks: { database: 'fail', mlService: 'ok' },
+    const app = createApp({
+      getReadiness: async (): Promise<ReadinessResult> => ({
+        healthy: false,
+        checks: { database: 'fail', mlService: 'ok' },
+      }),
     })
 
     const res = await app.request('/v1/mobile/health')
-    const body = await res.json() as {
+    // SAFETY: /v1/mobile/health returns standard success envelope with health status
+    const body = (await res.json()) as {
       success: boolean
       data: { status: 'healthy' | 'unhealthy' }
       meta: { request_id: string }
@@ -85,8 +83,10 @@ describe('integration: app runtime contract', () => {
   })
 
   it('enforces auth on protected endpoints', async () => {
+    const app = createApp()
     const res = await app.request('/v1/mobile/time')
-    const body = await res.json() as { error: { code: string } }
+    // SAFETY: unauthenticated request returns error envelope with code
+    const body = (await res.json()) as { error: { code: string } }
 
     expect(res.status).toBe(401)
     expect(body.error.code).toBe(ErrorCode.AUTH_REQUIRED)

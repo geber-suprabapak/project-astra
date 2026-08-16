@@ -1,6 +1,6 @@
 # Unimplemented Changes — Skanida Mobile BFF
 
-*Last updated: 2026-05-15*
+_Last updated: 2026-05-15_
 
 This document tracks deviations from `plan/plan.md`. Items marked with ~~strikethrough~~ have been resolved.
 

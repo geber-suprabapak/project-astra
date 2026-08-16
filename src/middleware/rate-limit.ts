@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from 'hono'
-import { getRedisClient } from '../clients/redis.js'
+import { z } from 'zod'
+import { getRedisClient, type RedisRuntimeClient } from '../clients/redis.js'
 import { env } from '../config/env.js'
 import { AppError } from '../lib/errors/app-error.js'
 import type { AppEnv } from '../types/context.js'
@@ -24,10 +25,7 @@ export interface RateLimitStore {
   reset(key: string): Promise<void>
 }
 
-interface RedisStoreClient {
-  del(key: string): Promise<unknown>
-  eval(script: string, options: { keys: string[]; arguments: string[] }): Promise<unknown>
-}
+export type RedisStoreClient = Pick<RedisRuntimeClient, 'del' | 'eval'>
 
 // ---------------------------------------------------------------------------
 // MemoryRateLimitStore — in-process sliding window (v1 default)
@@ -63,11 +61,12 @@ export class RedisRateLimitStore implements RateLimitStore {
       arguments: [String(this.now()), String(windowMs)],
     })
 
-    if (typeof result !== 'number') {
+    const parsed = z.number().safeParse(result)
+    if (!parsed.success) {
       throw new Error('Unexpected Redis rate limit response.')
     }
 
-    return result
+    return parsed.data
   }
 
   async reset(key: string): Promise<void> {
@@ -87,10 +86,15 @@ interface RateLimitEnvConfig {
   redisUrl?: string
 }
 
+export interface RateLimitStoreResult {
+  backend: RateLimitBackend
+  store: RateLimitStore
+}
+
 export function createRateLimitStore(
   config: RateLimitEnvConfig,
   deps: { redisClient?: RedisStoreClient | null } = {},
-): { backend: RateLimitBackend; store: RateLimitStore } {
+): RateLimitStoreResult {
   if (!config.redisUrl) {
     return { backend: 'memory', store: new MemoryRateLimitStore() }
   }
@@ -133,11 +137,7 @@ export function rateLimit(opts: RateLimitOptions): MiddlewareHandler<AppEnv> {
     const hits = await store.increment(key, opts.windowMs)
 
     if (hits > opts.max) {
-      throw new AppError(
-        'VALIDATION_ERROR',
-        429,
-        'Rate limit exceeded. Please slow down.',
-      )
+      throw new AppError('VALIDATION_ERROR', 429, 'Rate limit exceeded. Please slow down.')
     }
 
     await next()

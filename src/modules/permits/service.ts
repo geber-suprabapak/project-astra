@@ -1,12 +1,5 @@
-import {
-  getPermitHistory,
-  insertPermit,
-  type Permit,
-} from '../../clients/supabase/admin.js'
-import {
-  getSignedPermitUrl,
-  uploadPermitAttachment,
-} from '../../clients/supabase/storage.js'
+import { getPermitHistory, insertPermit, type Permit } from '../../clients/supabase/admin.js'
+import { getSignedPermitUrl, uploadPermitAttachment } from '../../clients/supabase/storage.js'
 import type { PermitCategory } from './schema.js'
 
 export interface PermitResponse {

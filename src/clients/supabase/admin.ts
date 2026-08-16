@@ -121,6 +121,7 @@ export async function getUserProfile(userId: string): Promise<UserProfile> {
   if (response.error || !response.data) {
     throw AppError.notFound('User profile')
   }
+  // SAFETY: user_profiles table row maps to UserProfile interface
   return response.data as UserProfile
 }
 
@@ -139,7 +140,9 @@ export async function getTodayAbsences(userId: string, dateWIB: string): Promise
 export async function getActiveSchedule(dayKey: string): Promise<Schedule | null> {
   const response = await supabaseAdmin
     .from('jadwal_absensi')
-    .select('hari, mulai_masuk, selesai_masuk, mulai_pulang, selesai_pulang, kompensasi_waktu, is_active')
+    .select(
+      'hari, mulai_masuk, selesai_masuk, mulai_pulang, selesai_pulang, kompensasi_waktu, is_active',
+    )
     .eq('hari', dayKey)
     .eq('is_active', true)
     .maybeSingle()
@@ -168,24 +171,24 @@ export async function getActivePermitsToday(
 export async function getPermitHistory(userId: string): Promise<Permit[]> {
   const response = await supabaseAdmin
     .from('perizinan')
-    .select('id, user_id, kategori_izin, deskripsi, status, link_foto, tanggal, approval_status, created_at, rejection_reason, rejected_at')
+    .select(
+      'id, user_id, kategori_izin, deskripsi, status, link_foto, tanggal, approval_status, created_at, rejection_reason, rejected_at',
+    )
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
 
-  if (response.error) throw AppError.internal(`Failed to query permit history: ${response.error.message}`)
+  if (response.error)
+    throw AppError.internal(`Failed to query permit history: ${response.error.message}`)
   return response.data ?? []
 }
 
 export async function insertPermit(permitData: InsertPermitData): Promise<Permit> {
-  const response = await supabaseAdmin
-    .from('perizinan')
-    .insert(permitData)
-    .select()
-    .single()
+  const response = await supabaseAdmin.from('perizinan').insert(permitData).select().single()
 
   if (response.error || !response.data) {
     throw AppError.internal(`Failed to insert permit: ${response.error?.message}`)
   }
+  // SAFETY: perizinan table insert returns matching Permit shape
   return response.data as Permit
 }
 
@@ -202,6 +205,7 @@ export async function insertAttendance(attendanceData: InsertAttendanceData): Pr
   if (response.error || !response.data) {
     throw AppError.internal(`Failed to insert attendance: ${response.error?.message}`)
   }
+  // SAFETY: absences table insert returns matching Absence shape
   return response.data as Absence
 }
 
@@ -211,11 +215,14 @@ export async function validateAttendanceAction(params: {
   longitude: number
   token: string
 }): Promise<AttendanceActionRpcResponse> {
-  const response = await createUserScopedClient(params.token).rpc('get_and_validate_attendance_action', {
-    p_user_id: params.userId,
-    p_user_lat: params.latitude,
-    p_user_lon: params.longitude,
-  })
+  const response = await createUserScopedClient(params.token).rpc(
+    'get_and_validate_attendance_action',
+    {
+      p_user_id: params.userId,
+      p_user_lat: params.latitude,
+      p_user_lon: params.longitude,
+    },
+  )
 
   if (response.error || !response.data) {
     throw AppError.internal(
@@ -223,6 +230,7 @@ export async function validateAttendanceAction(params: {
     )
   }
 
+  // SAFETY: RPC get_and_validate_attendance_action returns matching AttendanceActionRpcResponse JSON
   return response.data as AttendanceActionRpcResponse
 }
 
@@ -247,6 +255,7 @@ export async function saveAttendanceRecord(params: {
     )
   }
 
+  // SAFETY: RPC save_attendance_record returns matching SaveAttendanceRecordRpcResponse JSON
   return response.data as SaveAttendanceRecordRpcResponse
 }
 
@@ -254,10 +263,7 @@ export async function updateUserProfile(
   userId: string,
   updates: Partial<UserProfile>,
 ): Promise<void> {
-  const { error } = await supabaseAdmin
-    .from('user_profiles')
-    .update(updates)
-    .eq('user_id', userId)
+  const { error } = await supabaseAdmin.from('user_profiles').update(updates).eq('user_id', userId)
 
   if (error) throw AppError.internal(`Failed to update profile: ${error.message}`)
 }

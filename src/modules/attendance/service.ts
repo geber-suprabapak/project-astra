@@ -156,7 +156,11 @@ async function runGateChecks(params: {
     }
   }
 
-  const { inWindow, isLate, window } = getScheduleWindowForAction(schedule, todayWIB, actionTypeResult)
+  const { inWindow, isLate, window } = getScheduleWindowForAction(
+    schedule,
+    todayWIB,
+    actionTypeResult,
+  )
 
   if (!inWindow) {
     checks.schedule = 'fail'
@@ -329,6 +333,6 @@ export async function submit(params: {
   return {
     attendance_type: params.actionType,
     status_label: insertStatus,
-    processed_ms: processTimeMs || (Date.now() - startMs),
+    processed_ms: processTimeMs || Date.now() - startMs,
   }
 }

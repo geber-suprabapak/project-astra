@@ -1,13 +1,26 @@
 import type { MiddlewareHandler } from 'hono'
-import { createRemoteJWKSet, jwtVerify } from 'jose'
+import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
+import { z } from 'zod'
 import { env } from '../config/env.js'
 import { AppError } from '../lib/errors/app-error.js'
 import type { AppEnv } from '../types/context.js'
 
-const jwtVerifyOptions = {
-  audience: env.supabaseJwtAudience,
-  ...(env.supabaseJwtIssuer ? { issuer: env.supabaseJwtIssuer } : {}),
+interface JwtVerifyConfig {
+  audience: string
+  issuer?: string
 }
+
+function createJwtVerifyOptions(): JwtVerifyConfig {
+  const options: JwtVerifyConfig = {
+    audience: env.supabaseJwtAudience,
+  }
+  if (env.supabaseJwtIssuer) {
+    options.issuer = env.supabaseJwtIssuer
+  }
+  return options
+}
+
+const jwtVerifyOptions = createJwtVerifyOptions()
 
 // Cache JWKS fetcher (initialized lazily)
 let jwksGetter: ReturnType<typeof createRemoteJWKSet> | null = null
@@ -28,7 +41,7 @@ export const auth: MiddlewareHandler<AppEnv> = async (c, next) => {
   const token = authHeader.slice(7)
 
   try {
-    let payload: Record<string, unknown>
+    let payload: JWTPayload
 
     if (env.supabaseJwtSecret) {
       const secret = new TextEncoder().encode(env.supabaseJwtSecret)
@@ -40,10 +53,12 @@ export const auth: MiddlewareHandler<AppEnv> = async (c, next) => {
       payload = p
     }
 
-    const userId = payload['sub']
-    if (typeof userId !== 'string' || !userId) {
+    const parsedSub = z.string().min(1).safeParse(payload.sub)
+    if (!parsedSub.success) {
       throw AppError.authInvalid('Token missing subject claim.')
     }
+
+    const userId = parsedSub.data
 
     c.set('userId', userId)
     c.set('rawToken', token)

@@ -3,7 +3,7 @@ import { auth } from '../../middleware/auth.js'
 import { rateLimits } from '../../middleware/rate-limit.js'
 import { successResponse } from '../../lib/http/responses.js'
 import { AppError } from '../../lib/errors/app-error.js'
-import { UpdatePasswordSchema } from './schema.js'
+import { ClearAvatarSchema, UpdatePasswordSchema } from './schema.js'
 import { changePassword, getProfile, updateAvatar } from './service.js'
 import { getUserProfile } from '../../clients/supabase/admin.js'
 import type { AppEnv } from '../../types/context.js'
@@ -34,7 +34,7 @@ profileRouter.patch('/avatar', rateLimits.profileAvatar, async (c) => {
       return successResponse(c, { avatar_url: null }, 'Avatar cleared.')
     }
 
-    if (!fileEntry || typeof fileEntry === 'string') {
+    if (!fileEntry || !(fileEntry instanceof Blob)) {
       throw AppError.validationError('File is required in multipart form.')
     }
 
@@ -47,12 +47,9 @@ profileRouter.patch('/avatar', rateLimits.profileAvatar, async (c) => {
   }
 
   if (contentType.includes('application/json')) {
-    const body = await c.req.json() as unknown
-    const clear: unknown =
-      typeof body === 'object' && body !== null && 'clear' in body
-        ? (body as { clear?: unknown }).clear
-        : undefined
-    if (clear === true) {
+    const body = await c.req.json()
+    const parsedClear = ClearAvatarSchema.safeParse(body)
+    if (parsedClear.success && parsedClear.data.clear === true) {
       await updateAvatar(userId, null, true)
       return successResponse(c, { avatar_url: null }, 'Avatar cleared.')
     }
@@ -65,7 +62,7 @@ profileRouter.patch('/avatar', rateLimits.profileAvatar, async (c) => {
 // PATCH /v1/mobile/profile/password
 profileRouter.patch('/password', rateLimits.profilePassword, async (c) => {
   const userId = c.get('userId')
-  const body = await c.req.json() as unknown
+  const body = await c.req.json()
   const parsed = UpdatePasswordSchema.safeParse(body)
   if (!parsed.success) {
     throw AppError.validationError(parsed.error.flatten())

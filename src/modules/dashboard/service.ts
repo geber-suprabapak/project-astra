@@ -28,8 +28,13 @@ export function getDayKeyWIB(now = new Date()): string {
   return DAY_KEY_MAP[wib.getUTCDay()]
 }
 
+export interface DayBounds {
+  startISO: string
+  endISO: string
+}
+
 /** Returns WIB day bounds as ISO strings for perizinan range query */
-export function getWIBDayBounds(dateWIB: string): { startISO: string; endISO: string } {
+export function getWIBDayBounds(dateWIB: string): DayBounds {
   return {
     startISO: `${dateWIB}T00:00:00+07:00`,
     endISO: `${dateWIB}T23:59:59.999+07:00`,
@@ -97,11 +102,17 @@ export interface ScheduleWindow {
   late_deadline: string | null
 }
 
+export interface ScheduleActionResult {
+  inWindow: boolean
+  isLate: boolean
+  window: ScheduleWindow | null
+}
+
 export function getScheduleWindowForAction(
   schedule: Schedule,
   baseDateWIB: string,
   actionType: 'check_in' | 'check_out',
-): { inWindow: boolean; isLate: boolean; window: ScheduleWindow | null } {
+): ScheduleActionResult {
   const now = new Date()
 
   if (actionType === 'check_in') {
@@ -151,7 +162,13 @@ export function getScheduleWindowForAction(
 
 export type PrimaryAction =
   | { allowed: false; type: null; reason_code: string; label: string; reason_message: string }
-  | { allowed: true; type: 'check_in' | 'check_out'; reason_code: null; label: string; reason_message: null }
+  | {
+      allowed: true
+      type: 'check_in' | 'check_out'
+      reason_code: null
+      label: string
+      reason_message: null
+    }
 
 export function computePrimaryAction(params: {
   robinHealthy: boolean
@@ -161,35 +178,78 @@ export function computePrimaryAction(params: {
   attendanceStatus: AttendanceStatus
   baseDateWIB: string
 }): PrimaryAction {
-  const { robinHealthy, enrollmentStatus, hasActivePermit, schedule, attendanceStatus, baseDateWIB } = params
+  const {
+    robinHealthy,
+    enrollmentStatus,
+    hasActivePermit,
+    schedule,
+    attendanceStatus,
+    baseDateWIB,
+  } = params
 
   if (!robinHealthy) {
-    return { allowed: false, type: null, reason_code: 'DEPENDENCY_UNAVAILABLE', label: 'Layanan tidak tersedia', reason_message: 'Face recognition service is unavailable.' }
+    return {
+      allowed: false,
+      type: null,
+      reason_code: 'DEPENDENCY_UNAVAILABLE',
+      label: 'Layanan tidak tersedia',
+      reason_message: 'Face recognition service is unavailable.',
+    }
   }
 
   if (enrollmentStatus !== 'enrolled') {
-    return { allowed: false, type: null, reason_code: 'ENROLLMENT_REQUIRED', label: 'Absensi wajah belum terdaftar', reason_message: 'Face enrollment is required before attendance.' }
+    return {
+      allowed: false,
+      type: null,
+      reason_code: 'ENROLLMENT_REQUIRED',
+      label: 'Absensi wajah belum terdaftar',
+      reason_message: 'Face enrollment is required before attendance.',
+    }
   }
 
   if (hasActivePermit) {
-    return { allowed: false, type: null, reason_code: 'ATTENDANCE_BLOCKED', label: 'Izin aktif hari ini', reason_message: 'You have an active permit for today.' }
+    return {
+      allowed: false,
+      type: null,
+      reason_code: 'ATTENDANCE_BLOCKED',
+      label: 'Izin aktif hari ini',
+      reason_message: 'You have an active permit for today.',
+    }
   }
 
   if (!schedule) {
-    return { allowed: false, type: null, reason_code: 'ATTENDANCE_BLOCKED', label: 'Tidak ada jadwal aktif', reason_message: 'No active schedule for today.' }
+    return {
+      allowed: false,
+      type: null,
+      reason_code: 'ATTENDANCE_BLOCKED',
+      label: 'Tidak ada jadwal aktif',
+      reason_message: 'No active schedule for today.',
+    }
   }
 
   const { hasCheckedIn, hasCheckedOut } = attendanceStatus
 
   if (hasCheckedIn && hasCheckedOut) {
-    return { allowed: false, type: null, reason_code: 'ATTENDANCE_BLOCKED', label: 'Absensi hari ini sudah lengkap', reason_message: 'Attendance for today is already complete.' }
+    return {
+      allowed: false,
+      type: null,
+      reason_code: 'ATTENDANCE_BLOCKED',
+      label: 'Absensi hari ini sudah lengkap',
+      reason_message: 'Attendance for today is already complete.',
+    }
   }
 
   const actionType: 'check_in' | 'check_out' = hasCheckedIn ? 'check_out' : 'check_in'
   const { inWindow } = getScheduleWindowForAction(schedule, baseDateWIB, actionType)
 
   if (!inWindow) {
-    return { allowed: false, type: null, reason_code: 'ATTENDANCE_BLOCKED', label: 'Di luar jam absensi', reason_message: 'Outside of attendance window.' }
+    return {
+      allowed: false,
+      type: null,
+      reason_code: 'ATTENDANCE_BLOCKED',
+      label: 'Di luar jam absensi',
+      reason_message: 'Outside of attendance window.',
+    }
   }
 
   return {
@@ -275,19 +335,18 @@ export async function getDashboard(
   const { startISO, endISO } = getWIBDayBounds(todayWIB)
 
   // All parallel fetches
-  const [profile, absences, schedule, activePermits, robinReady, enrollStatus] =
-    await Promise.all([
-      getUserProfile(userId),
-      getTodayAbsences(userId, todayWIB),
-      getActiveSchedule(dayKey),
-      getActivePermitsToday(userId, startISO, endISO),
-      robinClient.checkReadiness(),
-      robinClient.getEnrollmentStatus(token, requestId).catch(() => ({
-        status: 'not_enrolled' as const,
-        embeddingCount: 0,
-        message: 'Unavailable.',
-      })),
-    ])
+  const [profile, absences, schedule, activePermits, robinReady, enrollStatus] = await Promise.all([
+    getUserProfile(userId),
+    getTodayAbsences(userId, todayWIB),
+    getActiveSchedule(dayKey),
+    getActivePermitsToday(userId, startISO, endISO),
+    robinClient.checkReadiness(),
+    robinClient.getEnrollmentStatus(token, requestId).catch(() => ({
+      status: 'not_enrolled' as const,
+      embeddingCount: 0,
+      message: 'Unavailable.',
+    })),
+  ])
 
   const attendanceStatus = computeAttendanceStatus(absences)
 
@@ -296,9 +355,7 @@ export async function getDashboard(
     attendanceStatus.today = 'leave'
   }
 
-  const avatarUrl = profile.avatar_url
-    ? await getSignedAvatarUrl(profile.avatar_url)
-    : null
+  const avatarUrl = profile.avatar_url ? await getSignedAvatarUrl(profile.avatar_url) : null
 
   const primaryAction = computePrimaryAction({
     robinHealthy: robinReady.healthy,
@@ -315,8 +372,10 @@ export async function getDashboard(
         day_key: schedule.hari,
         start_check_in_at: parseScheduleTime(schedule.mulai_masuk, todayWIB)?.toISOString() ?? null,
         end_check_in_at: parseScheduleTime(schedule.selesai_masuk, todayWIB)?.toISOString() ?? null,
-        start_check_out_at: parseScheduleTime(schedule.mulai_pulang, todayWIB)?.toISOString() ?? null,
-        end_check_out_at: parseScheduleTime(schedule.selesai_pulang, todayWIB)?.toISOString() ?? null,
+        start_check_out_at:
+          parseScheduleTime(schedule.mulai_pulang, todayWIB)?.toISOString() ?? null,
+        end_check_out_at:
+          parseScheduleTime(schedule.selesai_pulang, todayWIB)?.toISOString() ?? null,
         compensation_minutes: schedule.kompensasi_waktu,
       }
     : null
@@ -348,7 +407,8 @@ export async function getDashboard(
     face: {
       server_status: robinReady.healthy ? 'healthy' : 'unhealthy',
       enrollment_status: enrollStatus.status,
-      message: enrollStatus.message ?? (enrollStatus.status === 'enrolled' ? 'Ready' : 'Not enrolled.'),
+      message:
+        enrollStatus.message ?? (enrollStatus.status === 'enrolled' ? 'Ready' : 'Not enrolled.'),
     },
     permit: {
       has_active_permit: activePermits.length > 0,

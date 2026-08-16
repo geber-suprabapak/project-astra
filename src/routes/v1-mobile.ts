@@ -11,14 +11,24 @@ import type { AppEnv } from '../types/context.js'
 // All routes under /v1/mobile share auth via individual routers;
 // we do NOT apply auth here globally so /health remains public.
 
-const v1Mobile = new Hono<AppEnv>()
+export interface V1MobileDeps {
+  mobileHealthRouter?: Hono<AppEnv>
+}
 
-v1Mobile.route('/health', mobileHealthRouter)
-v1Mobile.route('/dashboard', dashboardRouter)
-v1Mobile.route('/attendance', attendanceRouter)
-v1Mobile.route('/face/enrollment', enrollmentRouter)
-v1Mobile.route('/permits', permitsRouter)
-v1Mobile.route('/profile', profileRouter)
-v1Mobile.route('/time', timeRouter)
+export function createV1Mobile(deps: V1MobileDeps = {}) {
+  const router = new Hono<AppEnv>()
+
+  router.route('/health', deps.mobileHealthRouter ?? mobileHealthRouter)
+  router.route('/dashboard', dashboardRouter)
+  router.route('/attendance', attendanceRouter)
+  router.route('/face/enrollment', enrollmentRouter)
+  router.route('/permits', permitsRouter)
+  router.route('/profile', profileRouter)
+  router.route('/time', timeRouter)
+
+  return router
+}
+
+const v1Mobile = createV1Mobile()
 
 export { v1Mobile }

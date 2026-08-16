@@ -7,6 +7,6 @@ describe('getServerTime', () => {
     expect(result.timezone).toBe('Asia/Jakarta')
     expect(result.source).toBe('bff')
     expect(result.now).toBeTruthy()
-    expect(typeof result.epoch_ms).toBe('number')
+    expect(Number.isFinite(result.epoch_ms)).toBe(true)
   })
 })

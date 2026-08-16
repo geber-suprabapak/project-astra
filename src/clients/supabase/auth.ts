@@ -25,10 +25,9 @@ export async function adminUpdatePassword(userId: string, newPassword: string): 
   if (error) throw AppError.internal(`Failed to update password: ${error.message}`)
 }
 
-export async function updateUserMetadata(
-  userId: string,
-  metadata: Record<string, unknown>,
-): Promise<void> {
+export type UserMetadata = Record<string, string | number | boolean | null | undefined>
+
+export async function updateUserMetadata(userId: string, metadata: UserMetadata): Promise<void> {
   const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
     user_metadata: metadata,
   })

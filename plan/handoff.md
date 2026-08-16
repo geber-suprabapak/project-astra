@@ -5,6 +5,7 @@
 The BFF service is **partially implemented**. Phase 0 (bootstrap) and most of Phase 1 (foundation) are in place. Phases 2–4 have route scaffolding and some service logic, but critical response shapes, middleware features, and tests are incomplete.
 
 **What works:**
+
 - Hono app bootstrap with CORS, request ID, structured logging, error envelope, rate limiting
 - Auth middleware with jose JWT verification (bearer token extraction, user ID on context)
 - Robin client with readiness, identify, enrollment status, enrollment upload
@@ -15,6 +16,7 @@ The BFF service is **partially implemented**. Phase 0 (bootstrap) and most of Ph
 - CI baseline (typecheck, lint, unit tests)
 
 **What needs work:**
+
 - Dashboard response shape is fundamentally different from the plan
 - Attendance precheck missing `checks` object and enrollment gate
 - Permits GET response missing `items` wrapper and `rejected_at` field
@@ -85,15 +87,15 @@ src/
 
 ## Key Dependencies
 
-| Package | Version | Purpose |
-|---|---|---|
-| hono | ^4.12 | Web framework |
-| @hono/node-server | ^1.13 | Node.js adapter |
-| zod | ^3.25 | Request/response validation |
-| jose | ^5.10 | JWT verification |
-| @supabase/supabase-js | ^2.104 | Supabase client |
-| pino | ^9.14 | Structured logging |
-| vitest | ^3.2 | Test runner |
+| Package               | Version | Purpose                     |
+| --------------------- | ------- | --------------------------- |
+| hono                  | ^4.12   | Web framework               |
+| @hono/node-server     | ^1.13   | Node.js adapter             |
+| zod                   | ^3.25   | Request/response validation |
+| jose                  | ^5.10   | JWT verification            |
+| @supabase/supabase-js | ^2.104  | Supabase client             |
+| pino                  | ^9.14   | Structured logging          |
+| vitest                | ^3.2    | Test runner                 |
 
 ---
 

@@ -6,4 +6,7 @@ export const ALLOWED_ENROLLMENT_CONTENT_TYPE = 'image/jpeg'
 
 export const EnrollFilesSchema = z
   .array(z.any())
-  .length(REQUIRED_ENROLLMENT_FILES, `Exactly ${REQUIRED_ENROLLMENT_FILES} JPEG files are required.`)
+  .length(
+    REQUIRED_ENROLLMENT_FILES,
+    `Exactly ${REQUIRED_ENROLLMENT_FILES} JPEG files are required.`,
+  )

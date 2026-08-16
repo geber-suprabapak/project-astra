@@ -1,8 +1,14 @@
 import type { Context } from 'hono'
-import type { AppError } from '../errors/app-error.js'
+import type { AppError, AppErrorDetails } from '../errors/app-error.js'
 import type { AppEnv } from '../../types/context.js'
 
 type AppErrorHttpStatus = 401 | 403 | 404 | 409 | 422 | 429 | 500 | 502 | 503 | 504
+
+interface ErrorResponseBody {
+  code: string
+  message: string
+  details?: AppErrorDetails
+}
 
 function getMeta(c: Context<AppEnv>) {
   return {
@@ -11,9 +17,9 @@ function getMeta(c: Context<AppEnv>) {
   }
 }
 
-export function successResponse(
+export function successResponse<T>(
   c: Context<AppEnv>,
-  data: unknown,
+  data: T,
   message: string,
   status: 200 | 201 = 200,
 ) {
@@ -29,16 +35,23 @@ export function successResponse(
 }
 
 export function errorResponse(c: Context<AppEnv>, error: AppError) {
+  const errorObj: ErrorResponseBody = {
+    code: error.code,
+    message: error.message,
+  }
+  if (error.details !== undefined) {
+    errorObj.details = error.details
+  }
+
+  // SAFETY: AppError.httpStatus is restricted to valid HTTP error status codes matching AppErrorHttpStatus
+  const status = error.httpStatus as AppErrorHttpStatus
+
   return c.json(
     {
       success: false,
-      error: {
-        code: error.code,
-        message: error.message,
-        ...(error.details !== undefined ? { details: error.details } : {}),
-      },
+      error: errorObj,
       meta: getMeta(c),
     },
-    error.httpStatus as AppErrorHttpStatus,
+    status,
   )
 }

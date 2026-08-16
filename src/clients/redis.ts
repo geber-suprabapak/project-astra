@@ -2,21 +2,13 @@ import { createClient } from 'redis'
 import { env } from '../config/env.js'
 import { logger } from '../lib/logging/logger.js'
 
-export interface RedisRuntimeClient {
-  isOpen: boolean
-  connect(): Promise<void>
-  del(key: string): Promise<number>
-  eval(script: string, options: { keys: string[]; arguments: string[] }): Promise<unknown>
-  on(event: 'error', listener: (err: unknown) => void): RedisRuntimeClient
-  ping(): Promise<string>
-  quit(): Promise<string>
-}
+export type RedisRuntimeClient = ReturnType<typeof createClient>
 
 let redisClient: RedisRuntimeClient | null = null
 let redisConnectPromise: Promise<void> | null = null
 
 function createRedisClient(): RedisRuntimeClient {
-  const client = createClient({ url: env.redisUrl }) as unknown as RedisRuntimeClient
+  const client = createClient({ url: env.redisUrl })
   client.on('error', (err) => {
     logger.error({ err }, 'Redis client error')
   })

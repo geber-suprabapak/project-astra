@@ -16,6 +16,6 @@ process.env['SUPABASE_STORAGE_UPLOAD_TIMEOUT_MS'] = '15000'
 
 // Supabase Realtime on Node <22 expects a WebSocket transport.
 if (!globalThis.WebSocket) {
-  // Align test runtime behavior across Node versions.
+  // SAFETY: NodeWebSocket provides standard WebSocket implementation for test environment.
   globalThis.WebSocket = NodeWebSocket as typeof globalThis.WebSocket
 }

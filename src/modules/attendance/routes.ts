@@ -16,7 +16,7 @@ attendanceRouter.post('/precheck', rateLimits.attendancePrecheck, async (c) => {
   const userId = c.get('userId')
   const token = c.get('rawToken')
   const requestId = c.get('requestId')
-  const body = await c.req.json() as unknown
+  const body = await c.req.json()
   const parsed = PrecheckBodySchema.safeParse(body)
   if (!parsed.success) throw AppError.validationError(parsed.error.flatten())
 
@@ -36,7 +36,7 @@ attendanceRouter.post('/submit', rateLimits.attendanceSubmit, async (c) => {
   const token = c.get('rawToken')
   const requestId = c.get('requestId')
 
-  const body = await c.req.json() as unknown
+  const body = await c.req.json()
   const parsed = SubmitBodySchema.safeParse(body)
   if (!parsed.success) throw AppError.validationError(parsed.error.flatten())
 

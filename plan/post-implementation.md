@@ -23,30 +23,32 @@ Mobile App → BFF (/v1/mobile/*) → Supabase (Auth, DB, Storage)
 
 ## API Endpoints
 
-| Method | Path | Auth | Purpose |
-|--------|------|------|---------|
-| `GET` | `/v1/mobile/dashboard` | Required | Dashboard aggregation with gating |
-| `POST` | `/v1/mobile/attendance/precheck` | Required | Attendance gate check before camera |
-| `POST` | `/v1/mobile/attendance/submit` | Required | Submit attendance with face recognition |
-| `GET` | `/v1/mobile/face/enrollment/status` | Required | Face enrollment status |
-| `POST` | `/v1/mobile/face/enrollment` | Required | Upload 10 face photos for enrollment |
-| `GET` | `/v1/mobile/permits` | Required | List user permits |
-| `POST` | `/v1/mobile/permits` | Required | Create a permit request |
-| `GET` | `/v1/mobile/profile` | Required | Read user profile |
-| `PATCH` | `/v1/mobile/profile/avatar` | Required | Upload or clear avatar |
-| `PATCH` | `/v1/mobile/profile/password` | Required | Change password |
-| `GET` | `/v1/mobile/time` | Required | Canonical server time |
-| `GET` | `/v1/mobile/health` | None | Mobile-safe health signal |
-| `GET` | `/live` | None | Process liveness |
-| `GET` | `/ready` | None | Dependency readiness |
+| Method  | Path                                | Auth     | Purpose                                 |
+| ------- | ----------------------------------- | -------- | --------------------------------------- |
+| `GET`   | `/v1/mobile/dashboard`              | Required | Dashboard aggregation with gating       |
+| `POST`  | `/v1/mobile/attendance/precheck`    | Required | Attendance gate check before camera     |
+| `POST`  | `/v1/mobile/attendance/submit`      | Required | Submit attendance with face recognition |
+| `GET`   | `/v1/mobile/face/enrollment/status` | Required | Face enrollment status                  |
+| `POST`  | `/v1/mobile/face/enrollment`        | Required | Upload 10 face photos for enrollment    |
+| `GET`   | `/v1/mobile/permits`                | Required | List user permits                       |
+| `POST`  | `/v1/mobile/permits`                | Required | Create a permit request                 |
+| `GET`   | `/v1/mobile/profile`                | Required | Read user profile                       |
+| `PATCH` | `/v1/mobile/profile/avatar`         | Required | Upload or clear avatar                  |
+| `PATCH` | `/v1/mobile/profile/password`       | Required | Change password                         |
+| `GET`   | `/v1/mobile/time`                   | Required | Canonical server time                   |
+| `GET`   | `/v1/mobile/health`                 | None     | Mobile-safe health signal               |
+| `GET`   | `/live`                             | None     | Process liveness                        |
+| `GET`   | `/ready`                            | None     | Dependency readiness                    |
 
 ## How to Run
 
 ### Prerequisites
+
 - Node.js 22+
 - Bun
 
 ### Local Development
+
 ```bash
 bun install
 cp .env.example .env
@@ -55,23 +57,27 @@ bun run dev
 ```
 
 ### Docker
+
 ```bash
 docker compose up --build
 ```
 
 ### Available Scripts
-| Script | Purpose |
-|--------|---------|
-| `bun run dev` | Start dev server with hot reload |
-| `bun run build` | TypeScript compile |
-| `bun run start` | Start production server |
-| `bun run typecheck` | Type check |
-| `bun run lint` | ESLint + Prettier check |
-| `bun run test` | Unit tests |
-| `bun run test:integration` | Integration tests |
+
+| Script                     | Purpose                          |
+| -------------------------- | -------------------------------- |
+| `bun run dev`              | Start dev server with hot reload |
+| `bun run build`            | TypeScript compile               |
+| `bun run start`            | Start production server          |
+| `bun run typecheck`        | Type check                       |
+| `bun run lint`             | ESLint + Prettier check          |
+| `bun run test`             | Unit tests                       |
+| `bun run test:integration` | Integration tests                |
 
 ### Required Environment Variables
+
 See `.env.example` for the full list. Key variables:
+
 - `TENANT_KEY` / `TENANT_NAME` — school identifier
 - `BUSINESS_TIMEZONE` — defaults to `Asia/Jakarta`
 - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET` — Supabase connection
@@ -81,6 +87,7 @@ See `.env.example` for the full list. Key variables:
 ## Error Handling
 
 All errors use a consistent envelope:
+
 ```json
 {
   "success": false,

@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { env } from '../../config/env.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { logger } from '../../lib/logging/logger.js'
@@ -10,6 +11,18 @@ import {
 } from './schemas.js'
 
 const ENROLL_STATUS_TIMEOUT_MS = () => env.robinEnrollStatusTimeoutMs
+
+export interface RobinRequestHeaders {
+  [key: string]: string
+  'Content-Type': string
+  Accept: string
+}
+
+export interface RobinUploadHeaders {
+  [key: string]: string
+  Authorization: string
+  'X-Request-ID': string
+}
 
 async function fetchWithTimeout(
   url: string,
@@ -30,8 +43,8 @@ async function fetchWithTimeout(
   }
 }
 
-function robinHeaders(token?: string, requestId?: string): Record<string, string> {
-  const headers: Record<string, string> = {
+function robinHeaders(token?: string, requestId?: string): RobinRequestHeaders {
+  const headers: RobinRequestHeaders = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
   }
@@ -88,9 +101,11 @@ export class RobinClient {
     )
 
     if (!res.ok) {
-      const body = await res.json().catch(() => ({})) as Record<string, unknown>
+      const errorJson = await res.json().catch(() => null)
+      const errorSchema = z.object({ message: z.string() })
+      const parsedError = errorSchema.safeParse(errorJson)
       throw AppError.attendanceBlocked(
-        typeof body['message'] === 'string' ? body['message'] : 'Face not recognized.',
+        parsedError.success ? parsedError.data.message : 'Face not recognized.',
       )
     }
 
@@ -155,7 +170,7 @@ export class RobinClient {
       formData.append('files', blob, f.filename)
     }
 
-    const headers: Record<string, string> = {
+    const headers: RobinUploadHeaders = {
       Authorization: `Bearer ${token}`,
       'X-Request-ID': requestId,
     }

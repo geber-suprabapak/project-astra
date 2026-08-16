@@ -37,17 +37,17 @@ the new BFF becomes the owner of mobile-facing application logic and orchestrati
 
 The new BFF must replace the following direct mobile dependencies and business decisions.
 
-| Current mobile flow | Current file(s) | Current direct dependency | Target BFF endpoint |
-| --- | --- | --- | --- |
-| Dashboard aggregation and gating | `app/Dashboard.tsx` | Supabase tables, face runtime, enrollment checks, time sync | `GET /v1/mobile/dashboard` |
-| Attendance precheck | `app/attendance/AbsenceReport.tsx` | device GPS, permit query, Supabase RPC `get_and_validate_attendance_action` | `POST /v1/mobile/attendance/precheck` |
-| Attendance submit | `app/attendance/CameraAttendance.tsx` | Robin identify, Supabase RPC `save_attendance_record` | `POST /v1/mobile/attendance/submit` |
-| Enrollment status | `utils/enrollment.ts` | Robin `/v1/enroll/status` | `GET /v1/mobile/face/enrollment/status` |
-| Enrollment upload | `app/profile/enroll.tsx` | Robin `/v1/enroll` | `POST /v1/mobile/face/enrollment` |
-| Permit list | `app/perizinan/status.tsx` | Supabase table reads | `GET /v1/mobile/permits` |
-| Permit create | `app/perizinan/izin.tsx` | Supabase storage + table insert | `POST /v1/mobile/permits` |
-| Profile read and avatar/password updates | `app/profile/ManageAccount.tsx` | Supabase profile/auth/storage | `GET /v1/mobile/profile`, `PATCH /v1/mobile/profile/avatar`, `PATCH /v1/mobile/profile/password` |
-| Server time sync | `utils/timeSync.ts` | Supabase edge function + WorldTimeAPI fallback | `GET /v1/mobile/time` |
+| Current mobile flow                      | Current file(s)                       | Current direct dependency                                                   | Target BFF endpoint                                                                              |
+| ---------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Dashboard aggregation and gating         | `app/Dashboard.tsx`                   | Supabase tables, face runtime, enrollment checks, time sync                 | `GET /v1/mobile/dashboard`                                                                       |
+| Attendance precheck                      | `app/attendance/AbsenceReport.tsx`    | device GPS, permit query, Supabase RPC `get_and_validate_attendance_action` | `POST /v1/mobile/attendance/precheck`                                                            |
+| Attendance submit                        | `app/attendance/CameraAttendance.tsx` | Robin identify, Supabase RPC `save_attendance_record`                       | `POST /v1/mobile/attendance/submit`                                                              |
+| Enrollment status                        | `utils/enrollment.ts`                 | Robin `/v1/enroll/status`                                                   | `GET /v1/mobile/face/enrollment/status`                                                          |
+| Enrollment upload                        | `app/profile/enroll.tsx`              | Robin `/v1/enroll`                                                          | `POST /v1/mobile/face/enrollment`                                                                |
+| Permit list                              | `app/perizinan/status.tsx`            | Supabase table reads                                                        | `GET /v1/mobile/permits`                                                                         |
+| Permit create                            | `app/perizinan/izin.tsx`              | Supabase storage + table insert                                             | `POST /v1/mobile/permits`                                                                        |
+| Profile read and avatar/password updates | `app/profile/ManageAccount.tsx`       | Supabase profile/auth/storage                                               | `GET /v1/mobile/profile`, `PATCH /v1/mobile/profile/avatar`, `PATCH /v1/mobile/profile/password` |
+| Server time sync                         | `utils/timeSync.ts`                   | Supabase edge function + WorldTimeAPI fallback                              | `GET /v1/mobile/time`                                                                            |
 
 ### Current behavior that must remain true after cutover
 

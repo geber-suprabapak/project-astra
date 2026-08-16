@@ -3,9 +3,7 @@ import type { AttendanceStatus } from '../dashboard/service.js'
 export { computeAttendanceStatus } from '../dashboard/service.js'
 
 /** Determine action type from attendance status */
-export function computeActionType(
-  status: AttendanceStatus,
-): 'check_in' | 'check_out' | 'done' {
+export function computeActionType(status: AttendanceStatus): 'check_in' | 'check_out' | 'done' {
   if (status.hasCheckedIn && status.hasCheckedOut) return 'done'
   if (status.hasCheckedIn) return 'check_out'
   return 'check_in'
@@ -33,6 +31,8 @@ export function validateImageBase64(b64: string): void {
   const size = base64ByteSize(b64)
   if (size > MAX_IMAGE_BYTES) {
     const mb = (size / 1024 / 1024).toFixed(1)
-    throw Object.assign(new Error(`Image too large: ${mb}MB. Maximum is 5MB.`), { code: 'VALIDATION_ERROR' })
+    throw Object.assign(new Error(`Image too large: ${mb}MB. Maximum is 5MB.`), {
+      code: 'VALIDATION_ERROR',
+    })
   }
 }

@@ -4,10 +4,10 @@ services:
     pull_policy: always
     env_file: .env
     ports:
-      - "3000:3000"
+      - '3000:3000'
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/ready"]
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3000/ready']
       interval: 30s
       timeout: 5s
       retries: 3

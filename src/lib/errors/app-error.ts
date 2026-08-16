@@ -1,11 +1,26 @@
 import { ErrorCode } from './codes.js'
 
+export interface ErrorDetailMap {
+  formErrors?: readonly string[]
+  fieldErrors?: Readonly<Record<string, readonly string[] | undefined>>
+  [key: string]:
+    | string
+    | number
+    | boolean
+    | null
+    | undefined
+    | readonly string[]
+    | Readonly<Record<string, readonly string[] | undefined>>
+}
+
+export type AppErrorDetails = ErrorDetailMap | string | number | boolean | null | undefined
+
 export class AppError extends Error {
   constructor(
     public readonly code: ErrorCode,
     public readonly httpStatus: number,
     message: string,
-    public readonly details?: unknown,
+    public readonly details?: AppErrorDetails,
   ) {
     super(message)
     this.name = 'AppError'
@@ -23,7 +38,7 @@ export class AppError extends Error {
     return new AppError(ErrorCode.FORBIDDEN, 403, 'Access denied.')
   }
 
-  static validationError(details?: unknown): AppError {
+  static validationError(details?: AppErrorDetails): AppError {
     return new AppError(ErrorCode.VALIDATION_ERROR, 422, 'Validation failed.', details)
   }
 
@@ -44,14 +59,10 @@ export class AppError extends Error {
   }
 
   static upstreamTimeout(service = 'upstream'): AppError {
-    return new AppError(
-      ErrorCode.UPSTREAM_TIMEOUT,
-      504,
-      `Request to ${service} timed out.`,
-    )
+    return new AppError(ErrorCode.UPSTREAM_TIMEOUT, 504, `Request to ${service} timed out.`)
   }
 
-  static storageUploadFailed(details?: unknown): AppError {
+  static storageUploadFailed(details?: AppErrorDetails): AppError {
     return new AppError(ErrorCode.STORAGE_UPLOAD_FAILED, 502, 'File upload failed.', details)
   }
 
@@ -63,7 +74,7 @@ export class AppError extends Error {
     return new AppError(ErrorCode.CONFLICT, 409, message)
   }
 
-static tenantMismatch(): AppError {
+  static tenantMismatch(): AppError {
     return new AppError(ErrorCode.TENANT_MISMATCH, 403, 'Tenant mismatch.')
   }
 

@@ -1,10 +1,29 @@
 import { describe, it, expect } from 'vitest'
-import { computeActionType, computeInsertStatus, base64ByteSize } from '../../../src/modules/attendance/mapper.js'
+import {
+  computeActionType,
+  computeInsertStatus,
+  base64ByteSize,
+} from '../../../src/modules/attendance/mapper.js'
 import type { AttendanceStatus } from '../../../src/modules/dashboard/service.js'
 
-const pending: AttendanceStatus = { today: 'pending', hasCheckedIn: false, hasCheckedOut: false, checkInStatus: null }
-const checkedIn: AttendanceStatus = { today: 'present', hasCheckedIn: true, hasCheckedOut: false, checkInStatus: 'Hadir' }
-const done: AttendanceStatus = { today: 'present', hasCheckedIn: true, hasCheckedOut: true, checkInStatus: 'Hadir' }
+const pending: AttendanceStatus = {
+  today: 'pending',
+  hasCheckedIn: false,
+  hasCheckedOut: false,
+  checkInStatus: null,
+}
+const checkedIn: AttendanceStatus = {
+  today: 'present',
+  hasCheckedIn: true,
+  hasCheckedOut: false,
+  checkInStatus: 'Hadir',
+}
+const done: AttendanceStatus = {
+  today: 'present',
+  hasCheckedIn: true,
+  hasCheckedOut: true,
+  checkInStatus: 'Hadir',
+}
 
 describe('computeActionType', () => {
   it('returns check_in when not checked in', () => {

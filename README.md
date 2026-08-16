@@ -19,7 +19,7 @@ Skanida Mobile App -> Project Astra (/v1/mobile/*) -> Supabase
 - Supabase JS client
 - Pino
 - Vitest
-- ESLint
+- Oxlint and Oxfmt
 - Docker
 - Bun
 
@@ -127,22 +127,22 @@ Stable error codes:
 
 ## API Surface
 
-| Method | Path | Auth | Purpose |
-| --- | --- | --- | --- |
-| `GET` | `/live` | No | Process liveness probe |
-| `GET` | `/ready` | No | Supabase and Robin readiness probe |
-| `GET` | `/v1/mobile/health` | No | Mobile-safe service status |
-| `GET` | `/v1/mobile/dashboard` | Yes | Dashboard aggregation and primary action gate |
-| `POST` | `/v1/mobile/attendance/precheck` | Yes | Validate attendance eligibility before camera |
-| `POST` | `/v1/mobile/attendance/submit` | Yes | Identify face and save attendance |
-| `GET` | `/v1/mobile/face/enrollment/status` | Yes | Read face enrollment status |
-| `POST` | `/v1/mobile/face/enrollment` | Yes | Upload enrollment images |
-| `GET` | `/v1/mobile/permits` | Yes | List permit requests |
-| `POST` | `/v1/mobile/permits` | Yes | Create permit request |
-| `GET` | `/v1/mobile/profile` | Yes | Read profile |
-| `PATCH` | `/v1/mobile/profile/avatar` | Yes | Upload or clear avatar |
-| `PATCH` | `/v1/mobile/profile/password` | Yes | Change password |
-| `GET` | `/v1/mobile/time` | Yes | Return canonical BFF time |
+| Method  | Path                                | Auth | Purpose                                       |
+| ------- | ----------------------------------- | ---- | --------------------------------------------- |
+| `GET`   | `/live`                             | No   | Process liveness probe                        |
+| `GET`   | `/ready`                            | No   | Supabase and Robin readiness probe            |
+| `GET`   | `/v1/mobile/health`                 | No   | Mobile-safe service status                    |
+| `GET`   | `/v1/mobile/dashboard`              | Yes  | Dashboard aggregation and primary action gate |
+| `POST`  | `/v1/mobile/attendance/precheck`    | Yes  | Validate attendance eligibility before camera |
+| `POST`  | `/v1/mobile/attendance/submit`      | Yes  | Identify face and save attendance             |
+| `GET`   | `/v1/mobile/face/enrollment/status` | Yes  | Read face enrollment status                   |
+| `POST`  | `/v1/mobile/face/enrollment`        | Yes  | Upload enrollment images                      |
+| `GET`   | `/v1/mobile/permits`                | Yes  | List permit requests                          |
+| `POST`  | `/v1/mobile/permits`                | Yes  | Create permit request                         |
+| `GET`   | `/v1/mobile/profile`                | Yes  | Read profile                                  |
+| `PATCH` | `/v1/mobile/profile/avatar`         | Yes  | Upload or clear avatar                        |
+| `PATCH` | `/v1/mobile/profile/password`       | Yes  | Change password                               |
+| `GET`   | `/v1/mobile/time`                   | Yes  | Return canonical BFF time                     |
 
 ### Dashboard
 
@@ -268,18 +268,18 @@ Returns the canonical BFF time:
 
 ## Rate Limits
 
-| Route | Limit |
-| --- | --- |
-| `GET /v1/mobile/dashboard` | 60 requests per minute |
-| `POST /v1/mobile/attendance/precheck` | 12 requests per minute |
-| `POST /v1/mobile/attendance/submit` | 6 requests per minute |
-| `GET /v1/mobile/face/enrollment/status` | 30 requests per minute |
-| `POST /v1/mobile/face/enrollment` | 2 requests per 10 minutes |
-| `GET /v1/mobile/permits` | 30 requests per minute |
-| `POST /v1/mobile/permits` | 5 requests per hour |
-| `PATCH /v1/mobile/profile/avatar` | 10 requests per hour |
-| `PATCH /v1/mobile/profile/password` | 5 requests per hour |
-| `GET /v1/mobile/time` | 30 requests per minute |
+| Route                                   | Limit                     |
+| --------------------------------------- | ------------------------- |
+| `GET /v1/mobile/dashboard`              | 60 requests per minute    |
+| `POST /v1/mobile/attendance/precheck`   | 12 requests per minute    |
+| `POST /v1/mobile/attendance/submit`     | 6 requests per minute     |
+| `GET /v1/mobile/face/enrollment/status` | 30 requests per minute    |
+| `POST /v1/mobile/face/enrollment`       | 2 requests per 10 minutes |
+| `GET /v1/mobile/permits`                | 30 requests per minute    |
+| `POST /v1/mobile/permits`               | 5 requests per hour       |
+| `PATCH /v1/mobile/profile/avatar`       | 10 requests per hour      |
+| `PATCH /v1/mobile/profile/password`     | 5 requests per hour       |
+| `GET /v1/mobile/time`                   | 30 requests per minute    |
 
 Rate limiting uses Redis when `REDIS_URL` is configured. Non-production environments without Redis fall back to the in-process store.
 
@@ -342,17 +342,19 @@ http://localhost:3000/v1/mobile/health
 
 ## Scripts
 
-| Command | Purpose |
-| --- | --- |
-| `bun run dev` | Start the development server with watch mode |
-| `bun run build` | Compile TypeScript to `dist/` |
-| `bun run start` | Start the compiled production server |
-| `bun run typecheck` | Run TypeScript without emit |
-| `bun run lint` | Run ESLint over `src` and `tests` |
-| `bun run test` | Run unit tests |
-| `bun run test:integration` | Run integration tests |
-| `bun run auth:token` | Get a Supabase access token for manual or scripted smoke checks |
-| `bun run smoke:staging` | Run the staging smoke contract against `STAGING_BASE_URL` with `ACCESS_TOKEN` |
+| Command                    | Purpose                                                                       |
+| -------------------------- | ----------------------------------------------------------------------------- |
+| `bun run dev`              | Start the development server with watch mode                                  |
+| `bun run build`            | Compile TypeScript to `dist/`                                                 |
+| `bun run start`            | Start the compiled production server                                          |
+| `bun run typecheck`        | Run TypeScript without emit                                                   |
+| `bun run lint`             | Run Oxlint, including anti-slop rules                                         |
+| `bun run format`           | Format files with Oxfmt                                                       |
+| `bun run format:check`     | Check formatting with Oxfmt                                                   |
+| `bun run test`             | Run unit tests                                                                |
+| `bun run test:integration` | Run integration tests                                                         |
+| `bun run auth:token`       | Get a Supabase access token for manual or scripted smoke checks               |
+| `bun run smoke:staging`    | Run the staging smoke contract against `STAGING_BASE_URL` with `ACCESS_TOKEN` |
 
 On constrained Windows environments, run Vitest with a single fork:
 

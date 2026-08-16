@@ -1,18 +1,12 @@
+import { getUserProfile, updateUserProfile } from '../../clients/supabase/admin.js'
+import { deleteAvatar, getSignedAvatarUrl, uploadAvatar } from '../../clients/supabase/storage.js'
 import {
-  getUserProfile,
-  updateUserProfile,
-} from '../../clients/supabase/admin.js'
-import {
-  deleteAvatar,
-  getSignedAvatarUrl,
-  uploadAvatar,
-} from '../../clients/supabase/storage.js'
-import { adminUpdatePassword, updateUserMetadata, verifyPassword } from '../../clients/supabase/auth.js'
+  adminUpdatePassword,
+  updateUserMetadata,
+  verifyPassword,
+} from '../../clients/supabase/auth.js'
 import { AppError } from '../../lib/errors/app-error.js'
-import {
-  ALLOWED_AVATAR_TYPES,
-  MAX_AVATAR_SIZE_BYTES,
-} from './schema.js'
+import { ALLOWED_AVATAR_TYPES, MAX_AVATAR_SIZE_BYTES } from './schema.js'
 
 export interface ProfileResponse {
   user_id: string
@@ -28,9 +22,7 @@ export interface ProfileResponse {
 
 export async function getProfile(userId: string): Promise<ProfileResponse> {
   const profile = await getUserProfile(userId)
-  const avatarUrl = profile.avatar_url
-    ? await getSignedAvatarUrl(profile.avatar_url)
-    : null
+  const avatarUrl = profile.avatar_url ? await getSignedAvatarUrl(profile.avatar_url) : null
 
   return {
     user_id: profile.user_id,
@@ -59,6 +51,7 @@ export async function updateAvatar(
 
   if (!file) throw AppError.validationError('File or clear:true is required.')
 
+  // SAFETY: ALLOWED_AVATAR_TYPES is a const string array checked against string contentType
   if (!(ALLOWED_AVATAR_TYPES as readonly string[]).includes(file.contentType)) {
     throw AppError.validationError(
       `Unsupported file type. Allowed: ${ALLOWED_AVATAR_TYPES.join(', ')}.`,

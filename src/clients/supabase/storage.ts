@@ -41,9 +41,7 @@ export async function uploadAvatar(
 
 export async function deleteAvatar(userId: string): Promise<void> {
   // Delete all avatar variants for the user
-  const { data: files } = await supabaseAdmin.storage
-    .from(env.supabaseBucketAvatars)
-    .list(userId)
+  const { data: files } = await supabaseAdmin.storage.from(env.supabaseBucketAvatars).list(userId)
 
   if (files && files.length > 0) {
     const paths = files.map((f) => `${userId}/${f.name}`)

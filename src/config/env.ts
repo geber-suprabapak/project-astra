@@ -1,8 +1,11 @@
 import { z } from 'zod'
 
-const commaSeparated = z
-  .string()
-  .transform((s) => s.split(',').map((v) => v.trim()).filter(Boolean))
+const commaSeparated = z.string().transform((s) =>
+  s
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean),
+)
 
 const positiveInt = z.coerce.number().int().positive()
 
@@ -82,9 +85,7 @@ export function parseEnv(input: Record<string, string | undefined>) {
 const parsed = parseEnv(process.env)
 
 if (!parsed.success) {
-  const issues = parsed.error.issues
-    .map((i) => `  ${i.path.join('.')}: ${i.message}`)
-    .join('\n')
+  const issues = parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`).join('\n')
   console.error(`[config] Invalid environment variables:\n${issues}`)
   process.exit(1)
 }

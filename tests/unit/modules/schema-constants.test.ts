@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { UpdatePasswordSchema, ALLOWED_AVATAR_TYPES, MAX_AVATAR_SIZE_BYTES } from '../../../src/modules/profile/schema.js'
+import {
+  UpdatePasswordSchema,
+  ALLOWED_AVATAR_TYPES,
+  MAX_AVATAR_SIZE_BYTES,
+} from '../../../src/modules/profile/schema.js'
 import {
   REQUIRED_ENROLLMENT_FILES,
   MAX_ENROLLMENT_FILE_SIZE_BYTES,

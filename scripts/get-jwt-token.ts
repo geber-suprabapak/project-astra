@@ -1,10 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
 import { createInterface } from 'node:readline'
 
-type ArgMap = Record<string, string | boolean>
-
-function parseArgs(argv: string[]): ArgMap {
-  const args: ArgMap = {}
+function parseArgs(argv: string[]): Map<string, string | boolean> {
+  const args = new Map<string, string | boolean>()
   for (let i = 0; i < argv.length; i += 1) {
     const current = argv[i]
     if (!current.startsWith('--')) continue
@@ -12,19 +10,25 @@ function parseArgs(argv: string[]): ArgMap {
     const key = current.slice(2)
     const next = argv[i + 1]
     if (!next || next.startsWith('--')) {
-      args[key] = true
+      args.set(key, true)
       continue
     }
 
-    args[key] = next
+    args.set(key, next)
     i += 1
   }
   return args
 }
 
-function readValue(args: ArgMap, key: string, envKey: string): string {
-  const argValue = args[key]
-  if (typeof argValue === 'string' && argValue.trim()) return argValue.trim()
+function asString(value: string | boolean | undefined): string | null {
+  if (value === true || value === false || value === undefined) return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function readValue(args: Map<string, string | boolean>, key: string, envKey: string): string {
+  const argValue = asString(args.get(key))
+  if (argValue) return argValue
 
   const envValue = Bun.env[envKey]
   if (envValue?.trim()) return envValue.trim()
@@ -103,14 +107,10 @@ function promptSecret(question: string): Promise<string> {
 const args = parseArgs(process.argv.slice(2))
 const supabaseUrl = readValue(args, 'supabase-url', 'SUPABASE_URL')
 const supabaseAnonKey = readValue(args, 'anon-key', 'SUPABASE_ANON_KEY')
-const email =
-  typeof args.email === 'string' && args.email.trim()
-    ? args.email.trim()
-    : Bun.env.AUTH_EMAIL?.trim() ?? (await promptText('Email: '))
-const password =
-  typeof args.password === 'string' && args.password.trim()
-    ? args.password.trim()
-    : Bun.env.AUTH_PASSWORD?.trim() ?? (await promptSecret('Password: '))
+const argEmail = asString(args.get('email'))
+const email = argEmail ?? Bun.env.AUTH_EMAIL?.trim() ?? (await promptText('Email: '))
+const argPassword = asString(args.get('password'))
+const password = argPassword ?? Bun.env.AUTH_PASSWORD?.trim() ?? (await promptSecret('Password: '))
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {

@@ -28,12 +28,10 @@ export async function getReadiness(): Promise<ReadinessResult> {
     checkRedisReady(),
   ])
 
-  const database: 'ok' | 'fail' =
-    dbStatus.status === 'fulfilled' ? dbStatus.value : 'fail'
+  const database: 'ok' | 'fail' = dbStatus.status === 'fulfilled' ? dbStatus.value : 'fail'
   const mlService: 'ok' | 'fail' =
     robin.status === 'fulfilled' && robin.value.healthy ? 'ok' : 'fail'
-  const redisHealthy =
-    redis.status === 'fulfilled' ? redis.value : false
+  const redisHealthy = redis.status === 'fulfilled' ? redis.value : false
 
   return {
     healthy: database === 'ok' && mlService === 'ok' && redisHealthy,

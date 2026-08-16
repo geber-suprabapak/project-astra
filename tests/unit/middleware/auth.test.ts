@@ -17,7 +17,8 @@ describe('auth middleware', () => {
   it('throws AUTH_REQUIRED when no Authorization header', async () => {
     const app = createAuthApp()
     const res = await app.request('/test', { method: 'GET' })
-    const body = await res.json() as { error: { code: string } }
+    // SAFETY: error response body conforms to standard error envelope
+    const body = (await res.json()) as { error: { code: string } }
     expect(res.status).toBe(401)
     expect(body.error.code).toBe(ErrorCode.AUTH_REQUIRED)
   })
@@ -28,7 +29,8 @@ describe('auth middleware', () => {
       method: 'GET',
       headers: { Authorization: 'Basic dXNlcjpwYXNz' },
     })
-    const body = await res.json() as { error: { code: string } }
+    // SAFETY: error response body conforms to standard error envelope
+    const body = (await res.json()) as { error: { code: string } }
     expect(res.status).toBe(401)
     expect(body.error.code).toBe(ErrorCode.AUTH_REQUIRED)
   })
@@ -39,7 +41,8 @@ describe('auth middleware', () => {
       method: 'GET',
       headers: { Authorization: 'Bearer invalid.jwt.token' },
     })
-    const body = await res.json() as { error: { code: string } }
+    // SAFETY: error response body conforms to standard error envelope
+    const body = (await res.json()) as { error: { code: string } }
     expect(res.status).toBe(401)
     expect(body.error.code).toBe(ErrorCode.AUTH_INVALID)
   })

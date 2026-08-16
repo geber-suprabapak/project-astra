@@ -48,9 +48,9 @@ describe('env config', () => {
     })
 
     expect(parsed.success).toBe(false)
-    expect(parsed.success ? [] : parsed.error.issues.map((issue) => issue.path.join('.'))).toContain(
-      'REDIS_URL',
-    )
+    expect(
+      parsed.success ? [] : parsed.error.issues.map((issue) => issue.path.join('.')),
+    ).toContain('REDIS_URL')
   })
 
   it('allows non-production envs without REDIS_URL', () => {

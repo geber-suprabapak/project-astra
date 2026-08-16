@@ -36,9 +36,7 @@ export async function enrollFace(
 
   for (const file of files) {
     if (file.contentType !== ALLOWED_ENROLLMENT_CONTENT_TYPE) {
-      throw AppError.validationError(
-        `All files must be JPEG. Got: ${file.contentType}.`,
-      )
+      throw AppError.validationError(`All files must be JPEG. Got: ${file.contentType}.`)
     }
     if (file.size > MAX_ENROLLMENT_FILE_SIZE_BYTES) {
       throw AppError.validationError(

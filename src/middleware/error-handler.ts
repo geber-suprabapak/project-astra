@@ -15,10 +15,7 @@ export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
     return errorResponse(c, err)
   }
 
-  logger.error(
-    { err, requestId: c.get('requestId') },
-    'Unhandled error',
-  )
+  logger.error({ err, requestId: c.get('requestId') }, 'Unhandled error')
 
   const internal = AppError.internal(
     env.nodeEnv === 'production'

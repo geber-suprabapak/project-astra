@@ -37,7 +37,7 @@ permitsRouter.post('/', rateLimits.permitsPost, async (c) => {
   const attachmentEntry = form.get('attachment')
   let attachment: { buffer: Buffer; contentType: string } | null = null
 
-  if (attachmentEntry && typeof attachmentEntry !== 'string') {
+  if (attachmentEntry instanceof Blob) {
     const arrayBuffer = await attachmentEntry.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
 

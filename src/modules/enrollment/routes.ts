@@ -29,15 +29,16 @@ enrollmentRouter.post('/', rateLimits.enrollment, async (c) => {
 
   const files: EnrollmentFile[] = []
   for (const entry of fileEntries) {
-    if (typeof entry === 'string') {
+    if (!(entry instanceof Blob)) {
       throw AppError.validationError('files must be file uploads, not strings.')
     }
     const arrayBuffer = await entry.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
+    const filename = entry instanceof File ? entry.name : 'image.jpg'
     files.push({
       buffer,
       contentType: entry.type || 'application/octet-stream',
-      filename: entry.name || 'image.jpg',
+      filename: filename || 'image.jpg',
       size: buffer.length,
     })
   }
