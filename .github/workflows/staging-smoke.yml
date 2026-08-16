@@ -27,8 +27,8 @@ jobs:
           AUTH_EMAIL: ${{ secrets.AUTH_EMAIL }}
           AUTH_PASSWORD: ${{ secrets.AUTH_PASSWORD }}
         run: |
-          bun run auth:token --json > token.json
-          echo "ACCESS_TOKEN=$(jq -r '.access_token' token.json)" >> "$GITHUB_ENV"
+          TOKEN=$(bun run auth:token --json | jq -r '.access_token')
+          echo "ACCESS_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
       - name: Run staging smoke verification
         env:
