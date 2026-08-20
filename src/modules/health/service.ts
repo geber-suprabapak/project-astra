@@ -6,6 +6,7 @@ import type { AppProviders } from '../../providers/types.js'
 export interface HealthChecks {
   database: 'ok' | 'fail'
   objectStorage: 'ok' | 'fail'
+  identity: 'ok' | 'fail'
   mlService: 'ok' | 'fail'
   redis: 'ok' | 'fail'
 }
@@ -18,9 +19,10 @@ export interface ReadinessResult {
 export async function getReadiness(
   providers: AppProviders = defaultProviders,
 ): Promise<ReadinessResult> {
-  const [dbResult, storageResult, robinResult, redisResult] = await Promise.allSettled([
+  const [dbResult, storageResult, identityResult, robinResult, redisResult] = await Promise.allSettled([
     providers.domainStore.checkHealth(),
     providers.objectStorage.checkHealth(),
+    providers.identityProvider.checkHealth(),
     providers.robinClient.checkReadiness(),
     checkRedisReady(),
   ])
@@ -29,6 +31,8 @@ export async function getReadiness(
     dbResult.status === 'fulfilled' && dbResult.value ? 'ok' : 'fail'
   const objectStorage: 'ok' | 'fail' =
     storageResult.status === 'fulfilled' && storageResult.value ? 'ok' : 'fail'
+  const identity: 'ok' | 'fail' =
+    identityResult.status === 'fulfilled' && identityResult.value ? 'ok' : 'fail'
   const mlService: 'ok' | 'fail' =
     robinResult.status === 'fulfilled' && robinResult.value.healthy ? 'ok' : 'fail'
 
@@ -38,13 +42,18 @@ export async function getReadiness(
   }
 
   const healthy =
-    database === 'ok' && objectStorage === 'ok' && mlService === 'ok' && redis === 'ok'
+    database === 'ok' &&
+    objectStorage === 'ok' &&
+    identity === 'ok' &&
+    mlService === 'ok' &&
+    redis === 'ok'
 
   return {
     healthy,
     checks: {
       database,
       objectStorage,
+      identity,
       mlService,
       redis,
     },

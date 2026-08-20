@@ -2,6 +2,7 @@ import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
 import { z } from 'zod'
 import { env } from '../../config/env.js'
 import { AppError } from '../../lib/errors/app-error.js'
+import { logger } from '../../lib/logging/logger.js'
 import type { IdentityProvider, IdentityUser } from '../types.js'
 
 export interface OidcIdentityProviderOptions {
@@ -25,13 +26,13 @@ export class OidcIdentityProvider implements IdentityProvider {
   private jwksGetter: ReturnType<typeof createRemoteJWKSet> | null = null
 
   constructor(options: OidcIdentityProviderOptions = {}) {
-    this.issuer = options.issuer ?? env.oidcIssuer
-    this.jwksUrl = options.jwksUrl ?? env.oidcJwksUrl
-    this.jwtSecret = options.jwtSecret ?? env.oidcJwtSecret
+    this.issuer = 'issuer' in options ? options.issuer : env.oidcIssuer
+    this.jwksUrl = 'jwksUrl' in options ? options.jwksUrl : env.oidcJwksUrl
+    this.jwtSecret = 'jwtSecret' in options ? options.jwtSecret : env.oidcJwtSecret
     this.audience = options.audience ?? env.oidcAudience
-    this.logtoEndpoint = options.logtoEndpoint ?? env.logtoEndpoint
-    this.logtoAppId = options.logtoAppId ?? env.logtoAppId
-    this.logtoAppSecret = options.logtoAppSecret ?? env.logtoAppSecret
+    this.logtoEndpoint = 'logtoEndpoint' in options ? options.logtoEndpoint : env.logtoEndpoint
+    this.logtoAppId = 'logtoAppId' in options ? options.logtoAppId : env.logtoAppId
+    this.logtoAppSecret = 'logtoAppSecret' in options ? options.logtoAppSecret : env.logtoAppSecret
   }
 
   private getJwksGetter() {
@@ -82,77 +83,77 @@ export class OidcIdentityProvider implements IdentityProvider {
   }
 
   async verifyPassword(email: string, password: string): Promise<void> {
-    if (this.logtoEndpoint && this.logtoAppId && this.logtoAppSecret) {
-      try {
-        const response = await fetch(`${this.logtoEndpoint.replace(/\/$/, '')}/api/interaction/verification`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password }),
-        })
-        if (!response.ok) {
-          throw AppError.authInvalid('Current password is incorrect.')
-        }
-        return
-      } catch (err) {
-        if (err instanceof AppError) throw err
-        throw AppError.authInvalid('Current password is incorrect.')
-      }
+    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
+      throw AppError.internal('Identity provider management API is not configured.')
     }
 
-    // Default password verification passes for valid credentials in portable/dev mode
-    if (!password || password.length < 6) {
+    try {
+      const response = await fetch(`${this.logtoEndpoint.replace(/\/$/, '')}/api/interaction/verification`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      })
+      if (!response.ok) {
+        throw AppError.authInvalid('Current password is incorrect.')
+      }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, email }, 'Logto password verification failed with error')
       throw AppError.authInvalid('Current password is incorrect.')
     }
   }
 
   async updatePassword(userId: string, newPassword: string): Promise<void> {
-    if (this.logtoEndpoint && this.logtoAppId && this.logtoAppSecret) {
-      try {
-        const response = await fetch(
-          `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/password`,
-          {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password: newPassword }),
-          },
-        )
-        if (!response.ok) {
-          throw AppError.internal('Failed to update password in identity provider.')
-        }
-        return
-      } catch (err) {
-        if (err instanceof AppError) throw err
-        throw AppError.internal(`Failed to update password: ${(err as Error).message}`)
+    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
+      throw AppError.internal('Identity provider management API is not configured.')
+    }
+
+    try {
+      const response = await fetch(
+        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/password`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: newPassword }),
+        },
+      )
+      if (!response.ok) {
+        logger.error({ userId, status: response.status }, 'Logto update password returned error status')
+        throw AppError.internal('Failed to update password in identity provider.')
       }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId }, 'Logto update password error')
+      throw AppError.internal('Failed to update password in identity provider.')
     }
   }
 
   async updateUserMetadata(userId: string, metadata: Record<string, unknown>): Promise<void> {
-    if (this.logtoEndpoint && this.logtoAppId && this.logtoAppSecret) {
-      try {
-        const response = await fetch(
-          `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/custom-data`,
-          {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(metadata),
-          },
-        )
-        if (!response.ok) {
-          throw AppError.internal('Failed to update user metadata in identity provider.')
-        }
-      } catch (err) {
-        if (err instanceof AppError) throw err
-        throw AppError.internal(`Failed to update user metadata: ${(err as Error).message}`)
+    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
+      throw AppError.internal('Identity provider management API is not configured.')
+    }
+
+    try {
+      const response = await fetch(
+        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/custom-data`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(metadata),
+        },
+      )
+      if (!response.ok) {
+        logger.error({ userId, status: response.status }, 'Logto update user metadata returned error status')
+        throw AppError.internal('Failed to update user metadata in identity provider.')
       }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId }, 'Logto update user metadata error')
+      throw AppError.internal('Failed to update user metadata in identity provider.')
     }
   }
 
   async checkHealth(): Promise<boolean> {
-    if (this.jwtSecret) {
-      return true
-    }
-
     if (this.jwksUrl) {
       try {
         const controller = new AbortController()
@@ -168,6 +169,10 @@ export class OidcIdentityProvider implements IdentityProvider {
       }
     }
 
-    return true
+    if (this.jwtSecret) {
+      return true
+    }
+
+    return false
   }
 }

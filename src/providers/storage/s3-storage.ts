@@ -1,6 +1,7 @@
 import { createHash, createHmac } from 'node:crypto'
 import { env } from '../../config/env.js'
 import { AppError } from '../../lib/errors/app-error.js'
+import { logger } from '../../lib/logging/logger.js'
 import type { ObjectStorage } from '../types.js'
 
 const AVATAR_TTL_SECONDS = 86400 // 24h
@@ -124,6 +125,7 @@ export class S3ObjectStorage implements ObjectStorage {
     key: string,
     body?: Buffer,
     contentType?: string,
+    timeoutMs: number = env.storageUploadTimeoutMs,
   ): Promise<Response> {
     const url = this.buildObjectUrl(bucket, key, false)
     const now = new Date()
@@ -168,7 +170,7 @@ export class S3ObjectStorage implements ObjectStorage {
     headers['Authorization'] = authorization
 
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), env.storageUploadTimeoutMs)
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
 
     try {
       return await fetch(url.toString(), {
@@ -196,12 +198,14 @@ export class S3ObjectStorage implements ObjectStorage {
       )
       if (!response.ok) {
         const errorText = await response.text().catch(() => '')
-        throw AppError.storageUploadFailed(`S3 upload failed (${response.status}): ${errorText}`)
+        logger.error({ status: response.status, errorText }, 'S3 avatar upload failed')
+        throw AppError.storageUploadFailed()
       }
       return path
     } catch (err) {
       if (err instanceof AppError) throw err
-      throw AppError.storageUploadFailed((err as Error).message)
+      logger.error({ err }, 'S3 avatar upload failed with unexpected error')
+      throw AppError.storageUploadFailed()
     }
   }
 
@@ -241,12 +245,14 @@ export class S3ObjectStorage implements ObjectStorage {
       )
       if (!response.ok) {
         const errorText = await response.text().catch(() => '')
-        throw AppError.storageUploadFailed(`S3 upload failed (${response.status}): ${errorText}`)
+        logger.error({ status: response.status, errorText }, 'S3 permit attachment upload failed')
+        throw AppError.storageUploadFailed()
       }
       return path
     } catch (err) {
       if (err instanceof AppError) throw err
-      throw AppError.storageUploadFailed((err as Error).message)
+      logger.error({ err }, 'S3 permit attachment upload failed with unexpected error')
+      throw AppError.storageUploadFailed()
     }
   }
 
@@ -261,23 +267,8 @@ export class S3ObjectStorage implements ObjectStorage {
 
   async checkHealth(): Promise<boolean> {
     try {
-      const url = this.forcePathStyle
-        ? `${this.endpoint}/${this.bucketAvatars}`
-        : `${new URL(this.endpoint).protocol}//${this.bucketAvatars}.${new URL(this.endpoint).host}`
-
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 3000)
-
-      try {
-        const res = await fetch(url, {
-          method: 'HEAD',
-          signal: controller.signal,
-        })
-        // 200 OK, 403 Forbidden (endpoint reachable, bucket exists), 404 Not Found (endpoint up)
-        return res.status < 500
-      } finally {
-        clearTimeout(timer)
-      }
+      const res = await this.executeS3Request('HEAD', this.bucketAvatars, '', undefined, undefined, 3000)
+      return res.ok
     } catch {
       return false
     }

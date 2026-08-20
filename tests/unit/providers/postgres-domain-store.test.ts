@@ -39,13 +39,21 @@ describe('PostgresDomainStore (Greenfield)', () => {
     await expect(store.getUserProfile('non-existent')).rejects.toThrow('User profile not found.')
   })
 
-  it('getUserProfile throws internal AppError on database failure', async () => {
+  it('getUserProfile throws sanitized internal AppError on database failure without leaking raw message', async () => {
     const mockSql = vi.fn().mockImplementation(async () => {
-      throw new Error('Connection refused')
+      throw new Error('connect ECONNREFUSED 127.0.0.1:5432')
     }) as unknown as Sql
     const store = new PostgresDomainStore({ sql: mockSql })
 
-    await expect(store.getUserProfile('user-123')).rejects.toThrow(AppError)
+    try {
+      await store.getUserProfile('user-123')
+      expect.unreachable()
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(AppError)
+      expect(err.httpStatus).toBe(500)
+      expect(err.message).toBe('An unexpected database error occurred.')
+      expect(err.message).not.toContain('ECONNREFUSED')
+    }
   })
 
   it('getTodayAbsences queries attendances table', async () => {

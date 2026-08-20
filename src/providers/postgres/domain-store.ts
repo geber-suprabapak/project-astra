@@ -1,6 +1,7 @@
 import postgres, { type Sql } from 'postgres'
 import { env } from '../../config/env.js'
 import { AppError } from '../../lib/errors/app-error.js'
+import { logger } from '../../lib/logging/logger.js'
 import type {
   Absence,
   ActivePermitSummary,
@@ -88,7 +89,8 @@ export class PostgresDomainStore implements DomainStore {
       return rows[0]
     } catch (err) {
       if (err instanceof AppError) throw err
-      throw AppError.internal(`Failed to query user profile: ${(err as Error).message}`)
+      logger.error({ err, userId }, 'Failed to query user profile')
+      throw AppError.internal('An unexpected database error occurred.')
     }
   }
 
@@ -104,7 +106,8 @@ export class PostgresDomainStore implements DomainStore {
       `
     } catch (err) {
       if (err instanceof AppError) throw err
-      throw AppError.internal(`Failed to update profile: ${(err as Error).message}`)
+      logger.error({ err, userId }, 'Failed to update profile')
+      throw AppError.internal('An unexpected database error occurred.')
     }
   }
 
@@ -119,7 +122,8 @@ export class PostgresDomainStore implements DomainStore {
       return rows ?? []
     } catch (err) {
       if (err instanceof AppError) throw err
-      throw AppError.internal(`Failed to query attendances: ${(err as Error).message}`)
+      logger.error({ err, userId, dateWIB }, 'Failed to query attendances')
+      throw AppError.internal('An unexpected database error occurred.')
     }
   }
 
@@ -132,12 +136,14 @@ export class PostgresDomainStore implements DomainStore {
         RETURNING status, created_at, date, user_id
       `
       if (!rows || rows.length === 0) {
+        logger.error({ data }, 'Failed to insert attendance record: empty return')
         throw AppError.internal('Failed to insert attendance record.')
       }
       return rows[0]
     } catch (err) {
       if (err instanceof AppError) throw err
-      throw AppError.internal(`Failed to insert attendance: ${(err as Error).message}`)
+      logger.error({ err, data }, 'Failed to insert attendance')
+      throw AppError.internal('An unexpected database error occurred.')
     }
   }
 
@@ -154,7 +160,8 @@ export class PostgresDomainStore implements DomainStore {
       return rows[0] ?? null
     } catch (err) {
       if (err instanceof AppError) throw err
-      throw AppError.internal(`Failed to query schedule: ${(err as Error).message}`)
+      logger.error({ err, dayKey }, 'Failed to query schedule')
+      throw AppError.internal('An unexpected database error occurred.')
     }
   }
 
@@ -175,7 +182,8 @@ export class PostgresDomainStore implements DomainStore {
       return rows ?? []
     } catch (err) {
       if (err instanceof AppError) throw err
-      throw AppError.internal(`Failed to query permits: ${(err as Error).message}`)
+      logger.error({ err, userId, startISO, endISO }, 'Failed to query permits')
+      throw AppError.internal('An unexpected database error occurred.')
     }
   }
 
@@ -192,7 +200,8 @@ export class PostgresDomainStore implements DomainStore {
       return rows ?? []
     } catch (err) {
       if (err instanceof AppError) throw err
-      throw AppError.internal(`Failed to query permit history: ${(err as Error).message}`)
+      logger.error({ err, userId }, 'Failed to query permit history')
+      throw AppError.internal('An unexpected database error occurred.')
     }
   }
 
@@ -202,16 +211,18 @@ export class PostgresDomainStore implements DomainStore {
         INSERT INTO leave_requests (user_id, category, description, status, attachment_url, date)
         VALUES (${data.user_id}, ${data.kategori_izin}, ${data.deskripsi}, ${data.status}, ${data.link_foto}, ${data.tanggal})
         RETURNING id, user_id, category AS kategori_izin, description AS deskripsi,
-                  status, attachment_url AS link_foto, date::text AS tanggal,
-                  approval_status, created_at::text, rejection_reason, rejected_at::text
+                   status, attachment_url AS link_foto, date::text AS tanggal,
+                   approval_status, created_at::text, rejection_reason, rejected_at::text
       `
       if (!rows || rows.length === 0) {
+        logger.error({ data }, 'Failed to insert permit: empty return')
         throw AppError.internal('Failed to insert permit.')
       }
       return rows[0]
     } catch (err) {
       if (err instanceof AppError) throw err
-      throw AppError.internal(`Failed to insert permit: ${(err as Error).message}`)
+      logger.error({ err, data }, 'Failed to insert permit')
+      throw AppError.internal('An unexpected database error occurred.')
     }
   }
 
@@ -300,7 +311,8 @@ export class PostgresDomainStore implements DomainStore {
       }
     } catch (err) {
       if (err instanceof AppError) throw err
-      throw AppError.internal(`Failed to validate attendance action: ${(err as Error).message}`)
+      logger.error({ err, params }, 'Failed to validate attendance action')
+      throw AppError.internal('An unexpected database error occurred.')
     }
   }
 
@@ -337,7 +349,8 @@ export class PostgresDomainStore implements DomainStore {
       return { success: true }
     } catch (err) {
       if (err instanceof AppError) throw err
-      throw AppError.internal(`Failed to save attendance record: ${(err as Error).message}`)
+      logger.error({ err, params }, 'Failed to save attendance record')
+      throw AppError.internal('An unexpected database error occurred.')
     }
   }
 

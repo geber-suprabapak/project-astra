@@ -47,7 +47,7 @@ describe('integration: runtime health & readiness probes', () => {
     expect(res.headers.get('x-frame-options')).toBe('DENY')
   })
 
-  it('returns 200 on /ready when all dependencies (database, objectStorage, mlService, redis) are healthy', async () => {
+  it('returns 200 on /ready when all dependencies (database, objectStorage, identity, mlService, redis) are healthy', async () => {
     const domainStore = new MemoryDomainStore()
     const objectStorage = new MemoryObjectStorage()
     const identityProvider = new MemoryIdentityProvider()
@@ -60,7 +60,7 @@ describe('integration: runtime health & readiness probes', () => {
     const res = await app.request('/ready')
     const body = (await res.json()) as {
       healthy: boolean
-      checks: { database: string; objectStorage: string; mlService: string; redis: string }
+      checks: { database: string; objectStorage: string; identity: string; mlService: string; redis: string }
     }
 
     expect(res.status).toBe(200)
@@ -68,6 +68,7 @@ describe('integration: runtime health & readiness probes', () => {
     expect(body.checks).toEqual({
       database: 'ok',
       objectStorage: 'ok',
+      identity: 'ok',
       mlService: 'ok',
       redis: 'ok',
     })
@@ -87,7 +88,7 @@ describe('integration: runtime health & readiness probes', () => {
     const res = await app.request('/ready')
     const body = (await res.json()) as {
       healthy: boolean
-      checks: { database: string; objectStorage: string; mlService: string; redis: string }
+      checks: { database: string; objectStorage: string; identity: string; mlService: string; redis: string }
     }
 
     expect(res.status).toBe(503)
@@ -109,12 +110,34 @@ describe('integration: runtime health & readiness probes', () => {
     const res = await app.request('/ready')
     const body = (await res.json()) as {
       healthy: boolean
-      checks: { database: string; objectStorage: string; mlService: string; redis: string }
+      checks: { database: string; objectStorage: string; identity: string; mlService: string; redis: string }
     }
 
     expect(res.status).toBe(503)
     expect(body.healthy).toBe(false)
     expect(body.checks.objectStorage).toBe('fail')
+  })
+
+  it('returns 503 on /ready when identity provider check fails', async () => {
+    const domainStore = new MemoryDomainStore()
+    const objectStorage = new MemoryObjectStorage()
+    const identityProvider = new MemoryIdentityProvider()
+    identityProvider.isHealthy = false
+    const robinClient = createMockRobinClient(true)
+
+    const app = createApp({
+      providers: { domainStore, objectStorage, identityProvider, robinClient },
+    })
+
+    const res = await app.request('/ready')
+    const body = (await res.json()) as {
+      healthy: boolean
+      checks: { database: string; objectStorage: string; identity: string; mlService: string; redis: string }
+    }
+
+    expect(res.status).toBe(503)
+    expect(body.healthy).toBe(false)
+    expect(body.checks.identity).toBe('fail')
   })
 
   it('returns 503 on /ready when ML service (Robin) check fails', async () => {
@@ -130,7 +153,7 @@ describe('integration: runtime health & readiness probes', () => {
     const res = await app.request('/ready')
     const body = (await res.json()) as {
       healthy: boolean
-      checks: { database: string; objectStorage: string; mlService: string; redis: string }
+      checks: { database: string; objectStorage: string; identity: string; mlService: string; redis: string }
     }
 
     expect(res.status).toBe(503)
@@ -165,6 +188,7 @@ describe('integration: runtime health & readiness probes', () => {
     const bodyStr = JSON.stringify(body)
     expect(bodyStr).not.toContain('database')
     expect(bodyStr).not.toContain('objectStorage')
+    expect(bodyStr).not.toContain('identity')
     expect(bodyStr).not.toContain('mlService')
     expect(bodyStr).not.toContain('redis')
     expect(bodyStr).not.toContain('postgres')

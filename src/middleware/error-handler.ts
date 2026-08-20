@@ -17,12 +17,6 @@ export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
 
   logger.error({ err, requestId: c.get('requestId') }, 'Unhandled error')
 
-  const internal = AppError.internal(
-    env.nodeEnv === 'production'
-      ? 'An unexpected error occurred.'
-      : err instanceof Error
-        ? err.message
-        : 'An unexpected error occurred.',
-  )
+  const internal = AppError.internal('An unexpected error occurred.')
   return errorResponse(c, internal)
 }
