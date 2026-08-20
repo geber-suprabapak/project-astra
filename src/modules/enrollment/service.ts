@@ -1,4 +1,6 @@
 import { robinClient, type RobinClient } from '../../clients/robin/client.js'
+import { defaultProviders } from '../../providers/index.js'
+import type { AppProviders } from '../../providers/types.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import type { RobinEnrollResult, RobinEnrollStatus } from '../../clients/robin/schemas.js'
 import {
@@ -17,8 +19,13 @@ export interface EnrollmentFile {
 export async function getEnrollmentStatus(
   token: string,
   requestId: string,
-  client: RobinClient = robinClient,
+  clientOrProviders?: RobinClient | AppProviders,
 ): Promise<RobinEnrollStatus> {
+  const client =
+    clientOrProviders && 'robinClient' in clientOrProviders
+      ? clientOrProviders.robinClient
+      : ((clientOrProviders as RobinClient) ?? defaultProviders.robinClient ?? robinClient)
+
   return client.getEnrollmentStatus(token, requestId)
 }
 
@@ -26,7 +33,7 @@ export async function enrollFace(
   files: EnrollmentFile[],
   token: string,
   requestId: string,
-  client: RobinClient = robinClient,
+  clientOrProviders?: RobinClient | AppProviders,
 ): Promise<RobinEnrollResult> {
   if (files.length !== REQUIRED_ENROLLMENT_FILES) {
     throw AppError.validationError(
@@ -44,6 +51,11 @@ export async function enrollFace(
       )
     }
   }
+
+  const client =
+    clientOrProviders && 'robinClient' in clientOrProviders
+      ? clientOrProviders.robinClient
+      : ((clientOrProviders as RobinClient) ?? defaultProviders.robinClient ?? robinClient)
 
   return client.enroll(files, token, requestId)
 }

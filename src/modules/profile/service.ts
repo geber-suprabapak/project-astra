@@ -1,10 +1,5 @@
-import { getUserProfile, updateUserProfile } from '../../clients/supabase/admin.js'
-import { deleteAvatar, getSignedAvatarUrl, uploadAvatar } from '../../clients/supabase/storage.js'
-import {
-  adminUpdatePassword,
-  updateUserMetadata,
-  verifyPassword,
-} from '../../clients/supabase/auth.js'
+import { defaultProviders } from '../../providers/index.js'
+import type { AppProviders } from '../../providers/types.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { ALLOWED_AVATAR_TYPES, MAX_AVATAR_SIZE_BYTES } from './schema.js'
 
@@ -20,9 +15,14 @@ export interface ProfileResponse {
   avatar_url: string | null
 }
 
-export async function getProfile(userId: string): Promise<ProfileResponse> {
-  const profile = await getUserProfile(userId)
-  const avatarUrl = profile.avatar_url ? await getSignedAvatarUrl(profile.avatar_url) : null
+export async function getProfile(
+  userId: string,
+  providers: AppProviders = defaultProviders,
+): Promise<ProfileResponse> {
+  const profile = await providers.domainStore.getUserProfile(userId)
+  const avatarUrl = profile.avatar_url
+    ? await providers.objectStorage.getSignedAvatarUrl(profile.avatar_url)
+    : null
 
   return {
     user_id: profile.user_id,
@@ -41,17 +41,17 @@ export async function updateAvatar(
   userId: string,
   file: { buffer: Buffer; contentType: string } | null,
   clear: boolean,
+  providers: AppProviders = defaultProviders,
 ): Promise<string | null> {
   if (clear) {
-    await deleteAvatar(userId)
-    await updateUserProfile(userId, { avatar_url: null })
-    await updateUserMetadata(userId, { avatar_url: null })
+    await providers.objectStorage.deleteAvatar(userId)
+    await providers.domainStore.updateUserProfile(userId, { avatar_url: null })
+    await providers.identityProvider.updateUserMetadata(userId, { avatar_url: null })
     return null
   }
 
   if (!file) throw AppError.validationError('File or clear:true is required.')
 
-  // SAFETY: ALLOWED_AVATAR_TYPES is a const string array checked against string contentType
   if (!(ALLOWED_AVATAR_TYPES as readonly string[]).includes(file.contentType)) {
     throw AppError.validationError(
       `Unsupported file type. Allowed: ${ALLOWED_AVATAR_TYPES.join(', ')}.`,
@@ -62,11 +62,11 @@ export async function updateAvatar(
     throw AppError.validationError('Avatar file size must be under 5MB.')
   }
 
-  const path = await uploadAvatar(userId, file.buffer, file.contentType)
-  await updateUserProfile(userId, { avatar_url: path })
-  await updateUserMetadata(userId, { avatar_url: path })
+  const path = await providers.objectStorage.uploadAvatar(userId, file.buffer, file.contentType)
+  await providers.domainStore.updateUserProfile(userId, { avatar_url: path })
+  await providers.identityProvider.updateUserMetadata(userId, { avatar_url: path })
 
-  const signedUrl = await getSignedAvatarUrl(path)
+  const signedUrl = await providers.objectStorage.getSignedAvatarUrl(path)
   return signedUrl
 }
 
@@ -75,10 +75,11 @@ export async function changePassword(
   email: string | null | undefined,
   currentPassword: string,
   newPassword: string,
+  providers: AppProviders = defaultProviders,
 ): Promise<void> {
   if (!email) {
     throw AppError.internal('Cannot verify password — user email not found.')
   }
-  await verifyPassword(email, currentPassword)
-  await adminUpdatePassword(userId, newPassword)
+  await providers.identityProvider.verifyPassword(email, currentPassword)
+  await providers.identityProvider.updatePassword(userId, newPassword)
 }

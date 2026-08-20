@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-`src/` contains the BFF runtime. `src/app.ts` wires middleware and routes, `src/index.ts` starts the server, `src/routes/v1-mobile.ts` mounts the mobile API, and `src/modules/*` holds feature areas such as `dashboard`, `attendance`, `enrollment`, `permits`, `profile`, `time`, and `health`. Shared clients live in `src/clients/`, config in `src/config/`, middleware in `src/middleware/`, and shared HTTP/error helpers in `src/lib/`. Tests live under `tests/unit/` and `tests/integration/`. Planning docs are kept in `plan/`.
+`src/` contains the BFF runtime. `src/app.ts` wires middleware and routes with injectable provider seams, `src/index.ts` starts the server, `src/routes/v1-mobile.ts` mounts the mobile API, and `src/modules/*` holds feature areas such as `dashboard`, `attendance`, `enrollment`, `permits`, `profile`, `time`, and `health`. Pluggable provider seams live in `src/providers/` (`DomainStore` for PostgreSQL, `ObjectStorage` for S3, `IdentityProvider` for OIDC/Logto), shared clients live in `src/clients/`, config in `src/config/`, middleware in `src/middleware/`, and shared HTTP/error helpers in `src/lib/`. Tests live under `tests/unit/` and `tests/integration/`. Planning docs are kept in `plan/`.
 
 ## Build, Test, and Development Commands
 
@@ -34,7 +34,7 @@ History uses Conventional Commits, for example `feat(bff): complete Bun implemen
 
 ## Security & Configuration Tips
 
-Do not commit secrets. Copy `.env.example` and set tenant, Supabase, and Robin values per deployment. Keep `bun.lock` committed, and avoid reintroducing `npm` or `pnpm` commands into this repo.
+Do not commit secrets. Copy `.env.example` and set tenant, database, S3, OIDC, and Robin values per deployment. Keep `bun.lock` committed, and avoid reintroducing `npm` or `pnpm` commands into this repo.
 
 ## Serena Workspace Notes
 

@@ -1,5 +1,5 @@
-import { getPermitHistory, insertPermit, type Permit } from '../../clients/supabase/admin.js'
-import { getSignedPermitUrl, uploadPermitAttachment } from '../../clients/supabase/storage.js'
+import { defaultProviders } from '../../providers/index.js'
+import type { AppProviders, Permit } from '../../providers/types.js'
 import type { PermitCategory } from './schema.js'
 
 export interface PermitResponse {
@@ -21,7 +21,6 @@ function toPermitResponse(permit: Permit, attachmentUrl: string | null): PermitR
     description: permit.deskripsi,
     date: permit.tanggal,
     approval_status: permit.approval_status,
-    // NOTE: link_foto (raw storage path) is never returned to mobile
     attachment_url: attachmentUrl,
     created_at: permit.created_at,
     rejection_reason: permit.rejection_reason,
@@ -29,12 +28,17 @@ function toPermitResponse(permit: Permit, attachmentUrl: string | null): PermitR
   }
 }
 
-export async function listPermits(userId: string): Promise<PermitResponse[]> {
-  const permits = await getPermitHistory(userId)
+export async function listPermits(
+  userId: string,
+  providers: AppProviders = defaultProviders,
+): Promise<PermitResponse[]> {
+  const permits = await providers.domainStore.getPermitHistory(userId)
 
   return Promise.all(
     permits.map(async (p) => {
-      const url = p.link_foto ? await getSignedPermitUrl(p.link_foto) : null
+      const url = p.link_foto
+        ? await providers.objectStorage.getSignedPermitUrl(p.link_foto)
+        : null
       return toPermitResponse(p, url)
     }),
   )
@@ -46,18 +50,20 @@ export async function createPermit(params: {
   description: string
   date: string
   attachment?: { buffer: Buffer; contentType: string } | null
+  providers?: AppProviders
 }): Promise<PermitResponse> {
+  const providers = params.providers ?? defaultProviders
   let storagePath: string | null = null
 
   if (params.attachment) {
-    storagePath = await uploadPermitAttachment(
+    storagePath = await providers.objectStorage.uploadPermitAttachment(
       params.userId,
       params.attachment.buffer,
       params.attachment.contentType,
     )
   }
 
-  const permit = await insertPermit({
+  const permit = await providers.domainStore.insertPermit({
     user_id: params.userId,
     kategori_izin: params.category,
     deskripsi: params.description,
@@ -66,6 +72,8 @@ export async function createPermit(params: {
     tanggal: `${params.date}T00:00:00+07:00`,
   })
 
-  const attachmentUrl = storagePath ? await getSignedPermitUrl(storagePath) : null
+  const attachmentUrl = storagePath
+    ? await providers.objectStorage.getSignedPermitUrl(storagePath)
+    : null
   return toPermitResponse(permit, attachmentUrl)
 }

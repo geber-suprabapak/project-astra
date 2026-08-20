@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Use this guide to verify the BFF locally and to prepare JWT auth for Postman against staging or production.
+Use this guide to verify the Astra BFF locally and to prepare OIDC JWT authentication for Postman and integration checks against staging or production.
 
 ## Local Checks
 
@@ -10,7 +10,6 @@ Run the standard gates with Bun:
 
 ```bash
 bun run typecheck
-bun run lint
 bun run test -- --pool=forks --maxWorkers=1
 bun run test:integration -- --pool=forks --maxWorkers=1
 ```
@@ -21,10 +20,9 @@ Start the app while testing API calls:
 bun run dev
 ```
 
-## Get a JWT Token
+## Get an OIDC JWT Token
 
-Use the helper script to log in with Supabase email/password and print the access token.
-By default the script prompts for email and password so they do not end up in shell history.
+Use the helper script to sign an OIDC JWT access token for testing:
 
 ```bash
 bun run auth:token
@@ -36,16 +34,10 @@ Optional JSON output:
 bun run auth:token -- --json
 ```
 
-You can also rely on environment variables:
+Generate a token for a specific user and role:
 
 ```bash
-AUTH_EMAIL=user@example.com AUTH_PASSWORD=secret bun run auth:token
-```
-
-The script also accepts explicit Supabase overrides:
-
-```bash
-bun run auth:token -- --supabase-url https://your-project.supabase.co --anon-key your-anon-key
+bun run auth:token -- --user-id student-123 --role student --email student@sekolah.sch.id
 ```
 
 ## Postman Setup
@@ -58,8 +50,10 @@ Authorization: Bearer <access_token>
 
 Store the token in a Postman environment variable, for example `jwt_token`, and reference it as `{{jwt_token}}`. Refresh it when it expires; the helper script can be rerun any time.
 
-## Notes
+## Architecture & Test Seams
 
-- This repository uses Bun only.
-- Keep the `.env` values aligned with the target tenant before testing against production.
-- For production validation, test the exact `/v1/mobile/*` routes rather than the internal clients directly.
+- **Primary test seam**: The versioned `/v1/mobile/*` HTTP API with injectable `AppProviders` (`DomainStore`, `ObjectStorage`, `IdentityProvider`).
+- **Domain persistence**: Backed by PostgreSQL through `PostgresDomainStore` in production, or `MemoryDomainStore` in isolated contract tests.
+- **Object storage**: S3-compatible storage through `S3ObjectStorage` in production, or `MemoryObjectStorage` in isolated contract tests.
+- **Identity provider**: OIDC/Logto through `OidcIdentityProvider` in production, or `MemoryIdentityProvider` in isolated contract tests.
+- **Health monitoring**: `/live` (liveness) and `/ready` (dependency checks for database, objectStorage, mlService, redis) without leaking provider internals to mobile clients.

@@ -1,12 +1,6 @@
-import {
-  getActivePermitsToday,
-  getActiveSchedule,
-  getTodayAbsences,
-  saveAttendanceRecord,
-  validateAttendanceAction,
-} from '../../clients/supabase/admin.js'
-import { robinClient } from '../../clients/robin/client.js'
 import { AppError } from '../../lib/errors/app-error.js'
+import { defaultProviders } from '../../providers/index.js'
+import type { AppProviders, Schedule } from '../../providers/types.js'
 import {
   getDayKeyWIB,
   getTodayWIB,
@@ -34,7 +28,7 @@ interface GateResult {
   reason: string | null
   reasonCode: string | null
   locationName: string | null
-  schedule: Awaited<ReturnType<typeof getActiveSchedule>>
+  schedule: Schedule | null
   isLate: boolean
   window: ScheduleWindow | null
   todayWIB: string
@@ -47,7 +41,9 @@ async function runGateChecks(params: {
   longitude: number
   token: string
   requestId: string
+  providers?: AppProviders
 }): Promise<GateResult> {
+  const providers = params.providers ?? defaultProviders
   const now = new Date()
   const todayWIB = getTodayWIB(now)
   const dayKey = getDayKeyWIB(now)
@@ -61,11 +57,11 @@ async function runGateChecks(params: {
   }
 
   const [absences, schedule, activePermits, robinReady, enrollStatus] = await Promise.all([
-    getTodayAbsences(params.userId, todayWIB),
-    getActiveSchedule(dayKey),
-    getActivePermitsToday(params.userId, startISO, endISO),
-    robinClient.checkReadiness(),
-    robinClient.getEnrollmentStatus(params.token, params.requestId).catch(() => ({
+    providers.domainStore.getTodayAbsences(params.userId, todayWIB),
+    providers.domainStore.getActiveSchedule(dayKey),
+    providers.domainStore.getActivePermitsToday(params.userId, startISO, endISO),
+    providers.robinClient.checkReadiness(),
+    providers.robinClient.getEnrollmentStatus(params.token, params.requestId).catch(() => ({
       status: 'not_enrolled' as const,
       embeddingCount: 0,
       message: 'Unavailable.',
@@ -178,11 +174,10 @@ async function runGateChecks(params: {
     }
   }
 
-  const rpcResult = await validateAttendanceAction({
+  const rpcResult = await providers.domainStore.validateAttendanceAction({
     userId: params.userId,
     latitude: params.latitude,
     longitude: params.longitude,
-    token: params.token,
   })
 
   if (!rpcResult.actionable || rpcResult.action_type === 'none') {
@@ -230,7 +225,7 @@ async function runGateChecks(params: {
 }
 
 // ---------------------------------------------------------------------------
-// Precheck — matches plan.md §7.2 response shape
+// Precheck
 // ---------------------------------------------------------------------------
 
 export interface PrecheckResult {
@@ -248,6 +243,7 @@ export async function precheck(params: {
   longitude: number
   token: string
   requestId: string
+  providers?: AppProviders
 }): Promise<PrecheckResult> {
   const gate = await runGateChecks(params)
   return {
@@ -261,7 +257,7 @@ export async function precheck(params: {
 }
 
 // ---------------------------------------------------------------------------
-// Submit — matches plan.md §7.3 response shape
+// Submit
 // ---------------------------------------------------------------------------
 
 export interface SubmitResult {
@@ -278,7 +274,10 @@ export async function submit(params: {
   longitude: number
   token: string
   requestId: string
+  providers?: AppProviders
 }): Promise<SubmitResult> {
+  const providers = params.providers ?? defaultProviders
+
   // Re-run gate checks (do not skip)
   const gate = await runGateChecks({
     userId: params.userId,
@@ -286,6 +285,7 @@ export async function submit(params: {
     longitude: params.longitude,
     token: params.token,
     requestId: params.requestId,
+    providers,
   })
 
   if (!gate.allowed) {
@@ -299,26 +299,28 @@ export async function submit(params: {
   }
 
   // Verify enrollment before calling identify
-  const enrollment = await robinClient.getEnrollmentStatus(params.token, params.requestId)
+  const enrollment = await providers.robinClient.getEnrollmentStatus(
+    params.token,
+    params.requestId,
+  )
   if (enrollment.status !== 'enrolled') {
     throw AppError.enrollmentRequired()
   }
 
   // Identify face — throws AppError.attendanceBlocked if status !== 'ok'
   const startMs = Date.now()
-  const { processTimeMs } = await robinClient.identify(
+  const { processTimeMs } = await providers.robinClient.identify(
     params.imageBase64,
     params.token,
     params.requestId,
   )
 
-  // Persist attendance through the existing location-aware RPC
-  const saveResult = await saveAttendanceRecord({
+  // Persist attendance through DomainStore
+  const saveResult = await providers.domainStore.saveAttendanceRecord({
     userId: params.userId,
     actionType: params.actionType,
     latitude: params.latitude,
     longitude: params.longitude,
-    token: params.token,
   })
 
   if (!saveResult.success) {
@@ -327,7 +329,6 @@ export async function submit(params: {
     )
   }
 
-  // Keep the outward label stable with the existing mobile contract.
   const insertStatus = computeInsertStatus(params.actionType, gate.isLate)
 
   return {

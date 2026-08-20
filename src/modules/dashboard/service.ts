@@ -1,13 +1,5 @@
-import {
-  getActivePermitsToday,
-  getActiveSchedule,
-  getTodayAbsences,
-  getUserProfile,
-  type Absence,
-  type Schedule,
-} from '../../clients/supabase/admin.js'
-import { getSignedAvatarUrl } from '../../clients/supabase/storage.js'
-import { robinClient } from '../../clients/robin/client.js'
+import { defaultProviders } from '../../providers/index.js'
+import type { Absence, AppProviders, Schedule } from '../../providers/types.js'
 import { env } from '../../config/env.js'
 
 // ---------------------------------------------------------------------------
@@ -277,7 +269,7 @@ function computeTotalWorkHours(absences: Absence[]): number | null {
 }
 
 // ---------------------------------------------------------------------------
-// Dashboard orchestrator — matches plan.md §7.1 response shape
+// Dashboard orchestrator — matches response shape
 // ---------------------------------------------------------------------------
 
 export interface DashboardResponse {
@@ -328,6 +320,7 @@ export async function getDashboard(
   userId: string,
   token: string,
   requestId: string,
+  providers: AppProviders = defaultProviders,
 ): Promise<DashboardResponse> {
   const now = new Date()
   const todayWIB = getTodayWIB(now)
@@ -336,12 +329,12 @@ export async function getDashboard(
 
   // All parallel fetches
   const [profile, absences, schedule, activePermits, robinReady, enrollStatus] = await Promise.all([
-    getUserProfile(userId),
-    getTodayAbsences(userId, todayWIB),
-    getActiveSchedule(dayKey),
-    getActivePermitsToday(userId, startISO, endISO),
-    robinClient.checkReadiness(),
-    robinClient.getEnrollmentStatus(token, requestId).catch(() => ({
+    providers.domainStore.getUserProfile(userId),
+    providers.domainStore.getTodayAbsences(userId, todayWIB),
+    providers.domainStore.getActiveSchedule(dayKey),
+    providers.domainStore.getActivePermitsToday(userId, startISO, endISO),
+    providers.robinClient.checkReadiness(),
+    providers.robinClient.getEnrollmentStatus(token, requestId).catch(() => ({
       status: 'not_enrolled' as const,
       embeddingCount: 0,
       message: 'Unavailable.',
@@ -355,7 +348,9 @@ export async function getDashboard(
     attendanceStatus.today = 'leave'
   }
 
-  const avatarUrl = profile.avatar_url ? await getSignedAvatarUrl(profile.avatar_url) : null
+  const avatarUrl = profile.avatar_url
+    ? await providers.objectStorage.getSignedAvatarUrl(profile.avatar_url)
+    : null
 
   const primaryAction = computePrimaryAction({
     robinHealthy: robinReady.healthy,

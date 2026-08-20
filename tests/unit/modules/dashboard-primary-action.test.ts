@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { computePrimaryAction } from '../../../src/modules/dashboard/service.js'
 import type { AttendanceStatus } from '../../../src/modules/dashboard/service.js'
-import type { Schedule } from '../../../src/clients/supabase/admin.js'
+import type { Schedule } from '../../../src/providers/types.js'
 
 const baseSchedule: Schedule = {
   hari: 'senin',

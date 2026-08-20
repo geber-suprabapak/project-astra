@@ -1,5 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
-import { createInterface } from 'node:readline'
+import { SignJWT } from 'jose'
 
 function parseArgs(argv: string[]): Map<string, string | boolean> {
   const args = new Map<string, string | boolean>()
@@ -26,120 +25,42 @@ function asString(value: string | boolean | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
-function readValue(args: Map<string, string | boolean>, key: string, envKey: string): string {
-  const argValue = asString(args.get(key))
-  if (argValue) return argValue
-
-  const envValue = Bun.env[envKey]
-  if (envValue?.trim()) return envValue.trim()
-
-  throw new Error(`Missing ${key}. Set --${key} or ${envKey}.`)
-}
-
-function promptText(question: string): Promise<string> {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  })
-
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close()
-      resolve(answer.trim())
-    })
-  })
-}
-
-function promptSecret(question: string): Promise<string> {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    throw new Error('Password prompt requires an interactive terminal.')
-  }
-
-  return new Promise((resolve, reject) => {
-    const stdin = process.stdin
-    const stdout = process.stdout
-    let value = ''
-
-    const cleanup = () => {
-      stdin.off('data', onData)
-      if (stdin.isRaw) stdin.setRawMode(false)
-      stdin.pause()
-    }
-
-    const finish = () => {
-      cleanup()
-      stdout.write('\n')
-      resolve(value.trim())
-    }
-
-    const fail = (error: Error) => {
-      cleanup()
-      stdout.write('\n')
-      reject(error)
-    }
-
-    const onData = (chunk: string) => {
-      for (const char of chunk) {
-        if (char === '\u0003') {
-          fail(new Error('Cancelled.'))
-          return
-        }
-        if (char === '\r' || char === '\n') {
-          finish()
-          return
-        }
-        if (char === '\u0008' || char === '\u007f') {
-          value = value.slice(0, -1)
-          continue
-        }
-        value += char
-      }
-    }
-
-    stdout.write(question)
-    stdin.setRawMode(true)
-    stdin.resume()
-    stdin.setEncoding('utf8')
-    stdin.on('data', onData)
-  })
-}
-
 const args = parseArgs(process.argv.slice(2))
-const supabaseUrl = readValue(args, 'supabase-url', 'SUPABASE_URL')
-const supabaseAnonKey = readValue(args, 'anon-key', 'SUPABASE_ANON_KEY')
-const argEmail = asString(args.get('email'))
-const email = argEmail ?? Bun.env.AUTH_EMAIL?.trim() ?? (await promptText('Email: '))
-const argPassword = asString(args.get('password'))
-const password = argPassword ?? Bun.env.AUTH_PASSWORD?.trim() ?? (await promptSecret('Password: '))
+const userId = asString(args.get('user-id')) ?? Bun.env.AUTH_USER_ID?.trim() ?? 'test-student-1'
+const email = asString(args.get('email')) ?? Bun.env.AUTH_EMAIL?.trim() ?? 'student@sekolah.sch.id'
+const role = asString(args.get('role')) ?? 'student'
+const secretKey =
+  asString(args.get('secret')) ??
+  Bun.env.OIDC_JWT_SECRET?.trim() ??
+  'test-jwt-secret-that-is-long-enough-32-chars'
+const audience = asString(args.get('audience')) ?? Bun.env.OIDC_AUDIENCE?.trim() ?? 'authenticated'
+const issuer = asString(args.get('issuer')) ?? Bun.env.OIDC_ISSUER?.trim() ?? 'https://auth.school.test'
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
+const secret = new TextEncoder().encode(secretKey)
+
+const token = await new SignJWT({
+  email,
+  role,
+  name: 'Test Student',
 })
+  .setProtectedHeader({ alg: 'HS256' })
+  .setSubject(userId)
+  .setAudience(audience)
+  .setIssuer(issuer)
+  .setIssuedAt()
+  .setExpirationTime('24h')
+  .sign(secret)
 
-const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-
-if (error) {
-  console.error(`Login failed: ${error.message}`)
-  process.exit(1)
-}
-
-const token = data.session?.access_token
-if (!token) {
-  console.error('Login succeeded, but no access token was returned.')
-  process.exit(1)
-}
-
-if (args.json === true) {
+if (args.get('json') === true) {
   console.log(
     JSON.stringify(
       {
         access_token: token,
-        refresh_token: data.session?.refresh_token ?? null,
-        expires_at: data.session?.expires_at ?? null,
-        user_id: data.user.id,
+        token_type: 'Bearer',
+        expires_in: 86400,
+        user_id: userId,
+        email,
+        role,
       },
       null,
       2,

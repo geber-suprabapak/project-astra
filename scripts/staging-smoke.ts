@@ -1,6 +1,8 @@
 interface HealthChecks {
   database?: string
+  objectStorage?: string
   mlService?: string
+  redis?: string
 }
 
 interface ServerTimeData {
@@ -11,13 +13,14 @@ interface ServerTimeData {
 }
 
 interface DashboardData {
-  user?: { user_id?: string; name?: string }
+  profile?: { user_id?: string; full_name?: string }
 }
 
 interface PrecheckChecks {
-  schedule?: boolean
-  radius?: boolean
-  device?: boolean
+  schedule?: string
+  permit?: string
+  enrollment?: string
+  robin?: string
 }
 
 interface PrecheckData {

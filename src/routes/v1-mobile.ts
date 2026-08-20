@@ -1,34 +1,57 @@
 import { Hono } from 'hono'
-import { dashboardRouter } from '../modules/dashboard/routes.js'
-import { attendanceRouter } from '../modules/attendance/routes.js'
-import { enrollmentRouter } from '../modules/enrollment/routes.js'
-import { permitsRouter } from '../modules/permits/routes.js'
-import { profileRouter } from '../modules/profile/routes.js'
+import { createDashboardRouter, dashboardRouter } from '../modules/dashboard/routes.js'
+import { createAttendanceRouter, attendanceRouter } from '../modules/attendance/routes.js'
+import { createEnrollmentRouter, enrollmentRouter } from '../modules/enrollment/routes.js'
+import { createPermitsRouter, permitsRouter } from '../modules/permits/routes.js'
+import { createProfileRouter, profileRouter } from '../modules/profile/routes.js'
 import { timeRouter } from '../modules/time/routes.js'
-import { mobileHealthRouter } from '../modules/health/routes.js'
+import { createMobileHealthRouter, mobileHealthRouter } from '../modules/health/routes.js'
+import type { AppProviders } from '../providers/types.js'
 import type { AppEnv } from '../types/context.js'
 
-// All routes under /v1/mobile share auth via individual routers;
-// we do NOT apply auth here globally so /health remains public.
-
 export interface V1MobileDeps {
+  providers?: AppProviders
   mobileHealthRouter?: Hono<AppEnv>
+  dashboardRouter?: Hono<AppEnv>
+  attendanceRouter?: Hono<AppEnv>
+  enrollmentRouter?: Hono<AppEnv>
+  permitsRouter?: Hono<AppEnv>
+  profileRouter?: Hono<AppEnv>
 }
 
 export function createV1Mobile(deps: V1MobileDeps = {}) {
   const router = new Hono<AppEnv>()
 
-  router.route('/health', deps.mobileHealthRouter ?? mobileHealthRouter)
-  router.route('/dashboard', dashboardRouter)
-  router.route('/attendance', attendanceRouter)
-  router.route('/face/enrollment', enrollmentRouter)
-  router.route('/permits', permitsRouter)
-  router.route('/profile', profileRouter)
+  const health =
+    deps.mobileHealthRouter ??
+    (deps.providers
+      ? createMobileHealthRouter({ providers: deps.providers })
+      : mobileHealthRouter)
+  const dashboard =
+    deps.dashboardRouter ??
+    (deps.providers ? createDashboardRouter({ providers: deps.providers }) : dashboardRouter)
+  const attendance =
+    deps.attendanceRouter ??
+    (deps.providers ? createAttendanceRouter({ providers: deps.providers }) : attendanceRouter)
+  const enrollment =
+    deps.enrollmentRouter ??
+    (deps.providers ? createEnrollmentRouter({ providers: deps.providers }) : enrollmentRouter)
+  const permits =
+    deps.permitsRouter ??
+    (deps.providers ? createPermitsRouter({ providers: deps.providers }) : permitsRouter)
+  const profile =
+    deps.profileRouter ??
+    (deps.providers ? createProfileRouter({ providers: deps.providers }) : profileRouter)
+
+  router.route('/health', health)
+  router.route('/dashboard', dashboard)
+  router.route('/attendance', attendance)
+  router.route('/face/enrollment', enrollment)
+  router.route('/permits', permits)
+  router.route('/profile', profile)
   router.route('/time', timeRouter)
 
   return router
 }
 
-const v1Mobile = createV1Mobile()
-
-export { v1Mobile }
+export const v1Mobile = createV1Mobile()

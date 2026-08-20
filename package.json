@@ -18,10 +18,10 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.19.14",
-    "@supabase/supabase-js": "^2.106.0",
     "hono": "^4.12.14",
     "jose": "^5.10.0",
     "pino": "^9.6.0",
+    "postgres": "^3.4.9",
     "redis": "^5.12.1",
     "zod": "^3.24.2"
   },

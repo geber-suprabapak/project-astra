@@ -1,10 +1,13 @@
-import { checkRedisReady } from '../../clients/redis.js'
-import { supabaseAdmin } from '../../clients/supabase/admin.js'
-import { robinClient } from '../../clients/robin/client.js'
+import { checkRedisReady, isRedisConfigured } from '../../clients/redis.js'
+import { env } from '../../config/env.js'
+import { defaultProviders } from '../../providers/index.js'
+import type { AppProviders } from '../../providers/types.js'
 
 export interface HealthChecks {
   database: 'ok' | 'fail'
+  objectStorage: 'ok' | 'fail'
   mlService: 'ok' | 'fail'
+  redis: 'ok' | 'fail'
 }
 
 export interface ReadinessResult {
@@ -12,30 +15,39 @@ export interface ReadinessResult {
   checks: HealthChecks
 }
 
-async function checkDatabase(): Promise<'ok' | 'fail'> {
-  try {
-    const { error } = await supabaseAdmin.from('user_profiles').select('user_id').limit(1)
-    return error ? 'fail' : 'ok'
-  } catch {
-    return 'fail'
-  }
-}
-
-export async function getReadiness(): Promise<ReadinessResult> {
-  const [dbStatus, robin, redis] = await Promise.allSettled([
-    checkDatabase(),
-    robinClient.checkReadiness(),
+export async function getReadiness(
+  providers: AppProviders = defaultProviders,
+): Promise<ReadinessResult> {
+  const [dbResult, storageResult, robinResult, redisResult] = await Promise.allSettled([
+    providers.domainStore.checkHealth(),
+    providers.objectStorage.checkHealth(),
+    providers.robinClient.checkReadiness(),
     checkRedisReady(),
   ])
 
-  const database: 'ok' | 'fail' = dbStatus.status === 'fulfilled' ? dbStatus.value : 'fail'
+  const database: 'ok' | 'fail' =
+    dbResult.status === 'fulfilled' && dbResult.value ? 'ok' : 'fail'
+  const objectStorage: 'ok' | 'fail' =
+    storageResult.status === 'fulfilled' && storageResult.value ? 'ok' : 'fail'
   const mlService: 'ok' | 'fail' =
-    robin.status === 'fulfilled' && robin.value.healthy ? 'ok' : 'fail'
-  const redisHealthy = redis.status === 'fulfilled' ? redis.value : false
+    robinResult.status === 'fulfilled' && robinResult.value.healthy ? 'ok' : 'fail'
+
+  let redis: 'ok' | 'fail' = 'ok'
+  if (isRedisConfigured() || env.nodeEnv === 'production') {
+    redis = redisResult.status === 'fulfilled' && redisResult.value ? 'ok' : 'fail'
+  }
+
+  const healthy =
+    database === 'ok' && objectStorage === 'ok' && mlService === 'ok' && redis === 'ok'
 
   return {
-    healthy: database === 'ok' && mlService === 'ok' && redisHealthy,
-    checks: { database, mlService },
+    healthy,
+    checks: {
+      database,
+      objectStorage,
+      mlService,
+      redis,
+    },
   }
 }
 

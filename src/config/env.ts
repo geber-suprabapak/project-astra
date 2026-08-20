@@ -22,32 +22,47 @@ export const envSchema = z
 
     CORS_ALLOWED_ORIGINS: commaSeparated.default(''),
 
-    SUPABASE_URL: z.string().url(),
-    SUPABASE_ANON_KEY: z.string().min(1),
-    SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
-    SUPABASE_JWT_SECRET: z.string().min(1).optional(),
-    SUPABASE_JWKS_URL: z.string().url().optional(),
-    SUPABASE_JWT_ISSUER: z.string().min(1).optional(),
-    SUPABASE_JWT_AUDIENCE: z.string().min(1).default('authenticated'),
-    SUPABASE_STORAGE_BUCKET_AVATARS: z.string().min(1).default('avatars'),
-    SUPABASE_STORAGE_BUCKET_PERMITS: z.string().min(1).default('perizinan'),
+    DATABASE_URL: z.string().min(1).default('postgresql://postgres:postgres@localhost:5432/astra'),
+    DATABASE_MAX_CONNECTIONS: positiveInt.default(10),
+    DATABASE_IDLE_TIMEOUT_SECONDS: positiveInt.default(30),
+    DATABASE_CONNECT_TIMEOUT_SECONDS: positiveInt.default(5),
+    DB_QUERY_TIMEOUT_MS: positiveInt.default(5000),
+
+    S3_ENDPOINT: z.string().url().default('http://localhost:9000'),
+    S3_REGION: z.string().min(1).default('us-east-1'),
+    S3_ACCESS_KEY_ID: z.string().min(1).default('minioadmin'),
+    S3_SECRET_ACCESS_KEY: z.string().min(1).default('minioadmin'),
+    S3_BUCKET_AVATARS: z.string().min(1).default('avatars'),
+    S3_BUCKET_PERMITS: z.string().min(1).default('perizinan'),
+    S3_FORCE_PATH_STYLE: z
+      .union([z.boolean(), z.string().transform((s) => s.toLowerCase() === 'true')])
+      .default(true),
+    S3_PUBLIC_URL: z.string().url().optional(),
+    STORAGE_UPLOAD_TIMEOUT_MS: positiveInt.default(15000),
+
+    OIDC_ISSUER: z.string().min(1).optional(),
+    OIDC_JWKS_URL: z.string().url().optional(),
+    OIDC_JWT_SECRET: z.string().min(1).optional(),
+    OIDC_AUDIENCE: z.string().min(1).default('authenticated'),
+    LOGTO_ENDPOINT: z.string().url().optional(),
+    LOGTO_APP_ID: z.string().min(1).optional(),
+    LOGTO_APP_SECRET: z.string().min(1).optional(),
 
     ROBIN_BASE_URL: z.string().url(),
     ROBIN_READY_TIMEOUT_MS: positiveInt.default(3000),
     ROBIN_IDENTIFY_TIMEOUT_MS: positiveInt.default(30000),
     ROBIN_ENROLL_TIMEOUT_MS: positiveInt.default(60000),
     ROBIN_ENROLL_STATUS_TIMEOUT_MS: positiveInt.default(5000),
-    SUPABASE_QUERY_TIMEOUT_MS: positiveInt.default(5000),
-    SUPABASE_STORAGE_UPLOAD_TIMEOUT_MS: positiveInt.default(15000),
+
     REDIS_URL: z.string().url().optional(),
     REDIS_KEY_PREFIX: z.string().min(1).default('astra:ratelimit'),
   })
   .superRefine((data, ctx) => {
-    if (!data.SUPABASE_JWT_SECRET && !data.SUPABASE_JWKS_URL) {
+    if (!data.OIDC_JWT_SECRET && !data.OIDC_JWKS_URL) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Either SUPABASE_JWT_SECRET or SUPABASE_JWKS_URL must be provided',
-        path: ['SUPABASE_JWT_SECRET'],
+        message: 'Either OIDC_JWT_SECRET or OIDC_JWKS_URL must be provided',
+        path: ['OIDC_JWT_SECRET'],
       })
     }
 
@@ -101,22 +116,37 @@ export const env = {
   tenantName: raw.TENANT_NAME,
   businessTimezone: raw.BUSINESS_TIMEZONE,
   corsAllowedOrigins: raw.CORS_ALLOWED_ORIGINS,
-  supabaseUrl: raw.SUPABASE_URL,
-  supabaseAnonKey: raw.SUPABASE_ANON_KEY,
-  supabaseServiceRoleKey: raw.SUPABASE_SERVICE_ROLE_KEY,
-  supabaseJwtSecret: raw.SUPABASE_JWT_SECRET,
-  supabaseJwksUrl: raw.SUPABASE_JWKS_URL,
-  supabaseJwtIssuer: raw.SUPABASE_JWT_ISSUER,
-  supabaseJwtAudience: raw.SUPABASE_JWT_AUDIENCE,
-  supabaseBucketAvatars: raw.SUPABASE_STORAGE_BUCKET_AVATARS,
-  supabaseBucketPermits: raw.SUPABASE_STORAGE_BUCKET_PERMITS,
+
+  databaseUrl: raw.DATABASE_URL,
+  databaseMaxConnections: raw.DATABASE_MAX_CONNECTIONS,
+  databaseIdleTimeoutSeconds: raw.DATABASE_IDLE_TIMEOUT_SECONDS,
+  databaseConnectTimeoutSeconds: raw.DATABASE_CONNECT_TIMEOUT_SECONDS,
+  dbQueryTimeoutMs: raw.DB_QUERY_TIMEOUT_MS,
+
+  s3Endpoint: raw.S3_ENDPOINT,
+  s3Region: raw.S3_REGION,
+  s3AccessKeyId: raw.S3_ACCESS_KEY_ID,
+  s3SecretAccessKey: raw.S3_SECRET_ACCESS_KEY,
+  s3BucketAvatars: raw.S3_BUCKET_AVATARS,
+  s3BucketPermits: raw.S3_BUCKET_PERMITS,
+  s3ForcePathStyle: raw.S3_FORCE_PATH_STYLE,
+  s3PublicUrl: raw.S3_PUBLIC_URL,
+  storageUploadTimeoutMs: raw.STORAGE_UPLOAD_TIMEOUT_MS,
+
+  oidcIssuer: raw.OIDC_ISSUER,
+  oidcJwksUrl: raw.OIDC_JWKS_URL,
+  oidcJwtSecret: raw.OIDC_JWT_SECRET,
+  oidcAudience: raw.OIDC_AUDIENCE,
+  logtoEndpoint: raw.LOGTO_ENDPOINT,
+  logtoAppId: raw.LOGTO_APP_ID,
+  logtoAppSecret: raw.LOGTO_APP_SECRET,
+
   robinBaseUrl: raw.ROBIN_BASE_URL,
   robinReadyTimeoutMs: raw.ROBIN_READY_TIMEOUT_MS,
   robinIdentifyTimeoutMs: raw.ROBIN_IDENTIFY_TIMEOUT_MS,
   robinEnrollTimeoutMs: raw.ROBIN_ENROLL_TIMEOUT_MS,
   robinEnrollStatusTimeoutMs: raw.ROBIN_ENROLL_STATUS_TIMEOUT_MS,
-  supabaseQueryTimeoutMs: raw.SUPABASE_QUERY_TIMEOUT_MS,
-  supabaseStorageUploadTimeoutMs: raw.SUPABASE_STORAGE_UPLOAD_TIMEOUT_MS,
+
   redisUrl: raw.REDIS_URL,
   redisKeyPrefix: raw.REDIS_KEY_PREFIX,
 } as const

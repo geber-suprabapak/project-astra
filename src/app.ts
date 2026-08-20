@@ -9,11 +9,14 @@ import {
 } from './modules/health/routes.js'
 import { type ReadinessResult } from './modules/health/service.js'
 import { createV1Mobile, v1Mobile } from './routes/v1-mobile.js'
+import { defaultProviders } from './providers/index.js'
+import type { AppProviders } from './providers/types.js'
 import { env } from './config/env.js'
 import { logger } from './lib/logging/logger.js'
 import type { AppEnv } from './types/context.js'
 
 export interface AppDeps {
+  providers?: Partial<AppProviders>
   getReadiness?: () => Promise<ReadinessResult>
   v1Mobile?: Hono<AppEnv>
   healthRouter?: Hono<AppEnv>
@@ -22,8 +25,21 @@ export interface AppDeps {
 export function createApp(deps: AppDeps = {}) {
   const app = new Hono<AppEnv>()
 
+  const resolvedProviders: AppProviders = {
+    domainStore: deps.providers?.domainStore ?? defaultProviders.domainStore,
+    objectStorage: deps.providers?.objectStorage ?? defaultProviders.objectStorage,
+    identityProvider: deps.providers?.identityProvider ?? defaultProviders.identityProvider,
+    robinClient: deps.providers?.robinClient ?? defaultProviders.robinClient,
+  }
+
   // Global middleware
   app.use('*', requestId)
+
+  // Attach providers to context
+  app.use('*', async (c, next) => {
+    c.set('providers', resolvedProviders)
+    await next()
+  })
 
   app.use(
     '*',
@@ -64,12 +80,24 @@ export function createApp(deps: AppDeps = {}) {
 
   const rootHealth =
     deps.healthRouter ??
-    (deps.getReadiness ? createHealthRouter({ getReadiness: deps.getReadiness }) : healthRouter)
+    (deps.providers || deps.getReadiness
+      ? createHealthRouter({
+          providers: resolvedProviders,
+          getReadiness: deps.getReadiness,
+        })
+      : healthRouter)
+
   const mobileRouter =
     deps.v1Mobile ??
-    (deps.getReadiness
+    (deps.providers || deps.getReadiness
       ? createV1Mobile({
-          mobileHealthRouter: createMobileHealthRouter({ getReadiness: deps.getReadiness }),
+          providers: resolvedProviders,
+          mobileHealthRouter: deps.getReadiness
+            ? createMobileHealthRouter({
+                providers: resolvedProviders,
+                getReadiness: deps.getReadiness,
+              })
+            : undefined,
         })
       : v1Mobile)
 
