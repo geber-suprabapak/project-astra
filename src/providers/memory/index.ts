@@ -131,6 +131,14 @@ export class MemoryDomainStore implements DomainStore {
     latitude: number
     longitude: number
   }): Promise<SaveAttendanceRecordRpcResponse> {
+    const todayWIB = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    const status = params.actionType === 'check_in' ? 'Hadir' : 'Pulang'
+    this.absences.push({
+      status,
+      date: todayWIB,
+      user_id: params.userId,
+      created_at: new Date().toISOString(),
+    })
     return { success: true }
   }
 

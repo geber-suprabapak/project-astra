@@ -65,7 +65,7 @@ export interface InsertAttendanceData {
   created_at?: string
 }
 
-export interface AttendanceActionRpcResponse {
+export interface AttendanceActionValidationResult {
   actionable: boolean
   action_type: 'check_in' | 'check_out' | 'none'
   message: string
@@ -75,10 +75,16 @@ export interface AttendanceActionRpcResponse {
   } | null
 }
 
-export interface SaveAttendanceRecordRpcResponse {
+/** @deprecated Alias for backwards compatibility */
+export type AttendanceActionRpcResponse = AttendanceActionValidationResult
+
+export interface SaveAttendanceRecordResult {
   success: boolean
   message?: string
 }
+
+/** @deprecated Alias for backwards compatibility */
+export type SaveAttendanceRecordRpcResponse = SaveAttendanceRecordResult
 
 export interface DomainStore {
   getUserProfile(userId: string): Promise<UserProfile>

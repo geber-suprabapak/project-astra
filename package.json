@@ -13,6 +13,7 @@
     "format:check": "oxfmt --check",
     "test": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
+    "db:migrate": "bun scripts/migrate.ts",
     "auth:token": "bun scripts/get-jwt-token.ts",
     "smoke:staging": "bun scripts/staging-smoke.ts"
   },

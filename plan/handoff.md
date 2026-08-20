@@ -8,7 +8,8 @@ Astra (Skanida Mobile BFF) is implemented against greenfield platform components
 - Hono app bootstrap with CORS, request ID, structured logging, error envelope, rate limiting, and dependency injection
 - Auth middleware with standard OIDC JWT verification via `IdentityProvider`
 - Robin client for facial biometrics (readiness, identify, enrollment status, enrollment upload)
-- `DomainStore` (`PostgresDomainStore` & `MemoryDomainStore`) for domain queries (profiles, absences, schedules, permits, attendance)
+- `DomainStore` (`PostgresDomainStore` & `MemoryDomainStore`) for greenfield domain persistence (profiles, attendances, schedules, leave requests, locations)
+- Greenfield PostgreSQL schema defined in `db/schema.sql` and applied via `scripts/migrate.ts`
 - `ObjectStorage` (`S3ObjectStorage` & `MemoryObjectStorage`) for avatar and permit storage operations
 - `IdentityProvider` (`OidcIdentityProvider` & `MemoryIdentityProvider`) for token verification, password checks, and user metadata
 - Versioned `/v1/mobile` boundary with highest-level HTTP contract coverage in `tests/integration/`

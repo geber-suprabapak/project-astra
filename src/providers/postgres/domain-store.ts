@@ -14,6 +14,32 @@ import type {
   UserProfile,
 } from '../types.js'
 
+const DAY_KEY_MAP = ['minggu', 'senin', 'selasa', 'rabu', 'kamis', 'jumat', 'sabtu'] as const
+
+function getTodayWIB(now = new Date()): string {
+  const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000)
+  return wib.toISOString().slice(0, 10)
+}
+
+function getDayKeyWIB(now = new Date()): string {
+  const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000)
+  return DAY_KEY_MAP[wib.getUTCDay()]
+}
+
+function calculateDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000 // Earth radius in meters
+  const dLat = ((lat2 - lat1) * Math.PI) / 180
+  const dLon = ((lon2 - lon1) * Math.PI) / 180
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return R * c
+}
+
 export interface PostgresDomainStoreOptions {
   sql?: Sql
   databaseUrl?: string
@@ -52,7 +78,7 @@ export class PostgresDomainStore implements DomainStore {
     try {
       const rows = await this.sql<UserProfile[]>`
         SELECT user_id, full_name, email, nis, class_name, absence_number, avatar_url, role, gender
-        FROM user_profiles
+        FROM profiles
         WHERE user_id = ${userId}
         LIMIT 1
       `
@@ -72,8 +98,8 @@ export class PostgresDomainStore implements DomainStore {
       if (keys.length === 0) return
 
       await this.sql`
-        UPDATE user_profiles
-        SET ${this.sql(updates)}
+        UPDATE profiles
+        SET ${this.sql(updates)}, updated_at = NOW()
         WHERE user_id = ${userId}
       `
     } catch (err) {
@@ -86,13 +112,14 @@ export class PostgresDomainStore implements DomainStore {
     try {
       const rows = await this.sql<Absence[]>`
         SELECT status, created_at, date, user_id
-        FROM absences
+        FROM attendances
         WHERE user_id = ${userId} AND date = ${dateWIB}
         ORDER BY created_at ASC
       `
       return rows ?? []
     } catch (err) {
-      throw AppError.internal(`Failed to query absences: ${(err as Error).message}`)
+      if (err instanceof AppError) throw err
+      throw AppError.internal(`Failed to query attendances: ${(err as Error).message}`)
     }
   }
 
@@ -100,7 +127,7 @@ export class PostgresDomainStore implements DomainStore {
     try {
       const createdAt = data.created_at ?? new Date().toISOString()
       const rows = await this.sql<Absence[]>`
-        INSERT INTO absences (user_id, date, status, created_at)
+        INSERT INTO attendances (user_id, date, status, created_at)
         VALUES (${data.user_id}, ${data.date}, ${data.status}, ${createdAt})
         RETURNING status, created_at, date, user_id
       `
@@ -117,13 +144,16 @@ export class PostgresDomainStore implements DomainStore {
   async getActiveSchedule(dayKey: string): Promise<Schedule | null> {
     try {
       const rows = await this.sql<Schedule[]>`
-        SELECT hari, mulai_masuk, selesai_masuk, mulai_pulang, selesai_pulang, kompensasi_waktu, is_active
-        FROM jadwal_absensi
-        WHERE hari = ${dayKey} AND is_active = true
+        SELECT day_of_week AS hari, start_time::text AS mulai_masuk, end_time::text AS selesai_masuk,
+               start_checkout::text AS mulai_pulang, end_checkout::text AS selesai_pulang,
+               grace_period_minutes AS kompensasi_waktu, is_active
+        FROM schedules
+        WHERE (day_of_week = ${dayKey.toLowerCase()} OR day_of_week = ${dayKey}) AND is_active = true
         LIMIT 1
       `
       return rows[0] ?? null
     } catch (err) {
+      if (err instanceof AppError) throw err
       throw AppError.internal(`Failed to query schedule: ${(err as Error).message}`)
     }
   }
@@ -135,15 +165,16 @@ export class PostgresDomainStore implements DomainStore {
   ): Promise<ActivePermitSummary[]> {
     try {
       const rows = await this.sql<ActivePermitSummary[]>`
-        SELECT id, approval_status, kategori_izin
-        FROM perizinan
+        SELECT id, approval_status, category AS kategori_izin
+        FROM leave_requests
         WHERE user_id = ${userId}
           AND approval_status IN ('pending', 'approved')
-          AND tanggal >= ${startISO}
-          AND tanggal < ${endISO}
+          AND date >= ${startISO}
+          AND date < ${endISO}
       `
       return rows ?? []
     } catch (err) {
+      if (err instanceof AppError) throw err
       throw AppError.internal(`Failed to query permits: ${(err as Error).message}`)
     }
   }
@@ -151,13 +182,16 @@ export class PostgresDomainStore implements DomainStore {
   async getPermitHistory(userId: string): Promise<Permit[]> {
     try {
       const rows = await this.sql<Permit[]>`
-        SELECT id, user_id, kategori_izin, deskripsi, status, link_foto, tanggal, approval_status, created_at, rejection_reason, rejected_at
-        FROM perizinan
+        SELECT id, user_id, category AS kategori_izin, description AS deskripsi,
+               status, attachment_url AS link_foto, date::text AS tanggal,
+               approval_status, created_at::text, rejection_reason, rejected_at::text
+        FROM leave_requests
         WHERE user_id = ${userId}
         ORDER BY created_at DESC
       `
       return rows ?? []
     } catch (err) {
+      if (err instanceof AppError) throw err
       throw AppError.internal(`Failed to query permit history: ${(err as Error).message}`)
     }
   }
@@ -165,9 +199,11 @@ export class PostgresDomainStore implements DomainStore {
   async insertPermit(data: InsertPermitData): Promise<Permit> {
     try {
       const rows = await this.sql<Permit[]>`
-        INSERT INTO perizinan (user_id, kategori_izin, deskripsi, status, link_foto, tanggal)
+        INSERT INTO leave_requests (user_id, category, description, status, attachment_url, date)
         VALUES (${data.user_id}, ${data.kategori_izin}, ${data.deskripsi}, ${data.status}, ${data.link_foto}, ${data.tanggal})
-        RETURNING id, user_id, kategori_izin, deskripsi, status, link_foto, tanggal, approval_status, created_at, rejection_reason, rejected_at
+        RETURNING id, user_id, category AS kategori_izin, description AS deskripsi,
+                  status, attachment_url AS link_foto, date::text AS tanggal,
+                  approval_status, created_at::text, rejection_reason, rejected_at::text
       `
       if (!rows || rows.length === 0) {
         throw AppError.internal('Failed to insert permit.')
@@ -185,29 +221,86 @@ export class PostgresDomainStore implements DomainStore {
     longitude: number
   }): Promise<AttendanceActionRpcResponse> {
     try {
-      const rows = await this.sql`
-        SELECT get_and_validate_attendance_action(
-          ${params.userId},
-          ${params.latitude},
-          ${params.longitude}
-        ) AS result
+      // 1. Check geofence location
+      const locations = await this.sql<{ id: string; name: string; latitude: number; longitude: number; radius_meters: number }[]>`
+        SELECT id, name, latitude, longitude, radius_meters
+        FROM locations
+        WHERE is_active = true
+        LIMIT 1
       `
-      if (rows.length > 0 && rows[0]?.result) {
-        const rawResult = rows[0].result
-        return typeof rawResult === 'string' ? JSON.parse(rawResult) : (rawResult as AttendanceActionRpcResponse)
-      }
-    } catch {
-      // Fallback for greenfield test environments without RPC
-    }
 
-    return {
-      actionable: true,
-      action_type: 'check_in',
-      message: 'Validation successful.',
-      details: {
-        location_name: 'School Campus',
-        status: 'Hadir',
-      },
+      let locationName = 'School Campus'
+      if (locations && locations.length > 0) {
+        const loc = locations[0]
+        locationName = loc.name
+        const dist = calculateDistanceMeters(params.latitude, params.longitude, loc.latitude, loc.longitude)
+        if (dist > loc.radius_meters) {
+          return {
+            actionable: false,
+            action_type: 'none',
+            message: `Di luar radius lokasi sekolah (${loc.name}).`,
+            details: {
+              location_name: loc.name,
+            },
+          }
+        }
+      }
+
+      // 2. Query today's attendances
+      const now = new Date()
+      const todayWIB = getTodayWIB(now)
+      const dayKey = getDayKeyWIB(now)
+
+      const attendances = await this.sql<{ status: string; action_type: string | null }[]>`
+        SELECT status, action_type
+        FROM attendances
+        WHERE user_id = ${params.userId} AND date = ${todayWIB}
+        ORDER BY created_at ASC
+      `
+
+      const hasCheckedIn = attendances.some((r) => r.status === 'Hadir' || r.status === 'Terlambat' || r.action_type === 'check_in')
+      const hasCheckedOut = attendances.some((r) => r.status === 'Pulang' || r.action_type === 'check_out')
+      const hasAbsent = attendances.some((r) => r.status === 'Alpha')
+
+      if (hasAbsent || (hasCheckedIn && hasCheckedOut)) {
+        return {
+          actionable: false,
+          action_type: 'none',
+          message: 'Attendance for today is already complete.',
+          details: {
+            location_name: locationName,
+          },
+        }
+      }
+
+      const actionType: 'check_in' | 'check_out' = hasCheckedIn ? 'check_out' : 'check_in'
+
+      // 3. Check schedule for late status if check_in
+      let statusLabel: 'Hadir' | 'Terlambat' = 'Hadir'
+      if (actionType === 'check_in') {
+        const schedule = await this.getActiveSchedule(dayKey)
+        if (schedule?.selesai_masuk) {
+          const [h = 0, m = 0, s = 0] = schedule.selesai_masuk.split(':').map(Number)
+          const [year = 1970, month = 1, day = 1] = todayWIB.split('-').map(Number)
+          const endUtc = new Date(Date.UTC(year, month - 1, day, h - 7, m, s, 0))
+          if (now > endUtc) {
+            statusLabel = 'Terlambat'
+          }
+        }
+      }
+
+      return {
+        actionable: true,
+        action_type: actionType,
+        message: 'Validation successful.',
+        details: {
+          location_name: locationName,
+          status: statusLabel,
+        },
+      }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      throw AppError.internal(`Failed to validate attendance action: ${(err as Error).message}`)
     }
   }
 
@@ -218,24 +311,34 @@ export class PostgresDomainStore implements DomainStore {
     longitude: number
   }): Promise<SaveAttendanceRecordRpcResponse> {
     try {
-      const rows = await this.sql`
-        SELECT save_attendance_record(
-          ${params.userId},
-          ${params.actionType},
-          NULL,
-          ${params.latitude},
-          ${params.longitude}
-        ) AS result
-      `
-      if (rows.length > 0 && rows[0]?.result) {
-        const rawResult = rows[0].result
-        return typeof rawResult === 'string' ? JSON.parse(rawResult) : (rawResult as SaveAttendanceRecordRpcResponse)
-      }
-    } catch {
-      // Fallback for greenfield test environments without RPC
-    }
+      const now = new Date()
+      const todayWIB = getTodayWIB(now)
+      const dayKey = getDayKeyWIB(now)
 
-    return { success: true }
+      let status: 'Hadir' | 'Terlambat' | 'Pulang' = params.actionType === 'check_in' ? 'Hadir' : 'Pulang'
+
+      if (params.actionType === 'check_in') {
+        const schedule = await this.getActiveSchedule(dayKey)
+        if (schedule?.selesai_masuk) {
+          const [h = 0, m = 0, s = 0] = schedule.selesai_masuk.split(':').map(Number)
+          const [year = 1970, month = 1, day = 1] = todayWIB.split('-').map(Number)
+          const endUtc = new Date(Date.UTC(year, month - 1, day, h - 7, m, s, 0))
+          if (now > endUtc) {
+            status = 'Terlambat'
+          }
+        }
+      }
+
+      await this.sql`
+        INSERT INTO attendances (user_id, date, status, action_type, latitude, longitude, created_at)
+        VALUES (${params.userId}, ${todayWIB}, ${status}, ${params.actionType}, ${params.latitude}, ${params.longitude}, ${now.toISOString()})
+      `
+
+      return { success: true }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      throw AppError.internal(`Failed to save attendance record: ${(err as Error).message}`)
+    }
   }
 
   async checkHealth(): Promise<boolean> {

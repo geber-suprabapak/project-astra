@@ -9,7 +9,7 @@ export function computeActionType(status: AttendanceStatus): 'check_in' | 'check
   return 'check_in'
 }
 
-/** Compute what status label to insert in `absences` table */
+/** Compute what status label to insert in `attendances` table */
 export function computeInsertStatus(
   actionType: 'check_in' | 'check_out',
   isLate: boolean,

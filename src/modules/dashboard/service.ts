@@ -25,7 +25,7 @@ export interface DayBounds {
   endISO: string
 }
 
-/** Returns WIB day bounds as ISO strings for perizinan range query */
+/** Returns WIB day bounds as ISO strings for leave requests range query */
 export function getWIBDayBounds(dateWIB: string): DayBounds {
   return {
     startISO: `${dateWIB}T00:00:00+07:00`,

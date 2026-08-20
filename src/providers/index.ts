@@ -6,6 +6,7 @@ import type { AppProviders } from './types.js'
 
 export * from './types.js'
 export * from './postgres/domain-store.js'
+export * from './postgres/migrate.js'
 export * from './storage/s3-storage.js'
 export * from './identity/oidc-identity.js'
 export * from './memory/index.js'

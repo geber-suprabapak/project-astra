@@ -55,6 +55,8 @@ Robin stays internal and handles technical face recognition only. Astra/PostgreS
 ## Project Structure
 
 ```text
+db/
+  schema.sql                     Greenfield PostgreSQL schema definition
 src/
   app.ts                         Hono app bootstrap, CORS, logging, provider injection, routes
   index.ts                       Server entrypoint
@@ -63,7 +65,7 @@ src/
     robin/                       Robin HTTP client and schemas
   providers/
     types.ts                     DomainStore, ObjectStorage, IdentityProvider, AppProviders interfaces
-    postgres/                    PostgresDomainStore implementation
+    postgres/                    PostgresDomainStore & migration runner
     storage/                     S3ObjectStorage implementation (AWS SigV4)
     identity/                    OidcIdentityProvider implementation
     memory/                      In-memory provider test doubles
@@ -83,6 +85,8 @@ src/
     time/                        canonical time route/service
   routes/
     v1-mobile.ts                 /v1/mobile route composition with provider injection
+scripts/
+  migrate.ts                     PostgreSQL migration execution script
 tests/
   unit/                          unit tests
   integration/                   integration & HTTP contract tests

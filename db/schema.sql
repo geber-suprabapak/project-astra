@@ -1,0 +1,274 @@
+-- ============================================================================
+-- Skanida Platform — Project Astra Greenfield PostgreSQL Schema
+-- ============================================================================
+-- Owns: School configuration, academic periods, classes, Student/Staff profiles,
+-- Class Enrollment, schedules, Location/Geofence, Attendance, Attendance Attempts,
+-- Leave Requests, Files metadata, Notification Outbox, and Audit Logs.
+-- ============================================================================
+
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- ----------------------------------------------------------------------------
+-- Table: schools
+-- Description: School organization configuration
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS schools (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    timezone TEXT NOT NULL DEFAULT 'Asia/Jakarta',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ----------------------------------------------------------------------------
+-- Table: academic_periods
+-- Description: Academic periods (e.g. 2026/2027 Ganjil)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS academic_periods (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID REFERENCES schools(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ----------------------------------------------------------------------------
+-- Table: classes
+-- Description: Class rooms / study groups (e.g. XII RPL 1)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS classes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID REFERENCES schools(id) ON DELETE CASCADE,
+    academic_period_id UUID REFERENCES academic_periods(id) ON DELETE SET NULL,
+    name TEXT NOT NULL,
+    grade INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ----------------------------------------------------------------------------
+-- Table: profiles
+-- Description: Student, Staff, and Administrator profiles
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL UNIQUE,
+    full_name TEXT,
+    email TEXT,
+    nis TEXT UNIQUE,
+    class_name TEXT,
+    absence_number TEXT,
+    avatar_url TEXT,
+    role TEXT NOT NULL DEFAULT 'student',
+    gender TEXT,
+    lifecycle_status TEXT NOT NULL DEFAULT 'approved',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT profiles_role_check CHECK (role IN ('platform_admin', 'school_admin', 'teacher', 'student', 'staff')),
+    CONSTRAINT profiles_lifecycle_check CHECK (lifecycle_status IN ('pending', 'approved', 'rejected', 'disabled'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles(user_id);
+CREATE INDEX IF NOT EXISTS idx_profiles_nis ON profiles(nis);
+CREATE INDEX IF NOT EXISTS idx_profiles_role ON profiles(role);
+
+-- ----------------------------------------------------------------------------
+-- Table: class_enrollments
+-- Description: Time-bounded association of a Student to a class in an academic period
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS class_enrollments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL REFERENCES profiles(user_id) ON DELETE CASCADE,
+    class_id UUID REFERENCES classes(id) ON DELETE CASCADE,
+    academic_period_id UUID REFERENCES academic_periods(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT class_enrollments_status_check CHECK (status IN ('active', 'transferred', 'promoted', 'graduated', 'archived'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_class_enrollments_user_period ON class_enrollments(user_id, academic_period_id);
+
+-- ----------------------------------------------------------------------------
+-- Table: locations
+-- Description: Geofence locations for physical attendance validation
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS locations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
+    radius_meters DOUBLE PRECISION NOT NULL DEFAULT 100.0,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ----------------------------------------------------------------------------
+-- Table: schedules
+-- Description: Daily attendance time windows and grace periods in Asia/Jakarta
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS schedules (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    day_of_week TEXT NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    start_checkout TIME NOT NULL,
+    end_checkout TIME NOT NULL,
+    grace_period_minutes INTEGER NOT NULL DEFAULT 0,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT schedules_day_of_week_check CHECK (day_of_week IN ('senin', 'selasa', 'rabu', 'kamis', 'jumat', 'sabtu', 'minggu'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedules_day_active ON schedules(day_of_week, is_active);
+
+-- ----------------------------------------------------------------------------
+-- Table: attendances
+-- Description: Student attendance records for check-in and check-out
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS attendances (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL REFERENCES profiles(user_id) ON DELETE CASCADE,
+    date TEXT NOT NULL,
+    status TEXT NOT NULL,
+    action_type TEXT,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT attendances_status_check CHECK (status IN ('Hadir', 'Terlambat', 'Pulang', 'Alpha')),
+    CONSTRAINT attendances_action_type_check CHECK (action_type IS NULL OR action_type IN ('check_in', 'check_out'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_attendances_user_date ON attendances(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_attendances_created_at ON attendances(created_at);
+
+-- ----------------------------------------------------------------------------
+-- Table: attendance_attempts
+-- Description: Face verification and manual attendance attempt audit trail
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS attendance_attempts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL REFERENCES profiles(user_id) ON DELETE CASCADE,
+    action_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    reason TEXT,
+    quality_score DOUBLE PRECISION,
+    confidence DOUBLE PRECISION,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    process_time_ms INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT attendance_attempts_action_type_check CHECK (action_type IN ('check_in', 'check_out')),
+    CONSTRAINT attendance_attempts_status_check CHECK (status IN ('success', 'failed', 'error'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_attendance_attempts_user ON attendance_attempts(user_id);
+
+-- ----------------------------------------------------------------------------
+-- Table: leave_requests
+-- Description: Student permission and leave requests with attachments
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS leave_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL REFERENCES profiles(user_id) ON DELETE CASCADE,
+    category TEXT NOT NULL,
+    description TEXT,
+    status BOOLEAN NOT NULL DEFAULT true,
+    attachment_url TEXT,
+    date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    approval_status TEXT NOT NULL DEFAULT 'pending',
+    rejection_reason TEXT,
+    rejected_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT leave_requests_category_check CHECK (category IN ('sakit', 'pergi', 'dispensasi', 'lainnya')),
+    CONSTRAINT leave_requests_approval_status_check CHECK (approval_status IN ('pending', 'approved', 'rejected'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_leave_requests_user_date ON leave_requests(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_leave_requests_approval ON leave_requests(approval_status);
+
+-- ----------------------------------------------------------------------------
+-- Table: files
+-- Description: Astra-owned file metadata and lifecycle tracking
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS files (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL REFERENCES profiles(user_id) ON DELETE CASCADE,
+    purpose TEXT NOT NULL,
+    object_path TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes BIGINT,
+    lifecycle TEXT NOT NULL DEFAULT 'available',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT files_purpose_check CHECK (purpose IN ('avatar', 'permit_attachment', 'face_enrollment')),
+    CONSTRAINT files_lifecycle_check CHECK (lifecycle IN ('pending_upload', 'available', 'rejected', 'deleted'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_files_user ON files(user_id);
+CREATE INDEX IF NOT EXISTS idx_files_lifecycle ON files(lifecycle);
+
+-- ----------------------------------------------------------------------------
+-- Table: notification_outbox
+-- Description: Transactional outbox for asynchronous notification delivery
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS notification_outbox (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL REFERENCES profiles(user_id) ON DELETE CASCADE,
+    channel TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    next_retry_at TIMESTAMPTZ,
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT notification_outbox_channel_check CHECK (channel IN ('push', 'email')),
+    CONSTRAINT notification_outbox_status_check CHECK (status IN ('pending', 'processing', 'delivered', 'failed'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_outbox_status_next ON notification_outbox(status, next_retry_at);
+
+-- ----------------------------------------------------------------------------
+-- Table: audit_logs
+-- Description: Platform domain action audit logs
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    actor_id TEXT,
+    action TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT,
+    details JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
+
+-- ----------------------------------------------------------------------------
+-- Default Seed Data
+-- ----------------------------------------------------------------------------
+
+-- Default Campus Geofence Location
+INSERT INTO locations (id, name, latitude, longitude, radius_meters, is_active)
+VALUES ('a0000000-0000-0000-0000-000000000001', 'School Campus', -6.200000, 106.816666, 500.0, true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Default Schedules (Monday to Friday, Saturday)
+INSERT INTO schedules (day_of_week, start_time, end_time, start_checkout, end_checkout, grace_period_minutes, is_active)
+VALUES
+  ('senin', '06:00:00', '07:15:00', '15:00:00', '18:00:00', 15, true),
+  ('selasa', '06:00:00', '07:15:00', '15:00:00', '18:00:00', 15, true),
+  ('rabu', '06:00:00', '07:15:00', '15:00:00', '18:00:00', 15, true),
+  ('kamis', '06:00:00', '07:15:00', '15:00:00', '18:00:00', 15, true),
+  ('jumat', '06:00:00', '07:15:00', '11:30:00', '14:00:00', 15, true),
+  ('sabtu', '06:00:00', '07:15:00', '12:00:00', '15:00:00', 15, true)
+ON CONFLICT DO NOTHING;
