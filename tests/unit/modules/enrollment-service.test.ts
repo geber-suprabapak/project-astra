@@ -2,12 +2,19 @@ import { describe, it, expect, vi } from 'vitest'
 import { getEnrollmentStatus, enrollFace, type EnrollmentFile } from '../../../src/modules/enrollment/service.js'
 import type { AppProviders } from '../../../src/providers/types.js'
 import { ErrorCode } from '../../../src/lib/errors/codes.js'
+import {
+  MemoryDomainStore,
+  MemoryIdentityProvider,
+  MemoryObjectStorage,
+} from '../../../src/providers/memory/index.js'
 
-function createMockProviders(): {
+interface MockEnrollmentProviders {
   providers: AppProviders
   mockGetStatus: ReturnType<typeof vi.fn>
   mockEnroll: ReturnType<typeof vi.fn>
-} {
+}
+
+function createMockProviders(): MockEnrollmentProviders {
   const mockGetStatus = vi.fn().mockResolvedValue({
     status: 'enrolled',
     embeddingCount: 10,
@@ -22,9 +29,9 @@ function createMockProviders(): {
   })
 
   const providers: AppProviders = {
-    domainStore: {} as any,
-    objectStorage: {} as any,
-    identityProvider: {} as any,
+    domainStore: new MemoryDomainStore(),
+    objectStorage: new MemoryObjectStorage(),
+    identityProvider: new MemoryIdentityProvider(),
     robinClient: {
       checkReadiness: vi.fn(),
       getEnrollmentStatus: mockGetStatus,

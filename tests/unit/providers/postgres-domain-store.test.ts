@@ -1,11 +1,26 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { PostgresDomainStore } from '../../../src/providers/postgres/domain-store.js'
 import { AppError } from '../../../src/lib/errors/app-error.js'
 import type { Sql } from 'postgres'
 
+type MockQueryHandler = (
+  strings: TemplateStringsArray,
+  ..._values: readonly unknown[]
+) => Promise<readonly unknown[]> | readonly unknown[]
+
+function createMockSql(handler: MockQueryHandler): Sql {
+  const proxy = new Proxy(handler, {
+    apply(_target, _thisArg, [strings, ...values]: [TemplateStringsArray, ...unknown[]]) {
+      return handler(strings, ...values)
+    },
+  })
+  // SAFETY: Mock SQL proxy provides the template tag execution contract required by PostgresDomainStore
+  return proxy as Sql
+}
+
 describe('PostgresDomainStore (Greenfield)', () => {
   it('getUserProfile queries profiles table and returns result', async () => {
-    const mockSql = vi.fn().mockImplementation(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const mockSql = createMockSql((strings: TemplateStringsArray) => {
       const query = strings.join('?')
       expect(query).toContain('FROM profiles')
       expect(query).not.toContain('user_profiles')
@@ -22,7 +37,7 @@ describe('PostgresDomainStore (Greenfield)', () => {
           gender: 'L',
         },
       ]
-    }) as unknown as Sql
+    })
 
     const store = new PostgresDomainStore({ sql: mockSql })
     const profile = await store.getUserProfile('user-123')
@@ -33,31 +48,33 @@ describe('PostgresDomainStore (Greenfield)', () => {
   })
 
   it('getUserProfile throws notFound when profile does not exist', async () => {
-    const mockSql = vi.fn().mockImplementation(async () => []) as unknown as Sql
+    const mockSql = createMockSql(() => [])
     const store = new PostgresDomainStore({ sql: mockSql })
 
     await expect(store.getUserProfile('non-existent')).rejects.toThrow('User profile not found.')
   })
 
   it('getUserProfile throws sanitized internal AppError on database failure without leaking raw message', async () => {
-    const mockSql = vi.fn().mockImplementation(async () => {
+    const mockSql = createMockSql(() => {
       throw new Error('connect ECONNREFUSED 127.0.0.1:5432')
-    }) as unknown as Sql
+    })
     const store = new PostgresDomainStore({ sql: mockSql })
 
     try {
       await store.getUserProfile('user-123')
       expect.unreachable()
-    } catch (err: any) {
+    } catch (err) {
       expect(err).toBeInstanceOf(AppError)
-      expect(err.httpStatus).toBe(500)
-      expect(err.message).toBe('An unexpected database error occurred.')
-      expect(err.message).not.toContain('ECONNREFUSED')
+      // SAFETY: err is verified as AppError by expect(err).toBeInstanceOf(AppError)
+      const appErr = err as AppError
+      expect(appErr.httpStatus).toBe(500)
+      expect(appErr.message).toBe('An unexpected database error occurred.')
+      expect(appErr.message).not.toContain('ECONNREFUSED')
     }
   })
 
   it('getTodayAbsences queries attendances table', async () => {
-    const mockSql = vi.fn().mockImplementation(async (strings: TemplateStringsArray) => {
+    const mockSql = createMockSql((strings: TemplateStringsArray) => {
       const query = strings.join('?')
       expect(query).toContain('FROM attendances')
       expect(query).not.toContain('FROM absences')
@@ -69,7 +86,7 @@ describe('PostgresDomainStore (Greenfield)', () => {
           user_id: 'user-123',
         },
       ]
-    }) as unknown as Sql
+    })
 
     const store = new PostgresDomainStore({ sql: mockSql })
     const records = await store.getTodayAbsences('user-123', '2026-08-20')
@@ -79,7 +96,7 @@ describe('PostgresDomainStore (Greenfield)', () => {
   })
 
   it('insertAttendance inserts into attendances table', async () => {
-    const mockSql = vi.fn().mockImplementation(async (strings: TemplateStringsArray) => {
+    const mockSql = createMockSql((strings: TemplateStringsArray) => {
       const query = strings.join('?')
       expect(query).toContain('INSERT INTO attendances')
       return [
@@ -90,7 +107,7 @@ describe('PostgresDomainStore (Greenfield)', () => {
           user_id: 'user-123',
         },
       ]
-    }) as unknown as Sql
+    })
 
     const store = new PostgresDomainStore({ sql: mockSql })
     const inserted = await store.insertAttendance({
@@ -104,7 +121,7 @@ describe('PostgresDomainStore (Greenfield)', () => {
   })
 
   it('getActiveSchedule queries schedules table', async () => {
-    const mockSql = vi.fn().mockImplementation(async (strings: TemplateStringsArray) => {
+    const mockSql = createMockSql((strings: TemplateStringsArray) => {
       const query = strings.join('?')
       expect(query).toContain('FROM schedules')
       expect(query).not.toContain('jadwal_absensi')
@@ -119,7 +136,7 @@ describe('PostgresDomainStore (Greenfield)', () => {
           is_active: true,
         },
       ]
-    }) as unknown as Sql
+    })
 
     const store = new PostgresDomainStore({ sql: mockSql })
     const schedule = await store.getActiveSchedule('senin')
@@ -130,7 +147,7 @@ describe('PostgresDomainStore (Greenfield)', () => {
   })
 
   it('getActivePermitsToday and getPermitHistory query leave_requests table', async () => {
-    const mockSql = vi.fn().mockImplementation(async (strings: TemplateStringsArray) => {
+    const mockSql = createMockSql((strings: TemplateStringsArray) => {
       const query = strings.join('?')
       expect(query).toContain('leave_requests')
       expect(query).not.toContain('perizinan')
@@ -141,7 +158,7 @@ describe('PostgresDomainStore (Greenfield)', () => {
           kategori_izin: 'sakit',
         },
       ]
-    }) as unknown as Sql
+    })
 
     const store = new PostgresDomainStore({ sql: mockSql })
     const permits = await store.getActivePermitsToday('user-123', '2026-08-20T00:00:00+07:00', '2026-08-20T23:59:59+07:00')
@@ -151,9 +168,9 @@ describe('PostgresDomainStore (Greenfield)', () => {
   })
 
   it('saveAttendanceRecord surfaces persistence failures as errors and never reports synthetic success', async () => {
-    const mockSql = vi.fn().mockImplementation(async () => {
+    const mockSql = createMockSql(() => {
       throw new Error('Database connection failed during attendance insert')
-    }) as unknown as Sql
+    })
 
     const store = new PostgresDomainStore({ sql: mockSql })
 
@@ -168,9 +185,9 @@ describe('PostgresDomainStore (Greenfield)', () => {
   })
 
   it('validateAttendanceAction surfaces persistence failures as errors and never reports synthetic success', async () => {
-    const mockSql = vi.fn().mockImplementation(async () => {
+    const mockSql = createMockSql(() => {
       throw new Error('Database connection failed during location check')
-    }) as unknown as Sql
+    })
 
     const store = new PostgresDomainStore({ sql: mockSql })
 
@@ -184,7 +201,7 @@ describe('PostgresDomainStore (Greenfield)', () => {
   })
 
   it('validateAttendanceAction checks location radius and returns blocked if outside', async () => {
-    const mockSql = vi.fn().mockImplementation(async (strings: TemplateStringsArray) => {
+    const mockSql = createMockSql((strings: TemplateStringsArray) => {
       const query = strings.join('?')
       if (query.includes('FROM locations')) {
         return [
@@ -198,7 +215,7 @@ describe('PostgresDomainStore (Greenfield)', () => {
         ]
       }
       return []
-    }) as unknown as Sql
+    })
 
     const store = new PostgresDomainStore({ sql: mockSql })
     // Latitude/longitude far away (e.g. Bali: -8.4, 115.1)

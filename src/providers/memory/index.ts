@@ -12,6 +12,7 @@ import type {
   Permit,
   SaveAttendanceRecordRpcResponse,
   Schedule,
+  UserMetadata,
   UserProfile,
 } from '../types.js'
 
@@ -109,7 +110,7 @@ export class MemoryDomainStore implements DomainStore {
     return permit
   }
 
-  async validateAttendanceAction(params: {
+  async validateAttendanceAction(_params: {
     userId: string
     latitude: number
     longitude: number
@@ -232,11 +233,11 @@ export class MemoryIdentityProvider implements IdentityProvider {
     }
   }
 
-  async updatePassword(userId: string, newPassword: string): Promise<void> {
+  async updatePassword(_userId: string, _newPassword: string): Promise<void> {
     // In memory update
   }
 
-  async updateUserMetadata(userId: string, metadata: Record<string, unknown>): Promise<void> {
+  async updateUserMetadata(userId: string, metadata: UserMetadata): Promise<void> {
     const existing = this.users.get(userId)
     if (existing) {
       this.users.set(userId, { ...existing, ...metadata })

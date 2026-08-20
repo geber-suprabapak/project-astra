@@ -80,6 +80,7 @@ describe('S3ObjectStorage', () => {
         expect.unreachable()
       } catch (err) {
         expect(err).toBeInstanceOf(AppError)
+        // SAFETY: err is verified as AppError by expect(err).toBeInstanceOf(AppError)
         const appErr = err as AppError
         expect(appErr.code).toBe(ErrorCode.STORAGE_UPLOAD_FAILED)
         expect(appErr.httpStatus).toBe(502)
@@ -97,6 +98,7 @@ describe('S3ObjectStorage', () => {
         expect.unreachable()
       } catch (err) {
         expect(err).toBeInstanceOf(AppError)
+        // SAFETY: err is verified as AppError by expect(err).toBeInstanceOf(AppError)
         const appErr = err as AppError
         expect(appErr.code).toBe(ErrorCode.STORAGE_UPLOAD_FAILED)
         expect(appErr.httpStatus).toBe(502)

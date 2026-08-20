@@ -79,7 +79,7 @@ export class S3ObjectStorage implements ObjectStorage {
     const targetUrl = this.buildObjectUrl(bucket, key, true)
     const host = targetUrl.host
 
-    const queryParams: Record<string, string> = {
+    const queryParams = {
       'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
       'X-Amz-Credential': credential,
       'X-Amz-Date': amzDate,
@@ -87,9 +87,9 @@ export class S3ObjectStorage implements ObjectStorage {
       'X-Amz-SignedHeaders': 'host',
     }
 
-    const canonicalQuery = Object.keys(queryParams)
-      .sort()
-      .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(queryParams[k])}`)
+    const canonicalQuery = Object.entries(queryParams)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
       .join('&')
 
     const canonicalUri = targetUrl.pathname
@@ -134,11 +134,10 @@ export class S3ObjectStorage implements ObjectStorage {
     const credential = `${this.accessKeyId}/${dateStamp}/${this.region}/s3/aws4_request`
     const payloadHash = body ? sha256(body) : sha256('')
 
-    const headers: Record<string, string> = {
-      host: url.host,
-      'x-amz-date': amzDate,
-      'x-amz-content-sha256': payloadHash,
-    }
+    const headers: Record<string, string> = {}
+    headers.host = url.host
+    headers['x-amz-date'] = amzDate
+    headers['x-amz-content-sha256'] = payloadHash
     if (contentType) {
       headers['content-type'] = contentType
     }
@@ -172,13 +171,17 @@ export class S3ObjectStorage implements ObjectStorage {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
 
+    const init: RequestInit = {
+      method,
+      headers,
+      signal: controller.signal,
+    }
+    if (body && method !== 'GET' && method !== 'HEAD') {
+      init.body = new Uint8Array(body)
+    }
+
     try {
-      return await fetch(url.toString(), {
-        method,
-        headers,
-        body: body ? new Uint8Array(body) : undefined,
-        signal: controller.signal,
-      })
+      return await fetch(url.toString(), init)
     } finally {
       clearTimeout(timer)
     }

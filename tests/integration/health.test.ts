@@ -39,6 +39,7 @@ describe('integration: runtime health & readiness probes', () => {
   it('returns liveness payload and security headers on /live', async () => {
     const app = createApp()
     const res = await app.request('/live')
+    // SAFETY: /live endpoint returns standard JSON status object
     const body = (await res.json()) as { status: string }
 
     expect(res.status).toBe(200)
@@ -58,6 +59,7 @@ describe('integration: runtime health & readiness probes', () => {
     })
 
     const res = await app.request('/ready')
+    // SAFETY: /ready endpoint returns ReadinessResult shape
     const body = (await res.json()) as {
       healthy: boolean
       checks: { database: string; objectStorage: string; identity: string; mlService: string; redis: string }
@@ -86,6 +88,7 @@ describe('integration: runtime health & readiness probes', () => {
     })
 
     const res = await app.request('/ready')
+    // SAFETY: /ready endpoint returns ReadinessResult shape
     const body = (await res.json()) as {
       healthy: boolean
       checks: { database: string; objectStorage: string; identity: string; mlService: string; redis: string }
@@ -108,6 +111,7 @@ describe('integration: runtime health & readiness probes', () => {
     })
 
     const res = await app.request('/ready')
+    // SAFETY: /ready endpoint returns ReadinessResult shape
     const body = (await res.json()) as {
       healthy: boolean
       checks: { database: string; objectStorage: string; identity: string; mlService: string; redis: string }
@@ -130,6 +134,7 @@ describe('integration: runtime health & readiness probes', () => {
     })
 
     const res = await app.request('/ready')
+    // SAFETY: /ready endpoint returns ReadinessResult shape
     const body = (await res.json()) as {
       healthy: boolean
       checks: { database: string; objectStorage: string; identity: string; mlService: string; redis: string }
@@ -151,6 +156,7 @@ describe('integration: runtime health & readiness probes', () => {
     })
 
     const res = await app.request('/ready')
+    // SAFETY: /ready endpoint returns ReadinessResult shape
     const body = (await res.json()) as {
       healthy: boolean
       checks: { database: string; objectStorage: string; identity: string; mlService: string; redis: string }
@@ -173,6 +179,7 @@ describe('integration: runtime health & readiness probes', () => {
     })
 
     const res = await app.request('/v1/mobile/health')
+    // SAFETY: /v1/mobile/health returns standard success envelope with health status
     const body = (await res.json()) as {
       success: boolean
       data: { status: 'healthy' | 'unhealthy' }
@@ -198,6 +205,7 @@ describe('integration: runtime health & readiness probes', () => {
   it('enforces auth on protected endpoints', async () => {
     const app = createApp()
     const res = await app.request('/v1/mobile/time')
+    // SAFETY: unauthenticated request returns error envelope with code
     const body = (await res.json()) as { error: { code: string } }
 
     expect(res.status).toBe(401)

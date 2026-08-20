@@ -52,6 +52,7 @@ export async function updateAvatar(
 
   if (!file) throw AppError.validationError('File or clear:true is required.')
 
+  // SAFETY: ALLOWED_AVATAR_TYPES is a const tuple widened to string array for membership check
   if (!(ALLOWED_AVATAR_TYPES as readonly string[]).includes(file.contentType)) {
     throw AppError.validationError(
       `Unsupported file type. Allowed: ${ALLOWED_AVATAR_TYPES.join(', ')}.`,

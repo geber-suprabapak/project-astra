@@ -2,7 +2,6 @@ import type { ErrorHandler } from 'hono'
 import { AppError } from '../lib/errors/app-error.js'
 import { errorResponse } from '../lib/http/responses.js'
 import { logger } from '../lib/logging/logger.js'
-import { env } from '../config/env.js'
 import type { AppEnv } from '../types/context.js'
 
 export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {

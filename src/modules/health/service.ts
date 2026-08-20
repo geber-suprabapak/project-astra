@@ -3,7 +3,7 @@ import { env } from '../../config/env.js'
 import { defaultProviders } from '../../providers/index.js'
 import type { AppProviders } from '../../providers/types.js'
 
-import type { CheckStatus, HealthChecks, ReadinessResult } from './schema.js'
+import type { CheckStatus, ReadinessResult } from './schema.js'
 
 export type { CheckStatus, HealthChecks, ReadinessResult } from './schema.js'
 

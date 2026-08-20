@@ -18,7 +18,7 @@ describe('db/schema.sql idempotency', () => {
     expect(schemaSql).toMatch(/INSERT INTO locations[\s\S]*ON CONFLICT \(id\) DO NOTHING/i)
 
     // Verify all table creations are IF NOT EXISTS
-    const createTableStatements = schemaSql.match(/CREATE TABLE[^\(]+/gi) ?? []
+    const createTableStatements = schemaSql.match(/CREATE TABLE[^(]+/gi) ?? []
     for (const stmt of createTableStatements) {
       expect(stmt.toUpperCase()).toContain('IF NOT EXISTS')
     }

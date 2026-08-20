@@ -123,17 +123,20 @@ export interface ObjectStorage {
   checkHealth(): Promise<boolean>
 }
 
+export type UserMetadataValue = string | number | boolean | null | undefined
+export type UserMetadata = Record<string, UserMetadataValue>
+
 export interface IdentityUser {
   userId: string
   email?: string | null
-  [key: string]: unknown
+  [key: string]: UserMetadataValue
 }
 
 export interface IdentityProvider {
   verifyToken(token: string): Promise<IdentityUser>
   verifyPassword(email: string, password: string): Promise<void>
   updatePassword(userId: string, newPassword: string): Promise<void>
-  updateUserMetadata(userId: string, metadata: Record<string, unknown>): Promise<void>
+  updateUserMetadata(userId: string, metadata: UserMetadata): Promise<void>
   checkHealth(): Promise<boolean>
 }
 

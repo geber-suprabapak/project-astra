@@ -1,9 +1,9 @@
-import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
+import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyOptions } from 'jose'
 import { z } from 'zod'
 import { env } from '../../config/env.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { logger } from '../../lib/logging/logger.js'
-import type { IdentityProvider, IdentityUser } from '../types.js'
+import type { IdentityProvider, IdentityUser, UserMetadata } from '../types.js'
 
 export interface OidcIdentityProviderOptions {
   issuer?: string
@@ -44,7 +44,7 @@ export class OidcIdentityProvider implements IdentityProvider {
 
   async verifyToken(token: string): Promise<IdentityUser> {
     try {
-      const verifyOptions: { audience: string; issuer?: string } = {
+      const verifyOptions: JWTVerifyOptions = {
         audience: this.audience,
       }
       if (this.issuer) {
@@ -71,10 +71,11 @@ export class OidcIdentityProvider implements IdentityProvider {
         throw AppError.authInvalid('Token missing subject claim.')
       }
 
+      const parsedEmail = z.string().safeParse(payload['email'])
+
       return {
         userId: parsedSub.data,
-        email: typeof payload['email'] === 'string' ? payload['email'] : null,
-        ...payload,
+        email: parsedEmail.success ? parsedEmail.data : null,
       }
     } catch (err) {
       if (err instanceof AppError) throw err
@@ -128,7 +129,7 @@ export class OidcIdentityProvider implements IdentityProvider {
     }
   }
 
-  async updateUserMetadata(userId: string, metadata: Record<string, unknown>): Promise<void> {
+  async updateUserMetadata(userId: string, metadata: UserMetadata): Promise<void> {
     if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
       throw AppError.internal('Identity provider management API is not configured.')
     }

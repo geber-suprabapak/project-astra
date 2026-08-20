@@ -89,6 +89,7 @@ describe('integration: /v1/mobile contract boundary', () => {
       const res = await app.request('/v1/mobile/time', {
         headers: { Authorization: authHeader },
       })
+      // SAFETY: /v1/mobile/time returns JSON payload with server time metadata
       const body = (await res.json()) as {
         success: boolean
         data: { now: string; timezone: string; source: string; epoch_ms: number }
@@ -99,7 +100,7 @@ describe('integration: /v1/mobile contract boundary', () => {
       expect(body.success).toBe(true)
       expect(body.data.timezone).toBe('Asia/Jakarta')
       expect(body.data.source).toBe('bff')
-      expect(typeof body.data.epoch_ms).toBe('number')
+      expect(Number.isFinite(body.data.epoch_ms)).toBe(true)
     })
   })
 
@@ -108,6 +109,7 @@ describe('integration: /v1/mobile contract boundary', () => {
       const res = await app.request('/v1/mobile/dashboard', {
         headers: { Authorization: authHeader },
       })
+      // SAFETY: /v1/mobile/dashboard returns aggregated student dashboard response
       const body = (await res.json()) as {
         success: boolean
         data: {
@@ -148,6 +150,7 @@ describe('integration: /v1/mobile contract boundary', () => {
         }),
       })
 
+      // SAFETY: /v1/mobile/attendance/precheck returns precheck response shape
       const body = (await res.json()) as {
         success: boolean
         data: {
@@ -201,6 +204,7 @@ describe('integration: /v1/mobile contract boundary', () => {
         }),
       })
 
+      // SAFETY: /v1/mobile/attendance/submit returns attendance record result
       const body = (await res.json()) as {
         success: boolean
         data: {
@@ -214,7 +218,7 @@ describe('integration: /v1/mobile contract boundary', () => {
       expect(body.success).toBe(true)
       expect(body.data.attendance_type).toBe('check_in')
       expect(body.data.status_label).toBe('Hadir')
-      expect(typeof body.data.processed_ms).toBe('number')
+      expect(Number.isFinite(body.data.processed_ms)).toBe(true)
     })
   })
 
@@ -223,6 +227,7 @@ describe('integration: /v1/mobile contract boundary', () => {
       const res = await app.request('/v1/mobile/face/enrollment/status', {
         headers: { Authorization: authHeader },
       })
+      // SAFETY: /v1/mobile/face/enrollment/status returns face enrollment status
       const body = (await res.json()) as {
         success: boolean
         data: { status: string; embeddingCount: number }
@@ -245,6 +250,7 @@ describe('integration: /v1/mobile contract boundary', () => {
         body: formData,
       })
 
+      // SAFETY: /v1/mobile/face/enrollment returns enrollment result
       const body = (await res.json()) as {
         success: boolean
         data: { status: string; samplesReceived: number; embeddingsCreated: number }
@@ -276,6 +282,7 @@ describe('integration: /v1/mobile contract boundary', () => {
         body: formData,
       })
 
+      // SAFETY: POST /v1/mobile/permits returns created permit response
       const body = (await res.json()) as {
         success: boolean
         data: {
@@ -299,6 +306,7 @@ describe('integration: /v1/mobile contract boundary', () => {
       const res = await app.request('/v1/mobile/permits', {
         headers: { Authorization: authHeader },
       })
+      // SAFETY: GET /v1/mobile/permits returns permit list envelope
       const body = (await res.json()) as {
         success: boolean
         data: { items: unknown[] }
@@ -315,6 +323,7 @@ describe('integration: /v1/mobile contract boundary', () => {
       const res = await app.request('/v1/mobile/profile', {
         headers: { Authorization: authHeader },
       })
+      // SAFETY: GET /v1/mobile/profile returns student profile response
       const body = (await res.json()) as {
         success: boolean
         data: { user_id: string; full_name: string; nis: string }
@@ -336,6 +345,7 @@ describe('integration: /v1/mobile contract boundary', () => {
         body: formData,
       })
 
+      // SAFETY: PATCH /v1/mobile/profile/avatar returns avatar URL response
       const body = (await res.json()) as {
         success: boolean
         data: { avatar_url: string | null }
@@ -356,6 +366,7 @@ describe('integration: /v1/mobile contract boundary', () => {
         body: JSON.stringify({ clear: true }),
       })
 
+      // SAFETY: PATCH /v1/mobile/profile/avatar with clear:true returns null avatar_url
       const body = (await res.json()) as {
         success: boolean
         data: { avatar_url: string | null }
@@ -379,6 +390,7 @@ describe('integration: /v1/mobile contract boundary', () => {
         }),
       })
 
+      // SAFETY: PATCH /v1/mobile/profile/password returns success message envelope
       const body = (await res.json()) as {
         success: boolean
         message: string
@@ -408,6 +420,7 @@ describe('integration: /v1/mobile contract boundary', () => {
   describe('Route 404 fallback', () => {
     it('returns standard 404 error envelope for undefined routes', async () => {
       const res = await app.request('/v1/mobile/non-existent')
+      // SAFETY: 404 handler returns standard error envelope
       const body = (await res.json()) as {
         success: boolean
         error: { code: string; message: string }

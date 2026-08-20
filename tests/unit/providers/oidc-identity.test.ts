@@ -70,6 +70,7 @@ describe('OidcIdentityProvider', () => {
         expect.unreachable()
       } catch (err) {
         expect(err).toBeInstanceOf(AppError)
+        // SAFETY: err is verified as AppError by expect(err).toBeInstanceOf(AppError)
         const appErr = err as AppError
         expect(appErr.code).toBe(ErrorCode.AUTH_INVALID)
         expect(appErr.httpStatus).toBe(401)

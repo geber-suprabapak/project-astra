@@ -96,6 +96,7 @@ export class PostgresDomainStore implements DomainStore {
 
   async updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<void> {
     try {
+      // SAFETY: keys of Partial<UserProfile> are valid property names of UserProfile
       const keys = Object.keys(updates) as (keyof UserProfile)[]
       if (keys.length === 0) return
 
