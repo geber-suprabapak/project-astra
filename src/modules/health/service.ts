@@ -3,18 +3,9 @@ import { env } from '../../config/env.js'
 import { defaultProviders } from '../../providers/index.js'
 import type { AppProviders } from '../../providers/types.js'
 
-export interface HealthChecks {
-  database: 'ok' | 'fail'
-  objectStorage: 'ok' | 'fail'
-  identity: 'ok' | 'fail'
-  mlService: 'ok' | 'fail'
-  redis: 'ok' | 'fail'
-}
+import type { CheckStatus, HealthChecks, ReadinessResult } from './schema.js'
 
-export interface ReadinessResult {
-  healthy: boolean
-  checks: HealthChecks
-}
+export type { CheckStatus, HealthChecks, ReadinessResult } from './schema.js'
 
 export async function getReadiness(
   providers: AppProviders = defaultProviders,
@@ -27,16 +18,16 @@ export async function getReadiness(
     checkRedisReady(),
   ])
 
-  const database: 'ok' | 'fail' =
+  const database: CheckStatus =
     dbResult.status === 'fulfilled' && dbResult.value ? 'ok' : 'fail'
-  const objectStorage: 'ok' | 'fail' =
+  const objectStorage: CheckStatus =
     storageResult.status === 'fulfilled' && storageResult.value ? 'ok' : 'fail'
-  const identity: 'ok' | 'fail' =
+  const identity: CheckStatus =
     identityResult.status === 'fulfilled' && identityResult.value ? 'ok' : 'fail'
-  const mlService: 'ok' | 'fail' =
+  const mlService: CheckStatus =
     robinResult.status === 'fulfilled' && robinResult.value.healthy ? 'ok' : 'fail'
 
-  let redis: 'ok' | 'fail' = 'ok'
+  let redis: CheckStatus = 'ok'
   if (isRedisConfigured() || env.nodeEnv === 'production') {
     redis = redisResult.status === 'fulfilled' && redisResult.value ? 'ok' : 'fail'
   }

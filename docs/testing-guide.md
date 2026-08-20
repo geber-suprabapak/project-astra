@@ -10,6 +10,7 @@ Run the standard gates with Bun:
 
 ```bash
 bun run typecheck
+bun run lint
 bun run test -- --pool=forks --maxWorkers=1
 bun run test:integration -- --pool=forks --maxWorkers=1
 ```

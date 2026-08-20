@@ -47,6 +47,8 @@ export const envSchema = z
     LOGTO_ENDPOINT: z.string().url().optional(),
     LOGTO_APP_ID: z.string().min(1).optional(),
     LOGTO_APP_SECRET: z.string().min(1).optional(),
+    AUTH_USER_ID: z.string().min(1).optional(),
+    AUTH_EMAIL: z.string().min(1).optional(),
 
     ROBIN_BASE_URL: z.string().url(),
     ROBIN_READY_TIMEOUT_MS: positiveInt.default(3000),
@@ -140,6 +142,8 @@ export const env = {
   logtoEndpoint: raw.LOGTO_ENDPOINT,
   logtoAppId: raw.LOGTO_APP_ID,
   logtoAppSecret: raw.LOGTO_APP_SECRET,
+  authUserId: raw.AUTH_USER_ID,
+  authEmail: raw.AUTH_EMAIL,
 
   robinBaseUrl: raw.ROBIN_BASE_URL,
   robinReadyTimeoutMs: raw.ROBIN_READY_TIMEOUT_MS,

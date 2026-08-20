@@ -69,4 +69,18 @@ describe('env config', () => {
       expect(parsed.data.REDIS_KEY_PREFIX).toBe('astra:ratelimit')
     }
   })
+
+  it('parses optional auth helper env vars when provided', () => {
+    const parsed = parseEnv({
+      ...baseEnv,
+      AUTH_USER_ID: 'custom-student-id',
+      AUTH_EMAIL: 'custom@school.sch.id',
+    })
+
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      expect(parsed.data.AUTH_USER_ID).toBe('custom-student-id')
+      expect(parsed.data.AUTH_EMAIL).toBe('custom@school.sch.id')
+    }
+  })
 })

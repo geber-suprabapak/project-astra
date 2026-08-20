@@ -163,8 +163,91 @@ Stable error codes:
 ## Health Semantics
 
 - `/live`: process is running; no downstream checks.
-- `/ready`: checks PostgreSQL (`database`), S3 (`objectStorage`), Robin (`mlService`), and Redis (`redis`); returns `503` when any required dependency is unavailable.
+- `/ready`: checks PostgreSQL (`database`), S3 (`objectStorage`), OIDC/Logto (`identity`), Robin (`mlService`), and Redis (`redis`); returns `503` when any required dependency is unavailable.
 - `/v1/mobile/health`: mobile-safe health response with `status: "healthy"` or `status: "unhealthy"` without leaking provider internals.
+
+## Environment Variables
+
+All configuration is parsed and validated at boot via `src/config/env.ts`.
+
+### Core & Tenant
+
+| Variable | Default / Required | Description |
+| -------- | ------------------ | ----------- |
+| `NODE_ENV` | `development` | Runtime environment (`development`, `production`, `test`). |
+| `PORT` | `3000` | HTTP server port. |
+| `LOG_LEVEL` | `info` | Pino log level (`fatal`, `error`, `warn`, `info`, `debug`, `trace`). |
+| `SERVICE_NAME` | `skanida-bff` | Service identifier for structured logs. |
+| `TENANT_KEY` | **Required** | Deployment tenant slug identifier. |
+| `TENANT_NAME` | **Required** | Display name of the school tenant. |
+| `BUSINESS_TIMEZONE` | `Asia/Jakarta` | Timezone for canonical time and schedule calculations. |
+| `CORS_ALLOWED_ORIGINS` | `""` | Comma-separated allowed origins (required in production; wildcards disallowed in production). |
+
+### PostgreSQL Database
+
+| Variable | Default | Description |
+| -------- | ------- | ----------- |
+| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/astra` | PostgreSQL connection string (supports direct or PgBouncer). |
+| `DATABASE_MAX_CONNECTIONS` | `10` | Maximum connection pool size. |
+| `DATABASE_IDLE_TIMEOUT_SECONDS` | `30` | Idle connection timeout in seconds. |
+| `DATABASE_CONNECT_TIMEOUT_SECONDS` | `5` | Connection establishment timeout in seconds. |
+| `DB_QUERY_TIMEOUT_MS` | `5000` | Database query timeout in milliseconds. |
+
+### S3-Compatible Object Storage
+
+| Variable | Default | Description |
+| -------- | ------- | ----------- |
+| `S3_ENDPOINT` | `http://localhost:9000` | S3-compatible API endpoint (MinIO, Ceph, Garage, AWS S3). |
+| `S3_REGION` | `us-east-1` | S3 region. |
+| `S3_ACCESS_KEY_ID` | `minioadmin` | S3 access key ID. |
+| `S3_SECRET_ACCESS_KEY` | `minioadmin` | S3 secret access key. |
+| `S3_BUCKET_AVATARS` | `avatars` | Bucket name for profile avatars. |
+| `S3_BUCKET_PERMITS` | `perizinan` | Bucket name for permit attachment files. |
+| `S3_FORCE_PATH_STYLE` | `true` | Use path-style bucket addressing. |
+| `S3_PUBLIC_URL` | _(Optional)_ | Optional custom base URL for public or presigned asset access. |
+| `STORAGE_UPLOAD_TIMEOUT_MS` | `15000` | Storage upload timeout in milliseconds. |
+
+### OIDC / Logto Authentication & Helper
+
+| Variable | Default / Required | Description |
+| -------- | ------------------ | ----------- |
+| `OIDC_JWT_SECRET` | _(Required if no JWKS)_ | Secret key for symmetric HS256 JWT verification. |
+| `OIDC_JWKS_URL` | _(Required if no Secret)_ | JWKS URL for asymmetric JWT verification. |
+| `OIDC_ISSUER` | _(Optional)_ | Expected token issuer claim. |
+| `OIDC_AUDIENCE` | `authenticated` | Expected token audience claim. |
+| `LOGTO_ENDPOINT` | _(Optional)_ | Logto Management API endpoint URL. |
+| `LOGTO_APP_ID` | _(Optional)_ | Logto Management API M2M App ID. |
+| `LOGTO_APP_SECRET` | _(Optional)_ | Logto Management API M2M App Secret. |
+| `AUTH_USER_ID` | _(Optional)_ | Default user ID for the `bun run auth:token` helper. |
+| `AUTH_EMAIL` | _(Optional)_ | Default user email for the `bun run auth:token` helper. |
+
+### Robin (Face Recognition API)
+
+| Variable | Default / Required | Description |
+| -------- | ------------------ | ----------- |
+| `ROBIN_BASE_URL` | **Required** | Base URL for the internal Robin face recognition service. |
+| `ROBIN_READY_TIMEOUT_MS` | `3000` | Health probe timeout in milliseconds. |
+| `ROBIN_IDENTIFY_TIMEOUT_MS` | `30000` | Face identification timeout in milliseconds. |
+| `ROBIN_ENROLL_TIMEOUT_MS` | `60000` | Face enrollment timeout in milliseconds. |
+| `ROBIN_ENROLL_STATUS_TIMEOUT_MS` | `5000` | Face enrollment status query timeout in milliseconds. |
+
+### Redis Rate Limiting
+
+| Variable | Default / Required | Description |
+| -------- | ------------------ | ----------- |
+| `REDIS_URL` | _(Optional)_ | Redis connection URL (required in production; falls back to in-memory store in non-production). |
+| `REDIS_KEY_PREFIX` | `astra:ratelimit` | Key prefix for rate limiting counters. |
+
+### Downstream Timeouts
+
+| Variable | Default | Downstream Target |
+| -------- | ------- | ----------------- |
+| `DB_QUERY_TIMEOUT_MS` | `5000` | PostgreSQL query execution |
+| `STORAGE_UPLOAD_TIMEOUT_MS` | `15000` | S3 object storage upload operations |
+| `ROBIN_READY_TIMEOUT_MS` | `3000` | Robin `/ready` health probe |
+| `ROBIN_IDENTIFY_TIMEOUT_MS` | `30000` | Robin `/v1/face/identify` endpoint |
+| `ROBIN_ENROLL_TIMEOUT_MS` | `60000` | Robin `/v1/face/enroll` endpoint |
+| `ROBIN_ENROLL_STATUS_TIMEOUT_MS` | `5000` | Robin `/v1/face/enroll/status` endpoint |
 
 ## Testing & Quality Gates
 
@@ -172,6 +255,7 @@ Run the standard validation gates:
 
 ```bash
 bun run typecheck
+bun run lint
 bun run test -- --pool=forks --maxWorkers=1
 bun run test:integration -- --pool=forks --maxWorkers=1
 ```

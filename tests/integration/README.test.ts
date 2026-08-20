@@ -20,7 +20,7 @@ describe('integration: app runtime contract', () => {
     const app = createApp({
       getReadiness: async (): Promise<ReadinessResult> => ({
         healthy: true,
-        checks: { database: 'ok', objectStorage: 'ok', mlService: 'ok', redis: 'ok' },
+        checks: { database: 'ok', objectStorage: 'ok', identity: 'ok', mlService: 'ok', redis: 'ok' },
       }),
     })
 
@@ -28,13 +28,13 @@ describe('integration: app runtime contract', () => {
     // SAFETY: /ready endpoint returns ReadinessResult shape
     const body = (await res.json()) as {
       healthy: boolean
-      checks: { database: string; objectStorage: string; mlService: string; redis: string }
+      checks: { database: string; objectStorage: string; identity: string; mlService: string; redis: string }
     }
 
     expect(res.status).toBe(200)
     expect(body).toEqual({
       healthy: true,
-      checks: { database: 'ok', objectStorage: 'ok', mlService: 'ok', redis: 'ok' },
+      checks: { database: 'ok', objectStorage: 'ok', identity: 'ok', mlService: 'ok', redis: 'ok' },
     })
   })
 
@@ -42,7 +42,7 @@ describe('integration: app runtime contract', () => {
     const app = createApp({
       getReadiness: async (): Promise<ReadinessResult> => ({
         healthy: false,
-        checks: { database: 'ok', objectStorage: 'ok', mlService: 'fail', redis: 'ok' },
+        checks: { database: 'ok', objectStorage: 'ok', identity: 'ok', mlService: 'fail', redis: 'ok' },
       }),
     })
 
@@ -50,13 +50,13 @@ describe('integration: app runtime contract', () => {
     // SAFETY: /ready endpoint returns ReadinessResult shape
     const body = (await res.json()) as {
       healthy: boolean
-      checks: { database: string; objectStorage: string; mlService: string; redis: string }
+      checks: { database: string; objectStorage: string; identity: string; mlService: string; redis: string }
     }
 
     expect(res.status).toBe(503)
     expect(body).toEqual({
       healthy: false,
-      checks: { database: 'ok', objectStorage: 'ok', mlService: 'fail', redis: 'ok' },
+      checks: { database: 'ok', objectStorage: 'ok', identity: 'ok', mlService: 'fail', redis: 'ok' },
     })
   })
 
@@ -64,7 +64,7 @@ describe('integration: app runtime contract', () => {
     const app = createApp({
       getReadiness: async (): Promise<ReadinessResult> => ({
         healthy: false,
-        checks: { database: 'fail', objectStorage: 'ok', mlService: 'ok', redis: 'ok' },
+        checks: { database: 'fail', objectStorage: 'ok', identity: 'ok', mlService: 'ok', redis: 'ok' },
       }),
     })
 

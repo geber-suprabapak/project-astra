@@ -1,4 +1,5 @@
 import { SignJWT } from 'jose'
+import { env } from '../src/config/env.js'
 
 function parseArgs(argv: string[]): Map<string, string | boolean> {
   const args = new Map<string, string | boolean>()
@@ -26,15 +27,15 @@ function asString(value: string | boolean | undefined): string | null {
 }
 
 const args = parseArgs(process.argv.slice(2))
-const userId = asString(args.get('user-id')) ?? Bun.env.AUTH_USER_ID?.trim() ?? 'test-student-1'
-const email = asString(args.get('email')) ?? Bun.env.AUTH_EMAIL?.trim() ?? 'student@sekolah.sch.id'
+const userId = asString(args.get('user-id')) ?? env.authUserId ?? 'test-student-1'
+const email = asString(args.get('email')) ?? env.authEmail ?? 'student@sekolah.sch.id'
 const role = asString(args.get('role')) ?? 'student'
 const secretKey =
   asString(args.get('secret')) ??
-  Bun.env.OIDC_JWT_SECRET?.trim() ??
+  env.oidcJwtSecret ??
   'test-jwt-secret-that-is-long-enough-32-chars'
-const audience = asString(args.get('audience')) ?? Bun.env.OIDC_AUDIENCE?.trim() ?? 'authenticated'
-const issuer = asString(args.get('issuer')) ?? Bun.env.OIDC_ISSUER?.trim() ?? 'https://auth.school.test'
+const audience = asString(args.get('audience')) ?? env.oidcAudience ?? 'authenticated'
+const issuer = asString(args.get('issuer')) ?? env.oidcIssuer ?? 'https://auth.school.test'
 
 const secret = new TextEncoder().encode(secretKey)
 
