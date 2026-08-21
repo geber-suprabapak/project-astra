@@ -1,6 +1,11 @@
 import { AppError } from '../../lib/errors/app-error.js'
 import { defaultProviders } from '../../providers/index.js'
-import type { AppProviders, Schedule } from '../../providers/types.js'
+import type {
+  AppProviders,
+  AttendanceRecord,
+  CalendarException,
+  Schedule,
+} from '../../providers/types.js'
 import {
   getDayKeyWIB,
   getTodayWIB,

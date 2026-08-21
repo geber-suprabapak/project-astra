@@ -437,7 +437,7 @@ export async function getDashboard(
       full_name: profile.full_name,
       email: profile.email,
       nis: profile.nis,
-      class_name: profile.class_name,
+      class_name: activeEnrollment?.class_name ?? profile.class_name,
       absence_number: profile.absence_number,
       avatar_url: avatarUrl,
       role: profile.role,

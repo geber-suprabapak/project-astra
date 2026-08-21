@@ -6,7 +6,12 @@ import { AppError } from '../../lib/errors/app-error.js'
 import { defaultProviders } from '../../providers/index.js'
 import type { AppProviders } from '../../providers/types.js'
 import { ClearAvatarSchema, UpdatePasswordSchema } from './schema.js'
-import { changePassword, getProfile, updateAvatar } from './service.js'
+import {
+  changePassword,
+  getProfile,
+  getStudentEnrollmentHistory,
+  updateAvatar,
+} from './service.js'
 import type { AppEnv } from '../../types/context.js'
 
 export interface ProfileRouterDeps {
@@ -25,6 +30,18 @@ export function createProfileRouter(deps: ProfileRouterDeps = {}) {
     const data = await getProfile(userId, providers)
     return successResponse(c, data, 'Profile retrieved.')
   })
+
+  // GET /v1/mobile/profile/enrollments & GET /v1/mobile/profile/enrollment-history
+  const handleEnrollments = async (c: any) => {
+    const userId = c.get('userId')
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const items = await getStudentEnrollmentHistory(userId, providers)
+    return successResponse(c, { items }, 'Student enrollment history retrieved.')
+  }
+
+  router.get('/enrollments', handleEnrollments)
+  router.get('/enrollment-history', handleEnrollments)
+
 
   // PATCH /v1/mobile/profile/avatar
   router.patch('/avatar', rateLimits.profileAvatar, async (c) => {

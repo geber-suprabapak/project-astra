@@ -1,5 +1,5 @@
 import { defaultProviders } from '../../providers/index.js'
-import type { AppProviders } from '../../providers/types.js'
+import type { AppProviders, ClassEnrollment, ProfileLifecycleStatus } from '../../providers/types.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { ALLOWED_AVATAR_TYPES, MAX_AVATAR_SIZE_BYTES } from './schema.js'
 
@@ -12,7 +12,9 @@ export interface ProfileResponse {
   absence_number: string | null | undefined
   gender: string | null | undefined
   role: string | null | undefined
+  lifecycle_status?: ProfileLifecycleStatus | null
   avatar_url: string | null
+  active_enrollment?: ClassEnrollment | null
 }
 
 export async function getProfile(
@@ -24,17 +26,35 @@ export async function getProfile(
     ? await providers.objectStorage.getSignedAvatarUrl(profile.avatar_url)
     : null
 
+  const activePeriod = await providers.domainStore.getActiveAcademicPeriod().catch(() => null)
+  const activeEnrollment = activePeriod
+    ? await providers.domainStore.getActiveClassEnrollment(userId, activePeriod.id).catch(() => null)
+    : null
+
   return {
     user_id: profile.user_id,
     full_name: profile.full_name,
     email: profile.email,
     nis: profile.nis,
-    class_name: profile.class_name,
+    class_name: activeEnrollment?.class_name ?? profile.class_name,
     absence_number: profile.absence_number,
     gender: profile.gender,
     role: profile.role,
+    lifecycle_status: profile.lifecycle_status,
     avatar_url: avatarUrl,
+    active_enrollment: activeEnrollment ?? null,
   }
+}
+
+export async function getStudentEnrollmentHistory(
+  userId: string,
+  providers: AppProviders = defaultProviders,
+): Promise<ClassEnrollment[]> {
+  const profile = await providers.domainStore.getUserProfile(userId)
+  if (profile.role !== 'student') {
+    throw AppError.forbidden('Only students have class enrollment history.')
+  }
+  return providers.domainStore.getStudentEnrollmentHistory(userId)
 }
 
 export async function updateAvatar(
