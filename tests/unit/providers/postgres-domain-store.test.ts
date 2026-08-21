@@ -736,3 +736,4 @@ describe('PostgresDomainStore (Greenfield)', () => {
     expect(await store.isSessionRevoked('user-1')).toBe(true)
   })
 })
+

@@ -13,6 +13,7 @@ import type {
   ClassRoom,
   CreateAcademicPeriodParams,
   CreateClassParams,
+  CreatePasswordResetCodeParams,
   CreatePermissionParams,
   CreateRoleParams,
   CreateSchoolParams,
@@ -20,10 +21,13 @@ import type {
   DomainStore,
   InsertAttendanceData,
   InsertPermitData,
+  PasswordResetCode,
   Permission,
   Permit,
+  ProfileLifecycleStatus,
   Role,
   RosterReport,
+  RosterStudent,
   SaveAttendanceRecordRpcResponse,
   Schedule,
   School,
@@ -1217,6 +1221,194 @@ export class PostgresDomainStore implements DomainStore {
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, userId }, 'Failed to check session revocation')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getRosterStudentByNis(nis: string): Promise<RosterStudent | null> {
+    try {
+      const reports = await this.sql<RosterReport[]>`
+        SELECT rows FROM roster_reports WHERE status = 'accepted' ORDER BY accepted_at DESC
+      `
+      for (const report of reports) {
+        const rows = Array.isArray(report.rows) ? report.rows : []
+        const row = rows.find((candidate) => candidate.nis === nis)
+        if (row) {
+          return {
+            nis: row.nis,
+            full_name: row.full_name,
+            class_name: row.class_name,
+            grade: row.grade,
+          }
+        }
+      }
+
+      const profileRows = await this.sql<UserProfile[]>`
+        SELECT nis, full_name, class_name FROM profiles WHERE nis = ${nis} LIMIT 1
+      `
+      if (profileRows.length > 0 && profileRows[0].full_name && profileRows[0].class_name) {
+        return {
+          nis: profileRows[0].nis!,
+          full_name: profileRows[0].full_name,
+          class_name: profileRows[0].class_name,
+        }
+      }
+      return null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, nis }, 'Failed to query roster student by NIS')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async listStudentProfiles(filter?: {
+    lifecycle_status?: ProfileLifecycleStatus
+  }): Promise<UserProfile[]> {
+    try {
+      const rows = filter?.lifecycle_status
+        ? await this.sql<UserProfile[]>`
+            SELECT user_id, full_name, email, nis, class_name, absence_number, avatar_url, role, lifecycle_status, gender
+            FROM profiles
+            WHERE role = 'student' AND lifecycle_status = ${filter.lifecycle_status}
+            ORDER BY created_at DESC
+          `
+        : await this.sql<UserProfile[]>`
+            SELECT user_id, full_name, email, nis, class_name, absence_number, avatar_url, role, lifecycle_status, gender
+            FROM profiles
+            WHERE role = 'student'
+            ORDER BY created_at DESC
+          `
+      return rows ?? []
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, filter }, 'Failed to list student profiles')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async createPendingStudentProfile(params: {
+    userId: string
+    nis: string
+    email: string
+    fullName: string
+    className: string
+  }): Promise<UserProfile> {
+    try {
+      const rows = await this.sql<UserProfile[]>`
+        INSERT INTO profiles (user_id, full_name, nis, email, class_name, role, lifecycle_status)
+        VALUES (${params.userId}, ${params.fullName}, ${params.nis}, ${params.email}, ${params.className}, 'student', 'pending')
+        ON CONFLICT (user_id) DO UPDATE
+        SET full_name = EXCLUDED.full_name,
+            nis = EXCLUDED.nis,
+            email = EXCLUDED.email,
+            class_name = EXCLUDED.class_name,
+            role = 'student',
+            lifecycle_status = 'pending',
+            updated_at = NOW()
+        RETURNING user_id, full_name, email, nis, class_name, absence_number, avatar_url, role, lifecycle_status, gender
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.internal('Failed to create student profile.')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to create pending student profile')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async updateProfileLifecycle(
+    userId: string,
+    status: ProfileLifecycleStatus,
+  ): Promise<UserProfile> {
+    try {
+      const rows = await this.sql<UserProfile[]>`
+        UPDATE profiles
+        SET lifecycle_status = ${status}, updated_at = NOW()
+        WHERE user_id = ${userId}
+        RETURNING user_id, full_name, email, nis, class_name, absence_number, avatar_url, role, lifecycle_status, gender
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.notFound('User profile')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId, status }, 'Failed to update profile lifecycle status')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async updateProfileEmail(userId: string, email: string): Promise<UserProfile> {
+    try {
+      const rows = await this.sql<UserProfile[]>`
+        UPDATE profiles
+        SET email = ${email}, updated_at = NOW()
+        WHERE user_id = ${userId}
+        RETURNING user_id, full_name, email, nis, class_name, absence_number, avatar_url, role, lifecycle_status, gender
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.notFound('User profile')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId, email }, 'Failed to update profile email')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async createPasswordResetCode(
+    params: CreatePasswordResetCodeParams,
+  ): Promise<PasswordResetCode> {
+    try {
+      const rows = await this.sql<PasswordResetCode[]>`
+        INSERT INTO password_reset_codes (user_id, code, expires_at, created_by)
+        VALUES (${params.userId}, ${params.code}, ${params.expiresAt}, ${params.createdBy ?? null})
+        RETURNING id, user_id, code, expires_at::text, used, used_at::text, created_by, created_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.internal('Failed to create password reset code.')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to create password reset code')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getActivePasswordResetCode(
+    userId: string,
+    code: string,
+  ): Promise<PasswordResetCode | null> {
+    try {
+      const rows = await this.sql<PasswordResetCode[]>`
+        SELECT id, user_id, code, expires_at::text, used, used_at::text, created_by, created_at::text
+        FROM password_reset_codes
+        WHERE user_id = ${userId} AND code = ${code} AND used = false AND expires_at > NOW()
+        ORDER BY created_at DESC
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId, code }, 'Failed to query active reset code')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async markPasswordResetCodeUsed(codeId: string): Promise<void> {
+    try {
+      await this.sql`
+        UPDATE password_reset_codes
+        SET used = true, used_at = NOW()
+        WHERE id = ${codeId}
+      `
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, codeId }, 'Failed to mark password reset code as used')
       throw AppError.internal('An unexpected database error occurred.')
     }
   }

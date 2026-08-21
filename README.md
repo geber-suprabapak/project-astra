@@ -167,6 +167,15 @@ Stable error codes:
 | `GET`   | `/v1/admin/bootstrap/roster/:id`    | Yes  | Read staged roster validation report and review state |
 | `POST`  | `/v1/admin/bootstrap/roster/:id/accept` | Yes | Accept valid report and commit canonical Student profiles (school_admin only) |
 | `POST`  | `/v1/admin/bootstrap/signup/open`   | Yes  | Open Student registration after roster acceptance (school_admin only) |
+| `POST`  | `/v1/auth/student/signup`           | No   | Register new Student with valid roster NIS (creates pending profile) |
+| `POST`  | `/v1/auth/student/reset-password`   | No   | Reset Student password using one-time administrator reset code |
+| `GET`   | `/v1/admin/students`                | Yes  | List Student profiles with optional lifecycle status filter |
+| `GET`   | `/v1/admin/students/:userId`        | Yes  | Read Student profile details |
+| `POST`  | `/v1/admin/students/:userId/approve`| Yes  | Approve pending Student profile and activate Logto identity |
+| `POST`  | `/v1/admin/students/:userId/reject` | Yes  | Reject Student profile, disable Logto identity, and revoke sessions |
+| `POST`  | `/v1/admin/students/:userId/disable`| Yes  | Disable Student profile, disable Logto identity, and revoke sessions |
+| `POST`  | `/v1/admin/students/:userId/reset-code` | Yes | Generate short-lived one-time recovery code (school_admin only) |
+| `PATCH` | `/v1/admin/students/:userId/email`  | Yes  | Correct unverified Student email and sync to Logto |
 
 ### Protected identity context & bootstrap boundary
 Astra verifies every bearer token with the configured OIDC issuer, JWKS/signature, and
@@ -177,9 +186,10 @@ the `openid profile admin:read` scopes, prove MFA through `mfa_verified` or an M
 `amr` value, and set `must_change_password` to `false`. Astra denies pending,
 rejected, disabled, or missing profiles before any protected route runs.
 
-Bootstrap operations enforce strict role separation:
+Bootstrap and student account operations enforce strict role separation:
 - `platform_admin` boots the single School configuration, registers the initial `school_admin`, and stages the initial Student roster.
-- `school_admin` reviews the staged roster report, accepts clean batches with 0 rejected rows (committing canonical Student and Class Enrollment records), and opens Student signup.
+- `school_admin` reviews the staged roster report, accepts clean batches with 0 rejected rows (committing canonical Student and Class Enrollment records), opens Student signup, approves/rejects/disables Student profiles, and issues one-time recovery codes.
+- Students sign up with NIS, email, and password. Only valid roster NIS creates a pending profile. Login remains disabled until school administrator approval. Password recovery uses administrator-issued one-time codes without exposing passwords to staff.
 - Every state mutation writes immutable audit evidence to `audit_logs`.
 
 

@@ -697,3 +697,255 @@ export async function getStaffEffectivePermissions(params: {
     permissions,
   }
 }
+export async function listStudents(params: {
+  status?: ProfileLifecycleStatus
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<UserProfile[]> {
+  if (params.actorRole !== 'platform_admin' && params.actorRole !== 'school_admin') {
+    throw AppError.forbidden()
+  }
+
+  return params.providers.domainStore.listStudentProfiles(
+    params.status ? { lifecycle_status: params.status } : undefined,
+  )
+}
+
+export async function getStudent(params: {
+  userId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<UserProfile> {
+  if (params.actorRole !== 'platform_admin' && params.actorRole !== 'school_admin') {
+    throw AppError.forbidden()
+  }
+
+  const profile = await params.providers.domainStore.getUserProfile(params.userId)
+  if (profile.role !== 'student') {
+    throw AppError.notFound('Student profile')
+  }
+
+  return profile
+}
+
+export async function approveStudent(params: {
+  userId: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<UserProfile> {
+  if (params.actorRole !== 'school_admin' && params.actorRole !== 'platform_admin') {
+    throw AppError.forbidden()
+  }
+
+  const profile = await params.providers.domainStore.getUserProfile(params.userId)
+  if (profile.role !== 'student') {
+    throw AppError.notFound('Student profile')
+  }
+
+  const updated = await params.providers.domainStore.updateProfileLifecycle(
+    params.userId,
+    'approved',
+  )
+
+  if (params.providers.identityProvider.setUserSuspended) {
+    await params.providers.identityProvider.setUserSuspended(params.userId, false)
+  }
+  if (params.providers.identityProvider.assignUserRole) {
+    await params.providers.identityProvider.assignUserRole(params.userId, 'student')
+  }
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'approve_student',
+    entity_type: 'profile',
+    entity_id: params.userId,
+    details: {
+      nis: profile.nis,
+      full_name: profile.full_name,
+      previous_status: profile.lifecycle_status,
+      new_status: 'approved',
+    },
+  })
+
+  return updated
+}
+
+export async function rejectStudent(params: {
+  userId: string
+  reason?: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<UserProfile> {
+  if (params.actorRole !== 'school_admin' && params.actorRole !== 'platform_admin') {
+    throw AppError.forbidden()
+  }
+
+  const profile = await params.providers.domainStore.getUserProfile(params.userId)
+  if (profile.role !== 'student') {
+    throw AppError.notFound('Student profile')
+  }
+
+  const updated = await params.providers.domainStore.updateProfileLifecycle(
+    params.userId,
+    'rejected',
+  )
+
+  if (params.providers.identityProvider.setUserSuspended) {
+    await params.providers.identityProvider.setUserSuspended(params.userId, true)
+  }
+  if (params.providers.identityProvider.revokeUserSessions) {
+    await params.providers.identityProvider.revokeUserSessions(params.userId)
+  }
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'reject_student',
+    entity_type: 'profile',
+    entity_id: params.userId,
+    details: {
+      nis: profile.nis,
+      reason: params.reason ?? null,
+      previous_status: profile.lifecycle_status,
+      new_status: 'rejected',
+    },
+  })
+
+  return updated
+}
+
+export async function disableStudent(params: {
+  userId: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<UserProfile> {
+  if (params.actorRole !== 'school_admin' && params.actorRole !== 'platform_admin') {
+    throw AppError.forbidden()
+  }
+
+  const profile = await params.providers.domainStore.getUserProfile(params.userId)
+  if (profile.role !== 'student') {
+    throw AppError.notFound('Student profile')
+  }
+
+  const updated = await params.providers.domainStore.updateProfileLifecycle(
+    params.userId,
+    'disabled',
+  )
+
+  if (params.providers.identityProvider.setUserSuspended) {
+    await params.providers.identityProvider.setUserSuspended(params.userId, true)
+  }
+  if (params.providers.identityProvider.revokeUserSessions) {
+    await params.providers.identityProvider.revokeUserSessions(params.userId)
+  }
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'disable_student',
+    entity_type: 'profile',
+    entity_id: params.userId,
+    details: {
+      nis: profile.nis,
+      previous_status: profile.lifecycle_status,
+      new_status: 'disabled',
+    },
+  })
+
+  return updated
+}
+
+export async function generateStudentResetCode(params: {
+  userId: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<{
+  code: string
+  expires_at: string
+  user_id: string
+  nis: string | null
+}> {
+  if (params.actorRole !== 'school_admin' && params.actorRole !== 'platform_admin') {
+    throw AppError.forbidden()
+  }
+
+  const profile = await params.providers.domainStore.getUserProfile(params.userId)
+  if (profile.role !== 'student') {
+    throw AppError.notFound('Student profile')
+  }
+
+  if (profile.lifecycle_status !== 'approved') {
+    throw AppError.validationError(
+      'Cannot generate password reset code for non-approved student profile.',
+    )
+  }
+
+  const code = Math.floor(100000 + Math.random() * 900000).toString()
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString()
+
+  await params.providers.domainStore.createPasswordResetCode({
+    userId: params.userId,
+    code,
+    expiresAt,
+    createdBy: params.actorId,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'generate_reset_code',
+    entity_type: 'password_reset_code',
+    entity_id: params.userId,
+    details: {
+      nis: profile.nis,
+      expires_at: expiresAt,
+    },
+  })
+
+  return {
+    code,
+    expires_at: expiresAt,
+    user_id: params.userId,
+    nis: profile.nis ?? null,
+  }
+}
+
+export async function correctStudentEmail(params: {
+  userId: string
+  email: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<UserProfile> {
+  if (params.actorRole !== 'school_admin' && params.actorRole !== 'platform_admin') {
+    throw AppError.forbidden()
+  }
+
+  const profile = await params.providers.domainStore.getUserProfile(params.userId)
+  if (profile.role !== 'student') {
+    throw AppError.notFound('Student profile')
+  }
+
+  const oldEmail = profile.email
+  const updated = await params.providers.domainStore.updateProfileEmail(params.userId, params.email)
+
+  if (params.providers.identityProvider.updateUserEmail) {
+    await params.providers.identityProvider.updateUserEmail(params.userId, params.email)
+  }
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'correct_student_email',
+    entity_type: 'profile',
+    entity_id: params.userId,
+    details: {
+      nis: profile.nis,
+      old_email: oldEmail,
+      new_email: params.email,
+    },
+  })
+
+  return updated
+}

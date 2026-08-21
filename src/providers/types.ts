@@ -29,11 +29,26 @@ export interface IdentityUser {
   mustChangePassword?: boolean
 }
 
+export interface CreateStudentIdentityParams {
+  username: string
+  email: string
+  password?: string
+  name?: string
+  suspended?: boolean
+  roles?: readonly IdentityRole[]
+}
+
 export interface IdentityProvider {
   verifyToken(token: string): Promise<IdentityUser>
   verifyPassword(email: string, password: string): Promise<void>
   updatePassword(userId: string, newPassword: string): Promise<void>
   updateUserMetadata(userId: string, metadata: UserMetadata): Promise<void>
+  createStudentIdentity?(params: CreateStudentIdentityParams): Promise<{ userId: string }>
+  setUserSuspended?(userId: string, suspended: boolean): Promise<void>
+  assignUserRole?(userId: string, role: IdentityRole): Promise<void>
+  revokeUserRole?(userId: string, role: IdentityRole): Promise<void>
+  revokeUserSessions?(userId: string): Promise<void>
+  updateUserEmail?(userId: string, email: string): Promise<void>
   checkHealth(): Promise<boolean>
   createStaffIdentity?(params: {
     email: string
@@ -42,7 +57,6 @@ export interface IdentityProvider {
     password?: string
   }): Promise<{ userId: string; email: string }>
   requestPasswordResetEmail?(email: string): Promise<void>
-  revokeUserSessions?(userId: string): Promise<void>
   assignRoles?(userId: string, roles: string[]): Promise<void>
 }
 
@@ -395,8 +409,49 @@ export interface DomainStore {
   revokeUserSessions(userId: string): Promise<void>
   isSessionRevoked(userId: string): Promise<boolean>
 
+  // Student Onboarding & Account Recovery methods
+  getRosterStudentByNis(nis: string): Promise<RosterStudent | null>
+  listStudentProfiles(filter?: { lifecycle_status?: ProfileLifecycleStatus }): Promise<UserProfile[]>
+  createPendingStudentProfile(params: {
+    userId: string
+    nis: string
+    email: string
+    fullName: string
+    className: string
+  }): Promise<UserProfile>
+  updateProfileLifecycle(userId: string, status: ProfileLifecycleStatus): Promise<UserProfile>
+  updateProfileEmail(userId: string, email: string): Promise<UserProfile>
+  createPasswordResetCode(params: CreatePasswordResetCodeParams): Promise<PasswordResetCode>
+  getActivePasswordResetCode(userId: string, code: string): Promise<PasswordResetCode | null>
+  markPasswordResetCodeUsed(codeId: string): Promise<void>
+
   checkHealth(): Promise<boolean>
   close?(): Promise<void>
+}
+
+export interface RosterStudent {
+  nis: string
+  full_name: string
+  class_name: string
+  grade?: number | null
+}
+
+export interface PasswordResetCode {
+  id: string
+  user_id: string
+  code: string
+  expires_at: string
+  used: boolean
+  used_at?: string | null
+  created_by?: string | null
+  created_at?: string
+}
+
+export interface CreatePasswordResetCodeParams {
+  userId: string
+  code: string
+  expiresAt: string
+  createdBy?: string | null
 }
 
 export interface ObjectStorage {

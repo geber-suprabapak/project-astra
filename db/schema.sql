@@ -278,6 +278,23 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
+-- ----------------------------------------------------------------------------
+-- Table: password_reset_codes
+-- Description: Offline one-time password reset codes for student account recovery
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS password_reset_codes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL REFERENCES profiles(user_id) ON DELETE CASCADE,
+    code TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used BOOLEAN NOT NULL DEFAULT false,
+    used_at TIMESTAMPTZ,
+    created_by TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_codes_user ON password_reset_codes(user_id);
+CREATE INDEX IF NOT EXISTS idx_password_reset_codes_code ON password_reset_codes(code);
 
 -- ----------------------------------------------------------------------------
 -- Table: roles

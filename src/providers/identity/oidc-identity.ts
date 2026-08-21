@@ -3,7 +3,14 @@ import { z } from 'zod'
 import { env } from '../../config/env.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { logger } from '../../lib/logging/logger.js'
-import { identityRoleSchema, type IdentityProvider, type IdentityUser, type UserMetadata } from '../types.js'
+import {
+  identityRoleSchema,
+  type CreateStudentIdentityParams,
+  type IdentityProvider,
+  type IdentityRole,
+  type IdentityUser,
+  type UserMetadata,
+} from '../types.js'
 import { isMfaVerified } from './claims.js'
 
 export interface OidcIdentityProviderOptions {
@@ -287,6 +294,131 @@ export class OidcIdentityProvider implements IdentityProvider {
       )
     } catch (err) {
       logger.warn({ err, userId, roles }, 'Logto role assignment error')
+    }
+  }
+
+  async createStudentIdentity(params: CreateStudentIdentityParams): Promise<{ userId: string }> {
+    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
+      throw AppError.internal('Identity provider management API is not configured.')
+    }
+
+    try {
+      const response = await fetch(`${this.logtoEndpoint.replace(/\/$/, '')}/api/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: params.username,
+          primaryEmail: params.email,
+          password: params.password,
+          name: params.name,
+          isSuspended: params.suspended ?? true,
+          roleNames: params.roles ?? ['student'],
+        }),
+      })
+
+      if (!response.ok) {
+        throw AppError.internal('Failed to create student identity in identity provider.')
+      }
+
+      // SAFETY: Logto user creation response contains an id field.
+      const data = (await response.json()) as { id: string }
+      return { userId: data.id }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, username: params.username }, 'Logto create student identity error')
+      throw AppError.internal('Failed to create student identity in identity provider.')
+    }
+  }
+
+  async setUserSuspended(userId: string, suspended: boolean): Promise<void> {
+    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
+      throw AppError.internal('Identity provider management API is not configured.')
+    }
+
+    try {
+      const response = await fetch(
+        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/is-suspended`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ isSuspended: suspended }),
+        },
+      )
+      if (!response.ok) {
+        throw AppError.internal('Failed to update user status in identity provider.')
+      }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId, suspended }, 'Logto set user suspended error')
+      throw AppError.internal('Failed to update user status in identity provider.')
+    }
+  }
+
+  async assignUserRole(userId: string, role: IdentityRole): Promise<void> {
+    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
+      throw AppError.internal('Identity provider management API is not configured.')
+    }
+
+    try {
+      const response = await fetch(
+        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/roles`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roleNames: [role] }),
+        },
+      )
+      if (!response.ok) {
+        throw AppError.internal('Failed to assign role in identity provider.')
+      }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId, role }, 'Logto assign user role error')
+      throw AppError.internal('Failed to assign role in identity provider.')
+    }
+  }
+
+  async revokeUserRole(userId: string, role: IdentityRole): Promise<void> {
+    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
+      throw AppError.internal('Identity provider management API is not configured.')
+    }
+
+    try {
+      const response = await fetch(
+        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/roles/${encodeURIComponent(role)}`,
+        { method: 'DELETE' },
+      )
+      if (!response.ok && response.status !== 404) {
+        throw AppError.internal('Failed to revoke role in identity provider.')
+      }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId, role }, 'Logto revoke user role error')
+      throw AppError.internal('Failed to revoke role in identity provider.')
+    }
+  }
+
+  async updateUserEmail(userId: string, email: string): Promise<void> {
+    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
+      throw AppError.internal('Identity provider management API is not configured.')
+    }
+
+    try {
+      const response = await fetch(
+        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/primary-email`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ primaryEmail: email }),
+        },
+      )
+      if (!response.ok) {
+        throw AppError.internal('Failed to update email in identity provider.')
+      }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId }, 'Logto update user email error')
+      throw AppError.internal('Failed to update email in identity provider.')
     }
   }
 

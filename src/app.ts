@@ -10,6 +10,7 @@ import {
 import { type ReadinessResult } from './modules/health/service.js'
 import { createV1Mobile, v1Mobile } from './routes/v1-mobile.js'
 import { createAdminRouter, adminRouter } from './modules/admin/routes.js'
+import { createStudentAuthRouter, studentAuthRouter } from './modules/auth/routes.js'
 import { defaultProviders } from './providers/index.js'
 import type { AppProviders } from './providers/types.js'
 import { env } from './config/env.js'
@@ -22,6 +23,7 @@ export interface AppDeps {
   v1Mobile?: Hono<AppEnv>
   adminRouter?: Hono<AppEnv>
   healthRouter?: Hono<AppEnv>
+  studentAuthRouter?: Hono<AppEnv>
 }
 
 export function createApp(deps: AppDeps = {}) {
@@ -111,6 +113,15 @@ export function createApp(deps: AppDeps = {}) {
     deps.adminRouter ??
     (deps.providers ? createAdminRouter({ providers: resolvedProviders }) : adminRouter)
   app.route('/v1/admin', resolvedAdminRouter)
+
+  // Public Student Authentication routes
+  const resolvedStudentAuthRouter =
+    deps.studentAuthRouter ??
+    (deps.providers
+      ? createStudentAuthRouter({ providers: resolvedProviders })
+      : studentAuthRouter)
+  app.route('/v1/auth/student', resolvedStudentAuthRouter)
+
   // Mobile API routes
   app.route('/v1/mobile', mobileRouter)
 

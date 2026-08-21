@@ -13,6 +13,8 @@ import {
   type ClassRoom,
   type CreateAcademicPeriodParams,
   type CreateClassParams,
+  type CreatePasswordResetCodeParams,
+  type CreateStudentIdentityParams,
   type CreatePermissionParams,
   type CreateRoleParams,
   type CreateSchoolParams,
@@ -20,13 +22,17 @@ import {
   type DomainStore,
   type IdentityProvider,
   type IdentityUser,
+  type IdentityRole,
   type InsertAttendanceData,
   type InsertPermitData,
   type ObjectStorage,
+  type PasswordResetCode,
   type Permission,
   type Permit,
+  type ProfileLifecycleStatus,
   type Role,
   type RosterReport,
+  type RosterStudent,
   type SaveAttendanceRecordRpcResponse,
   type Schedule,
   type School,
@@ -120,6 +126,7 @@ export class MemoryDomainStore implements DomainStore {
   public permissions = new Map<string, Permission>()
   public userRoles = new Map<string, Set<string>>()
   public revokedSessions = new Set<string>()
+  public resetCodes: PasswordResetCode[] = []
   public signupOpen = false
   public isHealthy = true
 
@@ -149,12 +156,13 @@ export class MemoryDomainStore implements DomainStore {
   }
 
   async getProfileByNis(nis: string): Promise<UserProfile | null> {
+    let placeholder: UserProfile | null = null
     for (const profile of this.profiles.values()) {
-      if (profile.nis === nis) {
-        return { ...profile }
-      }
+      if (profile.nis !== nis) continue
+      if (profile.email) return { ...profile }
+      placeholder ??= profile
     }
-    return null
+    return placeholder ? { ...placeholder } : null
   }
 
   async getTodayAbsences(userId: string, dateWIB: string): Promise<Absence[]> {
@@ -719,7 +727,6 @@ export class MemoryDomainStore implements DomainStore {
         this.revokedSessions.add(userId)
       }
     }
-
     this.profiles.set(userId, profile)
     return { ...profile }
   }
@@ -730,6 +737,128 @@ export class MemoryDomainStore implements DomainStore {
 
   async isSessionRevoked(userId: string): Promise<boolean> {
     return this.revokedSessions.has(userId)
+  }
+
+  async getRosterStudentByNis(nis: string): Promise<RosterStudent | null> {
+    for (const report of this.rosterReports.values()) {
+      if (report.status === 'accepted') {
+        const row = report.rows.find((candidate) => candidate.nis === nis)
+        if (row) {
+          return {
+            nis: row.nis,
+            full_name: row.full_name,
+            class_name: row.class_name,
+            grade: row.grade,
+          }
+        }
+      }
+    }
+    for (const profile of this.profiles.values()) {
+      if (profile.nis === nis && profile.full_name && profile.class_name) {
+        return {
+          nis: profile.nis,
+          full_name: profile.full_name,
+          class_name: profile.class_name,
+        }
+      }
+    }
+    return null
+  }
+
+  async listStudentProfiles(filter?: {
+    lifecycle_status?: ProfileLifecycleStatus
+  }): Promise<UserProfile[]> {
+    return Array.from(this.profiles.values())
+      .filter(
+        (profile) =>
+          profile.role === 'student' &&
+          (!filter?.lifecycle_status || profile.lifecycle_status === filter.lifecycle_status),
+      )
+      .map((profile) => ({ ...profile }))
+  }
+
+  async createPendingStudentProfile(params: {
+    userId: string
+    nis: string
+    email: string
+    fullName: string
+    className: string
+  }): Promise<UserProfile> {
+    const profile: UserProfile = {
+      user_id: params.userId,
+      full_name: params.fullName,
+      nis: params.nis,
+      email: params.email,
+      class_name: params.className,
+      role: 'student',
+      lifecycle_status: 'pending',
+      gender: null,
+    }
+    this.profiles.set(params.userId, profile)
+    return { ...profile }
+  }
+
+  async updateProfileLifecycle(
+    userId: string,
+    status: ProfileLifecycleStatus,
+  ): Promise<UserProfile> {
+    const profile = this.profiles.get(userId)
+    if (!profile) {
+      throw AppError.notFound('User profile')
+    }
+    profile.lifecycle_status = status
+    this.profiles.set(userId, profile)
+    return { ...profile }
+  }
+
+  async updateProfileEmail(userId: string, email: string): Promise<UserProfile> {
+    const profile = this.profiles.get(userId)
+    if (!profile) {
+      throw AppError.notFound('User profile')
+    }
+    profile.email = email
+    this.profiles.set(userId, profile)
+    return { ...profile }
+  }
+
+  async createPasswordResetCode(
+    params: CreatePasswordResetCodeParams,
+  ): Promise<PasswordResetCode> {
+    const resetCode: PasswordResetCode = {
+      id: `rc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      user_id: params.userId,
+      code: params.code,
+      expires_at: params.expiresAt,
+      used: false,
+      used_at: null,
+      created_by: params.createdBy ?? null,
+      created_at: new Date().toISOString(),
+    }
+    this.resetCodes.push(resetCode)
+    return { ...resetCode }
+  }
+
+  async getActivePasswordResetCode(
+    userId: string,
+    code: string,
+  ): Promise<PasswordResetCode | null> {
+    const now = Date.now()
+    const found = this.resetCodes.find(
+      (resetCode) =>
+        resetCode.user_id === userId &&
+        resetCode.code === code &&
+        !resetCode.used &&
+        new Date(resetCode.expires_at).getTime() > now,
+    )
+    return found ? { ...found } : null
+  }
+
+  async markPasswordResetCodeUsed(codeId: string): Promise<void> {
+    const code = this.resetCodes.find((resetCode) => resetCode.id === codeId)
+    if (code) {
+      code.used = true
+      code.used_at = new Date().toISOString()
+    }
   }
 
   async checkHealth(): Promise<boolean> {
@@ -786,6 +915,60 @@ export class MemoryIdentityProvider implements IdentityProvider {
   public users = new Map<string, IdentityUser>()
   public passwords = new Map<string, string>()
   public revokedUsers = new Set<string>()
+  public suspendedUsers = new Set<string>()
+  public revokedSessions = new Set<string>()
+  async createStudentIdentity(
+    params: CreateStudentIdentityParams,
+  ): Promise<{ userId: string }> {
+    const userId = `student-identity-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    this.users.set(userId, {
+      userId,
+      email: params.email,
+      roles: [...(params.roles ?? ['student'])],
+      scopes: ['openid', 'profile'],
+      mfaVerified: false,
+      mustChangePassword: false,
+    })
+    if (params.password) {
+      this.passwords.set(params.email, params.password)
+    }
+    if (params.suspended !== false) {
+      this.suspendedUsers.add(userId)
+    }
+    return { userId }
+  }
+
+  async setUserSuspended(userId: string, suspended: boolean): Promise<void> {
+    if (suspended) {
+      this.suspendedUsers.add(userId)
+    } else {
+      this.suspendedUsers.delete(userId)
+    }
+  }
+
+  async assignUserRole(userId: string, role: IdentityRole): Promise<void> {
+    const user = this.users.get(userId)
+    if (user) {
+      user.roles = [...new Set([...(user.roles ?? []), role])]
+      this.users.set(userId, user)
+    }
+  }
+
+  async revokeUserRole(userId: string, role: IdentityRole): Promise<void> {
+    const user = this.users.get(userId)
+    if (user) {
+      user.roles = (user.roles ?? []).filter((assignedRole) => assignedRole !== role)
+      this.users.set(userId, user)
+    }
+  }
+
+  async updateUserEmail(userId: string, email: string): Promise<void> {
+    const user = this.users.get(userId)
+    if (user) {
+      this.users.set(userId, { ...user, email })
+    }
+  }
+
   public isHealthy = true
 
   async verifyToken(token: string): Promise<IdentityUser> {
@@ -843,8 +1026,12 @@ export class MemoryIdentityProvider implements IdentityProvider {
     }
   }
 
-  async updatePassword(_userId: string, _newPassword: string): Promise<void> {
-    // In memory update
+  async updatePassword(userId: string, newPassword: string): Promise<void> {
+    this.passwords.set(userId, newPassword)
+    const user = this.users.get(userId)
+    if (user?.email) {
+      this.passwords.set(user.email, newPassword)
+    }
   }
 
   async updateUserMetadata(userId: string, metadata: UserMetadata): Promise<void> {
@@ -892,6 +1079,7 @@ export class MemoryIdentityProvider implements IdentityProvider {
 
   async revokeUserSessions(userId: string): Promise<void> {
     this.revokedUsers.add(userId)
+    this.revokedSessions.add(userId)
   }
 
   async assignRoles(userId: string, roles: string[]): Promise<void> {
