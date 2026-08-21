@@ -35,15 +35,18 @@ interface GateResult {
   checks: CheckResult
 }
 
-async function runGateChecks(params: {
-  userId: string
-  latitude: number
-  longitude: number
-  token: string
-  requestId: string
-  providers?: AppProviders
-}): Promise<GateResult> {
-  const providers = params.providers ?? defaultProviders
+export async function runGateChecks(
+  params: {
+    userId: string
+    latitude: number
+    longitude: number
+    token: string
+    requestId: string
+    providers?: AppProviders
+  },
+  providers?: AppProviders,
+): Promise<GateResult> {
+  const actualProviders = params.providers ?? providers ?? defaultProviders
   const now = new Date()
   const todayWIB = getTodayWIB(now)
   const dayKey = getDayKeyWIB(now)
@@ -56,16 +59,16 @@ async function runGateChecks(params: {
     robin: 'pass',
   }
 
-  const [absences, schedule, activePermits, robinReady, enrollStatus] = await Promise.all([
-    providers.domainStore.getTodayAbsences(params.userId, todayWIB),
-    providers.domainStore.getActiveSchedule(dayKey),
-    providers.domainStore.getActivePermitsToday(params.userId, startISO, endISO),
-    providers.robinClient.checkReadiness(),
-    providers.robinClient.getEnrollmentStatus(params.token, params.requestId).catch(() => ({
+  const [absences, activePermits, robinReady, enrollStatus, activePeriod] = await Promise.all([
+    actualProviders.domainStore.getTodayAbsences(params.userId, todayWIB),
+    actualProviders.domainStore.getActivePermitsToday(params.userId, startISO, endISO),
+    actualProviders.robinClient.checkReadiness(),
+    actualProviders.robinClient.getEnrollmentStatus(params.token, params.requestId).catch(() => ({
       status: 'not_enrolled' as const,
       embeddingCount: 0,
       message: 'Unavailable.',
     })),
+    actualProviders.domainStore.getActiveAcademicPeriod(),
   ])
 
   const checks: CheckResult = { ...defaults }
@@ -78,7 +81,7 @@ async function runGateChecks(params: {
       reason: 'Face recognition service unavailable.',
       reasonCode: 'DEPENDENCY_UNAVAILABLE',
       locationName: null,
-      schedule,
+      schedule: null,
       isLate: false,
       window: null,
       todayWIB,
@@ -94,7 +97,7 @@ async function runGateChecks(params: {
       reason: 'Face enrollment is required.',
       reasonCode: 'ENROLLMENT_REQUIRED',
       locationName: null,
-      schedule,
+      schedule: null,
       isLate: false,
       window: null,
       todayWIB,
@@ -110,13 +113,68 @@ async function runGateChecks(params: {
       reason: 'You have an active permit for today.',
       reasonCode: 'ATTENDANCE_BLOCKED',
       locationName: null,
-      schedule,
+      schedule: null,
       isLate: false,
       window: null,
       todayWIB,
       checks,
     }
   }
+
+  if (!activePeriod) {
+    checks.schedule = 'fail'
+    return {
+      allowed: false,
+      actionType: null,
+      reason: 'No active academic period configured.',
+      reasonCode: 'ATTENDANCE_BLOCKED',
+      locationName: null,
+      schedule: null,
+      isLate: false,
+      window: null,
+      todayWIB,
+      checks,
+    }
+  }
+
+  const activeEnrollment = await actualProviders.domainStore.getActiveClassEnrollment(params.userId, activePeriod.id)
+  if (!activeEnrollment) {
+    checks.schedule = 'fail'
+    return {
+      allowed: false,
+      actionType: null,
+      reason: 'Student has no active class enrollment for the current academic period.',
+      reasonCode: 'ATTENDANCE_BLOCKED',
+      locationName: null,
+      schedule: null,
+      isLate: false,
+      window: null,
+      todayWIB,
+      checks,
+    }
+  }
+
+  const calendarException = await actualProviders.domainStore.getCalendarExceptionByDate(todayWIB, activePeriod.id)
+  if (calendarException && calendarException.is_holiday) {
+    checks.schedule = 'fail'
+    return {
+      allowed: false,
+      actionType: null,
+      reason: `Today is a scheduled calendar exception/holiday: ${calendarException.reason}`,
+      reasonCode: 'ATTENDANCE_BLOCKED',
+      locationName: null,
+      schedule: null,
+      isLate: false,
+      window: null,
+      todayWIB,
+      checks,
+    }
+  }
+
+  const schedule = await actualProviders.domainStore.getActiveSchedule(dayKey, {
+    classId: activeEnrollment.class_id,
+    academicPeriodId: activePeriod.id,
+  })
 
   if (!schedule) {
     checks.schedule = 'fail'
@@ -126,7 +184,7 @@ async function runGateChecks(params: {
       reason: 'No active schedule for today.',
       reasonCode: 'ATTENDANCE_BLOCKED',
       locationName: null,
-      schedule,
+      schedule: null,
       isLate: false,
       window: null,
       todayWIB,
@@ -174,7 +232,7 @@ async function runGateChecks(params: {
     }
   }
 
-  const rpcResult = await providers.domainStore.validateAttendanceAction({
+  const rpcResult = await actualProviders.domainStore.validateAttendanceAction({
     userId: params.userId,
     latitude: params.latitude,
     longitude: params.longitude,
@@ -237,15 +295,19 @@ export interface PrecheckResult {
   blocking_reason: string | null
 }
 
-export async function precheck(params: {
-  userId: string
-  latitude: number
-  longitude: number
-  token: string
-  requestId: string
-  providers?: AppProviders
-}): Promise<PrecheckResult> {
-  const gate = await runGateChecks(params)
+export async function precheck(
+  params: {
+    userId: string
+    latitude: number
+    longitude: number
+    token: string
+    requestId: string
+    providers?: AppProviders
+  },
+  providers?: AppProviders,
+): Promise<PrecheckResult> {
+  const actualProviders = params.providers ?? providers ?? defaultProviders
+  const gate = await runGateChecks(params, actualProviders)
   return {
     allowed: gate.allowed,
     action_type: gate.actionType,
@@ -266,27 +328,32 @@ export interface SubmitResult {
   processed_ms: number
 }
 
-export async function submit(params: {
-  userId: string
-  actionType: 'check_in' | 'check_out'
-  imageBase64: string
-  latitude: number
-  longitude: number
-  token: string
-  requestId: string
-  providers?: AppProviders
-}): Promise<SubmitResult> {
-  const providers = params.providers ?? defaultProviders
+export async function submit(
+  params: {
+    userId: string
+    actionType: 'check_in' | 'check_out'
+    imageBase64: string
+    latitude: number
+    longitude: number
+    token: string
+    requestId: string
+    providers?: AppProviders
+  },
+  providers?: AppProviders,
+): Promise<SubmitResult> {
+  const actualProviders = params.providers ?? providers ?? defaultProviders
 
   // Re-run gate checks (do not skip)
-  const gate = await runGateChecks({
-    userId: params.userId,
-    latitude: params.latitude,
-    longitude: params.longitude,
-    token: params.token,
-    requestId: params.requestId,
-    providers,
-  })
+  const gate = await runGateChecks(
+    {
+      userId: params.userId,
+      latitude: params.latitude,
+      longitude: params.longitude,
+      token: params.token,
+      requestId: params.requestId,
+    },
+    actualProviders,
+  )
 
   if (!gate.allowed) {
     throw AppError.attendanceBlocked(gate.reason ?? 'Attendance not allowed.')
@@ -299,7 +366,7 @@ export async function submit(params: {
   }
 
   // Verify enrollment before calling identify
-  const enrollment = await providers.robinClient.getEnrollmentStatus(
+  const enrollment = await actualProviders.robinClient.getEnrollmentStatus(
     params.token,
     params.requestId,
   )
@@ -309,14 +376,14 @@ export async function submit(params: {
 
   // Identify face — throws AppError.attendanceBlocked if status !== 'ok'
   const startMs = Date.now()
-  const { processTimeMs } = await providers.robinClient.identify(
+  const { processTimeMs } = await actualProviders.robinClient.identify(
     params.imageBase64,
     params.token,
     params.requestId,
   )
 
   // Persist attendance through DomainStore
-  const saveResult = await providers.domainStore.saveAttendanceRecord({
+  const saveResult = await actualProviders.domainStore.saveAttendanceRecord({
     userId: params.userId,
     actionType: params.actionType,
     latitude: params.latitude,

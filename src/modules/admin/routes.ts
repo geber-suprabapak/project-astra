@@ -9,44 +9,86 @@ import type { AppProviders } from '../../providers/types.js'
 import type { AppEnv } from '../../types/context.js'
 import {
   bootstrapSchoolSchema,
+  classEnrollmentStatusSchema,
+  createAcademicPeriodSchema,
+  createCalendarExceptionSchema,
+  createClassSchema,
+  createLocationSchema,
   createPermissionSchema,
   createRoleSchema,
+  createScheduleSchema,
   createSchoolAdminSchema,
   createStaffSchema,
+  enrollStudentSchema,
+  exitStudentEnrollmentSchema,
+  promoteStudentEnrollmentSchema,
+  rejectStudentSchema,
   requestStaffPasswordResetSchema,
   stageRosterSchema,
+  transferStudentEnrollmentSchema,
+  updateAcademicPeriodSchema,
+  updateCalendarExceptionSchema,
+  updateClassSchema,
+  updateLocationSchema,
   updateRoleSchema,
+  updateScheduleSchema,
   updateStaffSchema,
-  rejectStudentSchema,
   updateStudentEmailSchema,
 } from './schema.js'
 import {
   acceptRosterReport,
   approveStudent,
   bootstrapSchool,
+  correctStudentEmail,
+  createAcademicPeriod,
+  createCalendarException,
+  createClass,
+  createLocation,
   createPermission,
   createRole,
+  createSchedule,
   createSchoolAdmin,
   createStaff,
-  correctStudentEmail,
+  deleteCalendarException,
+  deleteLocation,
+  deleteSchedule,
   disableStudent,
+  enrollStudent,
+  exitStudentEnrollment,
   generateStudentResetCode,
   getBootstrapStatus,
+  getCalendarException,
+  getLocation,
   getPrivilegedSession,
   getRole,
   getRosterReport,
+  getSchedule,
   getStaff,
   getStaffEffectivePermissions,
+  getStudent,
+  listAcademicPeriods,
+  listCalendarExceptions,
+  listClasses,
+  listClassEnrollments,
+  listLocations,
   listPermissions,
   listRoles,
+  listSchedules,
   listStaff,
-  openStudentSignup,
-  requestStaffPasswordReset,
-  updateRole,
-  updateStaff,
-  getStudent,
   listStudents,
+  openStudentSignup,
+  promoteStudentEnrollment,
   rejectStudent,
+  requestStaffPasswordReset,
+  setActiveAcademicPeriod,
+  transferStudentEnrollment,
+  updateAcademicPeriod,
+  updateCalendarException,
+  updateClass,
+  updateLocation,
+  updateRole,
+  updateSchedule,
+  updateStaff,
   validateAndStageRoster,
 } from './service.js'
 import { profileLifecycleStatusSchema } from '../../providers/types.js'
@@ -544,7 +586,494 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
     return successResponse(c, result, 'Effective permissions retrieved successfully.')
   })
 
+  // -------------------------------------------------------------------------
+  // Academic Attendance Policy Routes
+  // -------------------------------------------------------------------------
+
+  // GET /v1/admin/academic-periods
+  router.get('/academic-periods', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const isActiveQuery = c.req.query('is_active') ?? c.req.query('isActive')
+    const isActive = isActiveQuery !== undefined ? isActiveQuery === 'true' : undefined
+    const periods = await listAcademicPeriods({
+      actorRole: c.get('profileRole'),
+      filter: { isActive },
+      providers,
+    })
+    return successResponse(c, periods, 'Academic periods retrieved successfully.')
+  })
+
+  // POST /v1/admin/academic-periods
+  router.post('/academic-periods', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json()
+    const parsed = createAcademicPeriodSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+    const period = await createAcademicPeriod({
+      name: parsed.data.name,
+      startDate: parsed.data.start_date ?? parsed.data.startDate!,
+      endDate: parsed.data.end_date ?? parsed.data.endDate!,
+      isActive: parsed.data.is_active ?? parsed.data.isActive,
+      schoolId: parsed.data.school_id ?? parsed.data.schoolId,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, period, 'Academic period created successfully.', 201)
+  })
+
+  // PUT /v1/admin/academic-periods/:id
+  router.put('/academic-periods/:id', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const body = await c.req.json()
+    const parsed = updateAcademicPeriodSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+    const period = await updateAcademicPeriod({
+      id,
+      name: parsed.data.name,
+      startDate: parsed.data.start_date ?? parsed.data.startDate,
+      endDate: parsed.data.end_date ?? parsed.data.endDate,
+      isActive: parsed.data.is_active ?? parsed.data.isActive,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, period, 'Academic period updated successfully.')
+  })
+
+  // POST /v1/admin/academic-periods/:id/set-active
+  router.post('/academic-periods/:id/set-active', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const period = await setActiveAcademicPeriod({
+      id,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, period, 'Academic period activated successfully.')
+  })
+
+  // GET /v1/admin/classes
+  router.get('/classes', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const schoolId = c.req.query('school_id') ?? c.req.query('schoolId')
+    const academicPeriodId = c.req.query('academic_period_id') ?? c.req.query('academicPeriodId')
+    const classes = await listClasses({
+      schoolId,
+      academicPeriodId,
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, classes, 'Classes retrieved successfully.')
+  })
+
+  // POST /v1/admin/classes
+  router.post('/classes', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json()
+    const parsed = createClassSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+    const cls = await createClass({
+      name: parsed.data.name,
+      grade: parsed.data.grade,
+      academicPeriodId: parsed.data.academic_period_id ?? parsed.data.academicPeriodId,
+      schoolId: parsed.data.school_id ?? parsed.data.schoolId,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, cls, 'Class created successfully.', 201)
+  })
+
+  // PUT /v1/admin/classes/:id
+  router.put('/classes/:id', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const body = await c.req.json()
+    const parsed = updateClassSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+    const cls = await updateClass({
+      id,
+      name: parsed.data.name,
+      grade: parsed.data.grade,
+      academicPeriodId: parsed.data.academic_period_id ?? parsed.data.academicPeriodId,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, cls, 'Class updated successfully.')
+  })
+
+  // GET /v1/admin/enrollments
+  router.get('/enrollments', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const userId = c.req.query('user_id') ?? c.req.query('userId')
+    const classId = c.req.query('class_id') ?? c.req.query('classId')
+    const academicPeriodId = c.req.query('academic_period_id') ?? c.req.query('academicPeriodId')
+    const statusParam = c.req.query('status')
+    const parsedStatus = statusParam ? classEnrollmentStatusSchema.safeParse(statusParam) : null
+    const status = parsedStatus?.success ? parsedStatus.data : undefined
+    const enrollments = await listClassEnrollments({
+      userId,
+      classId,
+      academicPeriodId,
+      status,
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, enrollments, 'Class enrollments retrieved successfully.')
+  })
+
+  // POST /v1/admin/enrollments
+  router.post('/enrollments', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json()
+    const parsed = enrollStudentSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+    const enrollment = await enrollStudent({
+      userId: parsed.data.user_id ?? parsed.data.userId!,
+      classId: parsed.data.class_id ?? parsed.data.classId!,
+      academicPeriodId: parsed.data.academic_period_id ?? parsed.data.academicPeriodId!,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, enrollment, 'Student enrolled successfully.', 201)
+  })
+
+  // POST /v1/admin/enrollments/transfer
+  router.post('/enrollments/transfer', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json()
+    const parsed = transferStudentEnrollmentSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+    const result = await transferStudentEnrollment({
+      userId: parsed.data.user_id ?? parsed.data.userId!,
+      toClassId: parsed.data.to_class_id ?? parsed.data.toClassId!,
+      academicPeriodId: parsed.data.academic_period_id ?? parsed.data.academicPeriodId!,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, result, 'Student enrollment transferred successfully.')
+  })
+
+  // POST /v1/admin/enrollments/promote
+  router.post('/enrollments/promote', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json()
+    const parsed = promoteStudentEnrollmentSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+    const result = await promoteStudentEnrollment({
+      userId: parsed.data.user_id ?? parsed.data.userId!,
+      fromAcademicPeriodId: parsed.data.from_academic_period_id ?? parsed.data.fromAcademicPeriodId!,
+      toAcademicPeriodId: parsed.data.to_academic_period_id ?? parsed.data.toAcademicPeriodId!,
+      toClassId: parsed.data.to_class_id ?? parsed.data.toClassId!,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, result, 'Student enrollment promoted successfully.')
+  })
+
+  // POST /v1/admin/enrollments/exit
+  router.post('/enrollments/exit', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json()
+    const parsed = exitStudentEnrollmentSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+    const result = await exitStudentEnrollment({
+      userId: parsed.data.user_id ?? parsed.data.userId!,
+      academicPeriodId: parsed.data.academic_period_id ?? parsed.data.academicPeriodId!,
+      status: parsed.data.status,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, result, 'Student enrollment exited successfully.')
+  })
+
+  // GET /v1/admin/schedules
+  router.get('/schedules', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const classId = c.req.query('class_id') ?? c.req.query('classId')
+    const academicPeriodId = c.req.query('academic_period_id') ?? c.req.query('academicPeriodId')
+    const dayOfWeek = c.req.query('day_of_week') ?? c.req.query('dayOfWeek')
+    const isActiveQuery = c.req.query('is_active') ?? c.req.query('isActive')
+    const isActive = isActiveQuery !== undefined ? isActiveQuery === 'true' : undefined
+    const schedules = await listSchedules({
+      filter: { classId, academicPeriodId, dayOfWeek, isActive },
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, schedules, 'Schedules retrieved successfully.')
+  })
+
+  // GET /v1/admin/schedules/:id
+  router.get('/schedules/:id', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const schedule = await getSchedule({
+      id,
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, schedule, 'Schedule retrieved successfully.')
+  })
+
+  // POST /v1/admin/schedules
+  router.post('/schedules', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json()
+    const parsed = createScheduleSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+    const schedule = await createSchedule({
+      schoolId: parsed.data.school_id ?? parsed.data.schoolId,
+      classId: parsed.data.class_id ?? parsed.data.classId,
+      academicPeriodId: parsed.data.academic_period_id ?? parsed.data.academicPeriodId,
+      locationId: parsed.data.location_id ?? parsed.data.locationId,
+      dayOfWeek: parsed.data.day_of_week ?? parsed.data.dayOfWeek!,
+      startTime: parsed.data.start_time ?? parsed.data.startTime!,
+      endTime: parsed.data.end_time ?? parsed.data.endTime!,
+      startCheckout: parsed.data.start_checkout ?? parsed.data.startCheckout!,
+      endCheckout: parsed.data.end_checkout ?? parsed.data.endCheckout!,
+      gracePeriodMinutes: parsed.data.grace_period_minutes ?? parsed.data.gracePeriodMinutes,
+      isActive: parsed.data.is_active ?? parsed.data.isActive,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, schedule, 'Schedule created successfully.', 201)
+  })
+
+  // PUT /v1/admin/schedules/:id
+  router.put('/schedules/:id', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const body = await c.req.json()
+    const parsed = updateScheduleSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+    const schedule = await updateSchedule({
+      id,
+      classId: parsed.data.class_id ?? parsed.data.classId,
+      academicPeriodId: parsed.data.academic_period_id ?? parsed.data.academicPeriodId,
+      locationId: parsed.data.location_id ?? parsed.data.locationId,
+      dayOfWeek: parsed.data.day_of_week ?? parsed.data.dayOfWeek,
+      startTime: parsed.data.start_time ?? parsed.data.startTime,
+      endTime: parsed.data.end_time ?? parsed.data.endTime,
+      startCheckout: parsed.data.start_checkout ?? parsed.data.startCheckout,
+      endCheckout: parsed.data.end_checkout ?? parsed.data.endCheckout,
+      gracePeriodMinutes: parsed.data.grace_period_minutes ?? parsed.data.gracePeriodMinutes,
+      isActive: parsed.data.is_active ?? parsed.data.isActive,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, schedule, 'Schedule updated successfully.')
+  })
+
+  // DELETE /v1/admin/schedules/:id
+  router.delete('/schedules/:id', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    await deleteSchedule({
+      id,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, { id }, 'Schedule deleted successfully.')
+  })
+
+  // GET /v1/admin/locations
+  router.get('/locations', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const isActiveQuery = c.req.query('is_active') ?? c.req.query('isActive')
+    const isActive = isActiveQuery !== undefined ? isActiveQuery === 'true' : undefined
+    const locations = await listLocations({
+      filter: { isActive },
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, locations, 'Locations retrieved successfully.')
+  })
+
+  // GET /v1/admin/locations/:id
+  router.get('/locations/:id', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const loc = await getLocation({
+      id,
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, loc, 'Location retrieved successfully.')
+  })
+
+  // POST /v1/admin/locations
+  router.post('/locations', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json()
+    const parsed = createLocationSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+    const loc = await createLocation({
+      name: parsed.data.name,
+      latitude: parsed.data.latitude,
+      longitude: parsed.data.longitude,
+      radiusMeters: parsed.data.radius_meters ?? parsed.data.radiusMeters,
+      isActive: parsed.data.is_active ?? parsed.data.isActive,
+      schoolId: parsed.data.school_id ?? parsed.data.schoolId,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, loc, 'Location created successfully.', 201)
+  })
+
+  // PUT /v1/admin/locations/:id
+  router.put('/locations/:id', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const body = await c.req.json()
+    const parsed = updateLocationSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+    const loc = await updateLocation({
+      id,
+      name: parsed.data.name,
+      latitude: parsed.data.latitude,
+      longitude: parsed.data.longitude,
+      radiusMeters: parsed.data.radius_meters ?? parsed.data.radiusMeters,
+      isActive: parsed.data.is_active ?? parsed.data.isActive,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, loc, 'Location updated successfully.')
+  })
+
+  // DELETE /v1/admin/locations/:id
+  router.delete('/locations/:id', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    await deleteLocation({
+      id,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, { id }, 'Location deleted successfully.')
+  })
+
+  // GET /v1/admin/calendar-exceptions
+  router.get('/calendar-exceptions', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const academicPeriodId = c.req.query('academic_period_id') ?? c.req.query('academicPeriodId')
+    const startDate = c.req.query('start_date') ?? c.req.query('startDate')
+    const endDate = c.req.query('end_date') ?? c.req.query('endDate')
+    const exceptions = await listCalendarExceptions({
+      filter: { academicPeriodId, startDate, endDate },
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, exceptions, 'Calendar exceptions retrieved successfully.')
+  })
+
+  // GET /v1/admin/calendar-exceptions/:id
+  router.get('/calendar-exceptions/:id', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const exc = await getCalendarException({
+      id,
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, exc, 'Calendar exception retrieved successfully.')
+  })
+
+  // POST /v1/admin/calendar-exceptions
+  router.post('/calendar-exceptions', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json()
+    const parsed = createCalendarExceptionSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+    const exc = await createCalendarException({
+      date: parsed.data.date,
+      reason: parsed.data.reason,
+      isHoliday: parsed.data.is_holiday ?? parsed.data.isHoliday,
+      academicPeriodId: parsed.data.academic_period_id ?? parsed.data.academicPeriodId,
+      schoolId: parsed.data.school_id ?? parsed.data.schoolId,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, exc, 'Calendar exception created successfully.', 201)
+  })
+
+  // PUT /v1/admin/calendar-exceptions/:id
+  router.put('/calendar-exceptions/:id', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const body = await c.req.json()
+    const parsed = updateCalendarExceptionSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+    const exc = await updateCalendarException({
+      id,
+      academicPeriodId: parsed.data.academic_period_id ?? parsed.data.academicPeriodId,
+      date: parsed.data.date,
+      reason: parsed.data.reason,
+      isHoliday: parsed.data.is_holiday ?? parsed.data.isHoliday,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, exc, 'Calendar exception updated successfully.')
+  })
+
+  // DELETE /v1/admin/calendar-exceptions/:id
+  router.delete('/calendar-exceptions/:id', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    await deleteCalendarException({
+      id,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, { id }, 'Calendar exception deleted successfully.')
+  })
+
   return router
 }
 
 export const adminRouter = createAdminRouter()
+

@@ -169,6 +169,9 @@ export function computePrimaryAction(params: {
   schedule: Schedule | null
   attendanceStatus: AttendanceStatus
   baseDateWIB: string
+  hasActiveAcademicPeriod?: boolean
+  hasActiveClassEnrollment?: boolean
+  calendarHolidayReason?: string | null
 }): PrimaryAction {
   const {
     robinHealthy,
@@ -177,6 +180,9 @@ export function computePrimaryAction(params: {
     schedule,
     attendanceStatus,
     baseDateWIB,
+    hasActiveAcademicPeriod = true,
+    hasActiveClassEnrollment = true,
+    calendarHolidayReason = null,
   } = params
 
   if (!robinHealthy) {
@@ -206,6 +212,36 @@ export function computePrimaryAction(params: {
       reason_code: 'ATTENDANCE_BLOCKED',
       label: 'Izin aktif hari ini',
       reason_message: 'You have an active permit for today.',
+    }
+  }
+
+  if (!hasActiveAcademicPeriod) {
+    return {
+      allowed: false,
+      type: null,
+      reason_code: 'ATTENDANCE_BLOCKED',
+      label: 'Periode akademik tidak aktif',
+      reason_message: 'No active academic period configured.',
+    }
+  }
+
+  if (!hasActiveClassEnrollment) {
+    return {
+      allowed: false,
+      type: null,
+      reason_code: 'ATTENDANCE_BLOCKED',
+      label: 'Belum terdaftar di kelas',
+      reason_message: 'Student has no active class enrollment for the current academic period.',
+    }
+  }
+
+  if (calendarHolidayReason) {
+    return {
+      allowed: false,
+      type: null,
+      reason_code: 'ATTENDANCE_BLOCKED',
+      label: 'Hari libur / kalender khusus',
+      reason_message: `Today is a scheduled calendar exception/holiday: ${calendarHolidayReason}`,
     }
   }
 
@@ -328,10 +364,9 @@ export async function getDashboard(
   const { startISO, endISO } = getWIBDayBounds(todayWIB)
 
   // All parallel fetches
-  const [profile, absences, schedule, activePermits, robinReady, enrollStatus] = await Promise.all([
+  const [profile, absences, activePermits, robinReady, enrollStatus, activePeriod] = await Promise.all([
     providers.domainStore.getUserProfile(userId),
     providers.domainStore.getTodayAbsences(userId, todayWIB),
-    providers.domainStore.getActiveSchedule(dayKey),
     providers.domainStore.getActivePermitsToday(userId, startISO, endISO),
     providers.robinClient.checkReadiness(),
     providers.robinClient.getEnrollmentStatus(token, requestId).catch(() => ({
@@ -339,7 +374,21 @@ export async function getDashboard(
       embeddingCount: 0,
       message: 'Unavailable.',
     })),
+    providers.domainStore.getActiveAcademicPeriod(),
   ])
+
+  const activeEnrollment = activePeriod
+    ? await providers.domainStore.getActiveClassEnrollment(userId, activePeriod.id)
+    : null
+
+  const calendarException = activePeriod
+    ? await providers.domainStore.getCalendarExceptionByDate(todayWIB, activePeriod.id)
+    : null
+
+  const schedule = await providers.domainStore.getActiveSchedule(dayKey, {
+    classId: activeEnrollment?.class_id,
+    academicPeriodId: activePeriod?.id,
+  })
 
   const attendanceStatus = computeAttendanceStatus(absences)
 
@@ -359,6 +408,9 @@ export async function getDashboard(
     schedule,
     attendanceStatus,
     baseDateWIB: todayWIB,
+    hasActiveAcademicPeriod: Boolean(activePeriod),
+    hasActiveClassEnrollment: Boolean(activeEnrollment),
+    calendarHolidayReason: calendarException?.is_holiday ? calendarException.reason : null,
   })
 
   // Compute normalized schedule

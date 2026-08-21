@@ -1,15 +1,22 @@
 import { AppError } from '../../lib/errors/app-error.js'
 import type {
+  AcademicPeriod,
   AppProviders,
   BootstrapStatus,
+  CalendarException,
+  ClassEnrollment,
+  ClassEnrollmentStatus,
+  ClassRoom,
   IdentityRole,
   IdentityUser,
+  Location,
   Permission,
   ProfileLifecycleStatus,
   RejectedRosterRow,
   Role,
   RosterReport,
   RosterRowInput,
+  Schedule,
   School,
   UserProfile,
 } from '../../providers/types.js'
@@ -949,3 +956,704 @@ export async function correctStudentEmail(params: {
 
   return updated
 }
+
+// ---------------------------------------------------------------------------
+// Academic Attendance Policy Service Operations
+// ---------------------------------------------------------------------------
+
+function checkPolicyAdminAccess(actorRole: IdentityRole | null): void {
+  if (actorRole !== 'school_admin' && actorRole !== 'platform_admin') {
+    throw AppError.forbidden()
+  }
+}
+
+// --- Academic Periods ---
+
+export async function listAcademicPeriods(params: {
+  actorRole: IdentityRole | null
+  filter?: { isActive?: boolean }
+  providers: AppProviders
+}): Promise<AcademicPeriod[]> {
+  checkPolicyAdminAccess(params.actorRole)
+  return params.providers.domainStore.listAcademicPeriods(params.filter)
+}
+
+export async function createAcademicPeriod(params: {
+  name: string
+  startDate: string
+  endDate: string
+  isActive?: boolean
+  schoolId?: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<AcademicPeriod> {
+  checkPolicyAdminAccess(params.actorRole)
+  const period = await params.providers.domainStore.createAcademicPeriod({
+    name: params.name,
+    startDate: params.startDate,
+    endDate: params.endDate,
+    isActive: params.isActive,
+    schoolId: params.schoolId,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'create_academic_period',
+    entity_type: 'academic_period',
+    entity_id: period.id,
+    details: {
+      name: period.name,
+      start_date: period.start_date,
+      end_date: period.end_date,
+      is_active: period.is_active,
+    },
+  })
+
+  return period
+}
+
+export async function updateAcademicPeriod(params: {
+  id: string
+  name?: string
+  startDate?: string
+  endDate?: string
+  isActive?: boolean
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<AcademicPeriod> {
+  checkPolicyAdminAccess(params.actorRole)
+  const period = await params.providers.domainStore.updateAcademicPeriod(params.id, {
+    name: params.name,
+    startDate: params.startDate,
+    endDate: params.endDate,
+    isActive: params.isActive,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'update_academic_period',
+    entity_type: 'academic_period',
+    entity_id: period.id,
+    details: {
+      name: period.name,
+      start_date: period.start_date,
+      end_date: period.end_date,
+      is_active: period.is_active,
+    },
+  })
+
+  return period
+}
+
+export async function setActiveAcademicPeriod(params: {
+  id: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<AcademicPeriod> {
+  checkPolicyAdminAccess(params.actorRole)
+  const period = await params.providers.domainStore.setActiveAcademicPeriod(params.id)
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'set_active_academic_period',
+    entity_type: 'academic_period',
+    entity_id: period.id,
+    details: {
+      name: period.name,
+      is_active: true,
+    },
+  })
+
+  return period
+}
+
+// --- Classes ---
+
+export async function listClasses(params: {
+  schoolId?: string
+  academicPeriodId?: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<ClassRoom[]> {
+  checkPolicyAdminAccess(params.actorRole)
+  return params.providers.domainStore.getClasses(params.schoolId, params.academicPeriodId)
+}
+
+export async function createClass(params: {
+  name: string
+  grade?: number | null
+  academicPeriodId?: string | null
+  schoolId?: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<ClassRoom> {
+  checkPolicyAdminAccess(params.actorRole)
+  const cls = await params.providers.domainStore.createClass({
+    name: params.name,
+    grade: params.grade,
+    academicPeriodId: params.academicPeriodId,
+    schoolId: params.schoolId,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'create_class',
+    entity_type: 'class',
+    entity_id: cls.id,
+    details: {
+      name: cls.name,
+      grade: cls.grade,
+      academic_period_id: cls.academic_period_id,
+    },
+  })
+
+  return cls
+}
+
+export async function updateClass(params: {
+  id: string
+  name?: string
+  grade?: number | null
+  academicPeriodId?: string | null
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<ClassRoom> {
+  checkPolicyAdminAccess(params.actorRole)
+  const cls = await params.providers.domainStore.updateClass(params.id, {
+    name: params.name,
+    grade: params.grade,
+    academicPeriodId: params.academicPeriodId,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'update_class',
+    entity_type: 'class',
+    entity_id: cls.id,
+    details: {
+      name: cls.name,
+      grade: cls.grade,
+      academic_period_id: cls.academic_period_id,
+    },
+  })
+
+  return cls
+}
+
+// --- Class Enrollments ---
+
+export async function listClassEnrollments(params: {
+  userId?: string
+  classId?: string
+  academicPeriodId?: string
+  status?: ClassEnrollmentStatus
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<ClassEnrollment[]> {
+  checkPolicyAdminAccess(params.actorRole)
+  return params.providers.domainStore.listClassEnrollments({
+    userId: params.userId,
+    classId: params.classId,
+    academicPeriodId: params.academicPeriodId,
+    status: params.status,
+  })
+}
+
+export async function enrollStudent(params: {
+  userId: string
+  classId: string
+  academicPeriodId: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<ClassEnrollment> {
+  checkPolicyAdminAccess(params.actorRole)
+  const enrollment = await params.providers.domainStore.enrollStudentInClass({
+    userId: params.userId,
+    classId: params.classId,
+    academicPeriodId: params.academicPeriodId,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'enroll_student',
+    entity_type: 'class_enrollment',
+    entity_id: enrollment.id,
+    details: {
+      user_id: enrollment.user_id,
+      class_id: enrollment.class_id,
+      academic_period_id: enrollment.academic_period_id,
+      status: enrollment.status,
+    },
+  })
+
+  return enrollment
+}
+
+export async function transferStudentEnrollment(params: {
+  userId: string
+  toClassId: string
+  academicPeriodId: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<{ previous: ClassEnrollment; current: ClassEnrollment }> {
+  checkPolicyAdminAccess(params.actorRole)
+  const result = await params.providers.domainStore.transferStudentEnrollment({
+    userId: params.userId,
+    toClassId: params.toClassId,
+    academicPeriodId: params.academicPeriodId,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'transfer_student_enrollment',
+    entity_type: 'class_enrollment',
+    entity_id: result.current.id,
+    details: {
+      user_id: params.userId,
+      from_class_id: result.previous.class_id,
+      to_class_id: result.current.class_id,
+      academic_period_id: params.academicPeriodId,
+    },
+  })
+
+  return result
+}
+
+export async function promoteStudentEnrollment(params: {
+  userId: string
+  fromAcademicPeriodId: string
+  toAcademicPeriodId: string
+  toClassId: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<{ previous: ClassEnrollment; current: ClassEnrollment }> {
+  checkPolicyAdminAccess(params.actorRole)
+  const result = await params.providers.domainStore.promoteStudentEnrollment({
+    userId: params.userId,
+    fromAcademicPeriodId: params.fromAcademicPeriodId,
+    toAcademicPeriodId: params.toAcademicPeriodId,
+    toClassId: params.toClassId,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'promote_student_enrollment',
+    entity_type: 'class_enrollment',
+    entity_id: result.current.id,
+    details: {
+      user_id: params.userId,
+      from_academic_period_id: params.fromAcademicPeriodId,
+      to_academic_period_id: params.toAcademicPeriodId,
+      to_class_id: result.current.class_id,
+    },
+  })
+
+  return result
+}
+
+export async function exitStudentEnrollment(params: {
+  userId: string
+  academicPeriodId: string
+  status?: 'archived' | 'graduated'
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<ClassEnrollment> {
+  checkPolicyAdminAccess(params.actorRole)
+  const enrollment = await params.providers.domainStore.exitStudentEnrollment({
+    userId: params.userId,
+    academicPeriodId: params.academicPeriodId,
+    status: params.status,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'exit_student_enrollment',
+    entity_type: 'class_enrollment',
+    entity_id: enrollment.id,
+    details: {
+      user_id: params.userId,
+      academic_period_id: params.academicPeriodId,
+      status: enrollment.status,
+    },
+  })
+
+  return enrollment
+}
+
+// --- Schedules ---
+
+export async function listSchedules(params: {
+  filter?: {
+    classId?: string
+    academicPeriodId?: string
+    dayOfWeek?: string
+    isActive?: boolean
+  }
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<Schedule[]> {
+  checkPolicyAdminAccess(params.actorRole)
+  return params.providers.domainStore.listSchedules(params.filter)
+}
+
+export async function getSchedule(params: {
+  id: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<Schedule> {
+  checkPolicyAdminAccess(params.actorRole)
+  const schedule = await params.providers.domainStore.getScheduleById(params.id)
+  if (!schedule) throw AppError.notFound('Schedule')
+  return schedule
+}
+
+export async function createSchedule(params: {
+  schoolId?: string | null
+  classId?: string | null
+  academicPeriodId?: string | null
+  locationId?: string | null
+  dayOfWeek: string
+  startTime: string
+  endTime: string
+  startCheckout: string
+  endCheckout: string
+  gracePeriodMinutes?: number
+  isActive?: boolean
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<Schedule> {
+  checkPolicyAdminAccess(params.actorRole)
+  const schedule = await params.providers.domainStore.createSchedule({
+    schoolId: params.schoolId,
+    classId: params.classId,
+    academicPeriodId: params.academicPeriodId,
+    locationId: params.locationId,
+    dayOfWeek: params.dayOfWeek,
+    startTime: params.startTime,
+    endTime: params.endTime,
+    startCheckout: params.startCheckout,
+    endCheckout: params.endCheckout,
+    gracePeriodMinutes: params.gracePeriodMinutes,
+    isActive: params.isActive,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'create_schedule',
+    entity_type: 'schedule',
+    entity_id: schedule.id ?? 'unknown',
+    details: {
+      day_of_week: schedule.day_of_week ?? schedule.hari,
+      start_time: schedule.mulai_masuk,
+      end_time: schedule.selesai_masuk,
+      class_id: schedule.class_id,
+      academic_period_id: schedule.academic_period_id,
+      location_id: schedule.location_id,
+    },
+  })
+
+  return schedule
+}
+
+export async function updateSchedule(params: {
+  id: string
+  classId?: string | null
+  academicPeriodId?: string | null
+  locationId?: string | null
+  dayOfWeek?: string
+  startTime?: string
+  endTime?: string
+  startCheckout?: string
+  endCheckout?: string
+  gracePeriodMinutes?: number
+  isActive?: boolean
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<Schedule> {
+  checkPolicyAdminAccess(params.actorRole)
+  const schedule = await params.providers.domainStore.updateSchedule(params.id, {
+    classId: params.classId,
+    academicPeriodId: params.academicPeriodId,
+    locationId: params.locationId,
+    dayOfWeek: params.dayOfWeek,
+    startTime: params.startTime,
+    endTime: params.endTime,
+    startCheckout: params.startCheckout,
+    endCheckout: params.endCheckout,
+    gracePeriodMinutes: params.gracePeriodMinutes,
+    isActive: params.isActive,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'update_schedule',
+    entity_type: 'schedule',
+    entity_id: schedule.id ?? params.id,
+    details: {
+      day_of_week: schedule.day_of_week ?? schedule.hari,
+      start_time: schedule.mulai_masuk,
+      end_time: schedule.selesai_masuk,
+      class_id: schedule.class_id,
+      academic_period_id: schedule.academic_period_id,
+      location_id: schedule.location_id,
+    },
+  })
+
+  return schedule
+}
+
+export async function deleteSchedule(params: {
+  id: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<void> {
+  checkPolicyAdminAccess(params.actorRole)
+  await params.providers.domainStore.deleteSchedule(params.id)
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'delete_schedule',
+    entity_type: 'schedule',
+    entity_id: params.id,
+    details: { id: params.id },
+  })
+}
+
+// --- Locations ---
+
+export async function listLocations(params: {
+  filter?: { isActive?: boolean }
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<Location[]> {
+  checkPolicyAdminAccess(params.actorRole)
+  return params.providers.domainStore.listLocations(params.filter)
+}
+
+export async function getLocation(params: {
+  id: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<Location> {
+  checkPolicyAdminAccess(params.actorRole)
+  const loc = await params.providers.domainStore.getLocationById(params.id)
+  if (!loc) throw AppError.notFound('Location')
+  return loc
+}
+
+export async function createLocation(params: {
+  name: string
+  latitude: number
+  longitude: number
+  radiusMeters?: number
+  isActive?: boolean
+  schoolId?: string | null
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<Location> {
+  checkPolicyAdminAccess(params.actorRole)
+  const loc = await params.providers.domainStore.createLocation({
+    name: params.name,
+    latitude: params.latitude,
+    longitude: params.longitude,
+    radiusMeters: params.radiusMeters,
+    isActive: params.isActive,
+    schoolId: params.schoolId,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'create_location',
+    entity_type: 'location',
+    entity_id: loc.id,
+    details: {
+      name: loc.name,
+      latitude: loc.latitude,
+      longitude: loc.longitude,
+      radius_meters: loc.radius_meters,
+    },
+  })
+
+  return loc
+}
+
+export async function updateLocation(params: {
+  id: string
+  name?: string
+  latitude?: number
+  longitude?: number
+  radiusMeters?: number
+  isActive?: boolean
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<Location> {
+  checkPolicyAdminAccess(params.actorRole)
+  const loc = await params.providers.domainStore.updateLocation(params.id, {
+    name: params.name,
+    latitude: params.latitude,
+    longitude: params.longitude,
+    radiusMeters: params.radiusMeters,
+    isActive: params.isActive,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'update_location',
+    entity_type: 'location',
+    entity_id: loc.id,
+    details: {
+      name: loc.name,
+      latitude: loc.latitude,
+      longitude: loc.longitude,
+      radius_meters: loc.radius_meters,
+    },
+  })
+
+  return loc
+}
+
+export async function deleteLocation(params: {
+  id: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<void> {
+  checkPolicyAdminAccess(params.actorRole)
+  await params.providers.domainStore.deleteLocation(params.id)
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'delete_location',
+    entity_type: 'location',
+    entity_id: params.id,
+    details: { id: params.id },
+  })
+}
+
+// --- Calendar Exceptions ---
+
+export async function listCalendarExceptions(params: {
+  filter?: {
+    academicPeriodId?: string
+    startDate?: string
+    endDate?: string
+  }
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<CalendarException[]> {
+  checkPolicyAdminAccess(params.actorRole)
+  return params.providers.domainStore.listCalendarExceptions(params.filter)
+}
+
+export async function getCalendarException(params: {
+  id: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<CalendarException> {
+  checkPolicyAdminAccess(params.actorRole)
+  const exc = await params.providers.domainStore.getCalendarExceptionById(params.id)
+  if (!exc) throw AppError.notFound('Calendar exception')
+  return exc
+}
+
+export async function createCalendarException(params: {
+  schoolId?: string | null
+  academicPeriodId?: string | null
+  date: string
+  reason: string
+  isHoliday?: boolean
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<CalendarException> {
+  checkPolicyAdminAccess(params.actorRole)
+  const exc = await params.providers.domainStore.createCalendarException({
+    schoolId: params.schoolId,
+    academicPeriodId: params.academicPeriodId,
+    date: params.date,
+    reason: params.reason,
+    isHoliday: params.isHoliday,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'create_calendar_exception',
+    entity_type: 'calendar_exception',
+    entity_id: exc.id,
+    details: {
+      date: exc.date,
+      reason: exc.reason,
+      is_holiday: exc.is_holiday,
+      academic_period_id: exc.academic_period_id,
+    },
+  })
+
+  return exc
+}
+
+export async function updateCalendarException(params: {
+  id: string
+  academicPeriodId?: string | null
+  date?: string
+  reason?: string
+  isHoliday?: boolean
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<CalendarException> {
+  checkPolicyAdminAccess(params.actorRole)
+  const exc = await params.providers.domainStore.updateCalendarException(params.id, {
+    academicPeriodId: params.academicPeriodId,
+    date: params.date,
+    reason: params.reason,
+    isHoliday: params.isHoliday,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'update_calendar_exception',
+    entity_type: 'calendar_exception',
+    entity_id: exc.id,
+    details: {
+      date: exc.date,
+      reason: exc.reason,
+      is_holiday: exc.is_holiday,
+      academic_period_id: exc.academic_period_id,
+    },
+  })
+
+  return exc
+}
+
+export async function deleteCalendarException(params: {
+  id: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<void> {
+  checkPolicyAdminAccess(params.actorRole)
+  await params.providers.domainStore.deleteCalendarException(params.id)
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'delete_calendar_exception',
+    entity_type: 'calendar_exception',
+    entity_id: params.id,
+    details: { id: params.id },
+  })
+}
+

@@ -10,21 +10,31 @@ import type {
   AuditLog,
   AuditLogEntry,
   BootstrapStatus,
+  CalendarException,
+  ClassEnrollment,
+  ClassEnrollmentStatus,
   ClassRoom,
   CreateAcademicPeriodParams,
+  CreateCalendarExceptionParams,
   CreateClassParams,
+  CreateLocationParams,
   CreatePasswordResetCodeParams,
   CreatePermissionParams,
   CreateRoleParams,
+  CreateScheduleParams,
   CreateSchoolParams,
   CreateStaffParams,
   DomainStore,
+  EnrollStudentParams,
+  ExitStudentEnrollmentParams,
   InsertAttendanceData,
   InsertPermitData,
+  Location,
   PasswordResetCode,
   Permission,
   Permit,
   ProfileLifecycleStatus,
+  PromoteStudentEnrollmentParams,
   Role,
   RosterReport,
   RosterStudent,
@@ -32,7 +42,13 @@ import type {
   Schedule,
   School,
   StageRosterParams,
+  TransferStudentEnrollmentParams,
+  UpdateAcademicPeriodParams,
+  UpdateCalendarExceptionParams,
+  UpdateClassParams,
+  UpdateLocationParams,
   UpdateRoleParams,
+  UpdateScheduleParams,
   UpdateStaffParams,
   UserProfile,
 } from '../types.js'
@@ -186,20 +202,58 @@ export class PostgresDomainStore implements DomainStore {
     }
   }
 
-  async getActiveSchedule(dayKey: string): Promise<Schedule | null> {
+  async getActiveSchedule(
+    dayKey: string,
+    params?: { classId?: string; academicPeriodId?: string },
+  ): Promise<Schedule | null> {
     try {
+      const day = dayKey.toLowerCase()
+      const classId = params?.classId ?? null
+      const periodId = params?.academicPeriodId ?? null
+
       const rows = await this.sql<Schedule[]>`
-        SELECT day_of_week AS hari, start_time::text AS mulai_masuk, end_time::text AS selesai_masuk,
+        SELECT id, school_id, class_id, academic_period_id, location_id,
+               day_of_week, day_of_week AS hari, start_time::text AS mulai_masuk, end_time::text AS selesai_masuk,
                start_checkout::text AS mulai_pulang, end_checkout::text AS selesai_pulang,
-               grace_period_minutes AS kompensasi_waktu, is_active
+               grace_period_minutes AS kompensasi_waktu, is_active,
+               created_at::text, updated_at::text
         FROM schedules
-        WHERE (day_of_week = ${dayKey.toLowerCase()} OR day_of_week = ${dayKey}) AND is_active = true
+        WHERE is_active = true
+          AND (day_of_week = ${day})
+          AND (
+            (${classId}::uuid IS NOT NULL AND ${periodId}::uuid IS NOT NULL AND class_id = ${classId}::uuid AND academic_period_id = ${periodId}::uuid)
+            OR (${classId}::uuid IS NOT NULL AND class_id = ${classId}::uuid AND academic_period_id IS NULL)
+            OR (${periodId}::uuid IS NOT NULL AND academic_period_id = ${periodId}::uuid AND class_id IS NULL)
+            OR (class_id IS NULL AND academic_period_id IS NULL)
+          )
+        ORDER BY
+          CASE
+            WHEN ${classId}::uuid IS NOT NULL AND ${periodId}::uuid IS NOT NULL AND class_id = ${classId}::uuid AND academic_period_id = ${periodId}::uuid THEN 1
+            WHEN ${classId}::uuid IS NOT NULL AND class_id = ${classId}::uuid THEN 2
+            WHEN ${periodId}::uuid IS NOT NULL AND academic_period_id = ${periodId}::uuid THEN 3
+            ELSE 4
+          END ASC
         LIMIT 1
       `
-      return rows[0] ?? null
+      if (rows && rows.length > 0) {
+        return rows[0]
+      }
+
+      // Fallback for simple single-day matches if not class/period specific
+      const fallbackRows = await this.sql<Schedule[]>`
+        SELECT id, school_id, class_id, academic_period_id, location_id,
+               day_of_week, day_of_week AS hari, start_time::text AS mulai_masuk, end_time::text AS selesai_masuk,
+               start_checkout::text AS mulai_pulang, end_checkout::text AS selesai_pulang,
+               grace_period_minutes AS kompensasi_waktu, is_active,
+               created_at::text, updated_at::text
+        FROM schedules
+        WHERE is_active = true AND day_of_week = ${day}
+        LIMIT 1
+      `
+      return fallbackRows[0] ?? null
     } catch (err) {
       if (err instanceof AppError) throw err
-      logger.error({ err, dayKey }, 'Failed to query schedule')
+      logger.error({ err, dayKey, params }, 'Failed to query schedule')
       throw AppError.internal('An unexpected database error occurred.')
     }
   }
@@ -276,25 +330,39 @@ export class PostgresDomainStore implements DomainStore {
         SELECT id, name, latitude, longitude, radius_meters
         FROM locations
         WHERE is_active = true
-        LIMIT 1
       `
 
-      let locationName = 'School Campus'
-      if (locations && locations.length > 0) {
-        const loc = locations[0]
-        locationName = loc.name
-        const dist = calculateDistanceMeters(params.latitude, params.longitude, loc.latitude, loc.longitude)
-        if (dist > loc.radius_meters) {
-          return {
-            actionable: false,
-            action_type: 'none',
-            message: `Di luar radius lokasi sekolah (${loc.name}).`,
-            details: {
-              location_name: loc.name,
-            },
-          }
+      if (!locations || locations.length === 0) {
+        return {
+          actionable: false,
+          action_type: 'none',
+          message: 'No active attendance location/geofence configured.',
+          details: null,
         }
       }
+
+      let matchedLocation: { id: string; name: string; latitude: number; longitude: number; radius_meters: number } | null = null
+      for (const loc of locations) {
+        const dist = calculateDistanceMeters(params.latitude, params.longitude, loc.latitude, loc.longitude)
+        if (dist <= loc.radius_meters) {
+          matchedLocation = loc
+          break
+        }
+      }
+
+      if (!matchedLocation) {
+        const loc = locations[0]
+        return {
+          actionable: false,
+          action_type: 'none',
+          message: `Di luar radius lokasi sekolah (${loc.name}).`,
+          details: {
+            location_name: loc.name,
+          },
+        }
+      }
+
+      const locationName = matchedLocation.name
 
       // 2. Query today's attendances
       const now = new Date()
@@ -480,6 +548,46 @@ export class PostgresDomainStore implements DomainStore {
     }
   }
 
+  async listAcademicPeriods(filter?: { isActive?: boolean }): Promise<AcademicPeriod[]> {
+    try {
+      if (filter?.isActive !== undefined) {
+        const rows = await this.sql<AcademicPeriod[]>`
+          SELECT id, school_id, name, start_date::text, end_date::text, is_active, created_at::text, updated_at::text
+          FROM academic_periods
+          WHERE is_active = ${filter.isActive}
+          ORDER BY start_date DESC
+        `
+        return rows ?? []
+      }
+      const rows = await this.sql<AcademicPeriod[]>`
+        SELECT id, school_id, name, start_date::text, end_date::text, is_active, created_at::text, updated_at::text
+        FROM academic_periods
+        ORDER BY start_date DESC
+      `
+      return rows ?? []
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, filter }, 'Failed to list academic periods')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getAcademicPeriod(id: string): Promise<AcademicPeriod | null> {
+    try {
+      const rows = await this.sql<AcademicPeriod[]>`
+        SELECT id, school_id, name, start_date::text, end_date::text, is_active, created_at::text, updated_at::text
+        FROM academic_periods
+        WHERE id = ${id}
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to get academic period')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
   async getActiveAcademicPeriod(): Promise<AcademicPeriod | null> {
     try {
       const rows = await this.sql<AcademicPeriod[]>`
@@ -498,15 +606,28 @@ export class PostgresDomainStore implements DomainStore {
 
   async createAcademicPeriod(params: CreateAcademicPeriodParams): Promise<AcademicPeriod> {
     try {
-      const rows = await this.sql<AcademicPeriod[]>`
-        INSERT INTO academic_periods (school_id, name, start_date, end_date, is_active)
-        VALUES (${params.schoolId}, ${params.name}, ${params.startDate}::date, ${params.endDate}::date, ${params.isActive})
-        RETURNING id, school_id, name, start_date::text, end_date::text, is_active, created_at::text, updated_at::text
-      `
-      if (!rows || rows.length === 0) {
-        throw AppError.internal('Failed to create academic period.')
+      let schoolId = params.schoolId
+      if (!schoolId) {
+        const school = await this.getSchool()
+        schoolId = school?.id ?? 'a0000000-0000-0000-0000-000000000001'
       }
-      return rows[0]
+      const isActive = params.isActive ?? true
+
+      const beginFn = this.sql.begin ? this.sql.begin.bind(this.sql) : async (cb: (sql: Sql) => Promise<AcademicPeriod>) => cb(this.sql)
+      return await beginFn(async (sql) => {
+        if (isActive) {
+          await sql`UPDATE academic_periods SET is_active = false, updated_at = NOW() WHERE school_id = ${schoolId}`
+        }
+        const rows = await sql<AcademicPeriod[]>`
+          INSERT INTO academic_periods (school_id, name, start_date, end_date, is_active)
+          VALUES (${schoolId}, ${params.name}, ${params.startDate}::date, ${params.endDate}::date, ${isActive})
+          RETURNING id, school_id, name, start_date::text, end_date::text, is_active, created_at::text, updated_at::text
+        `
+        if (!rows || rows.length === 0) {
+          throw AppError.internal('Failed to create academic period.')
+        }
+        return rows[0]
+      })
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, params }, 'Failed to create academic period')
@@ -514,35 +635,106 @@ export class PostgresDomainStore implements DomainStore {
     }
   }
 
-  async getClasses(schoolId?: string): Promise<ClassRoom[]> {
+  async updateAcademicPeriod(id: string, params: UpdateAcademicPeriodParams): Promise<AcademicPeriod> {
     try {
-      if (schoolId) {
-        const rows = await this.sql<ClassRoom[]>`
-          SELECT id, school_id, academic_period_id, name, grade, created_at::text, updated_at::text
-          FROM classes
-          WHERE school_id = ${schoolId}
-          ORDER BY name ASC
+      const beginFn = this.sql.begin ? this.sql.begin.bind(this.sql) : async (cb: (sql: Sql) => Promise<AcademicPeriod>) => cb(this.sql)
+      return await beginFn(async (sql) => {
+        const existing = await sql<{ id: string; school_id: string }[]>`SELECT id, school_id FROM academic_periods WHERE id = ${id} LIMIT 1`
+        if (!existing || existing.length === 0) {
+          throw AppError.notFound('Academic period')
+        }
+        if (params.isActive === true) {
+          await sql`UPDATE academic_periods SET is_active = false, updated_at = NOW() WHERE school_id = ${existing[0].school_id}`
+        }
+        const rows = await sql<AcademicPeriod[]>`
+          UPDATE academic_periods
+          SET
+            name = COALESCE(${params.name ?? null}, name),
+            start_date = COALESCE(${params.startDate ? `${params.startDate}::date` : null}, start_date),
+            end_date = COALESCE(${params.endDate ? `${params.endDate}::date` : null}, end_date),
+            is_active = COALESCE(${params.isActive ?? null}, is_active),
+            updated_at = NOW()
+          WHERE id = ${id}
+          RETURNING id, school_id, name, start_date::text, end_date::text, is_active, created_at::text, updated_at::text
         `
-        return rows ?? []
-      }
+        return rows[0]
+      })
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id, params }, 'Failed to update academic period')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async setActiveAcademicPeriod(id: string): Promise<AcademicPeriod> {
+    try {
+      const beginFn = this.sql.begin ? this.sql.begin.bind(this.sql) : async (cb: (sql: Sql) => Promise<AcademicPeriod>) => cb(this.sql)
+      return await beginFn(async (sql) => {
+        const existing = await sql<{ id: string; school_id: string }[]>`SELECT id, school_id FROM academic_periods WHERE id = ${id} LIMIT 1`
+        if (!existing || existing.length === 0) {
+          throw AppError.notFound('Academic period')
+        }
+        await sql`UPDATE academic_periods SET is_active = false, updated_at = NOW() WHERE school_id = ${existing[0].school_id}`
+        const rows = await sql<AcademicPeriod[]>`
+          UPDATE academic_periods
+          SET is_active = true, updated_at = NOW()
+          WHERE id = ${id}
+          RETURNING id, school_id, name, start_date::text, end_date::text, is_active, created_at::text, updated_at::text
+        `
+        return rows[0]
+      })
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to set active academic period')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getClasses(schoolId?: string, academicPeriodId?: string): Promise<ClassRoom[]> {
+    try {
+      const sId = schoolId ?? null
+      const aId = academicPeriodId ?? null
       const rows = await this.sql<ClassRoom[]>`
         SELECT id, school_id, academic_period_id, name, grade, created_at::text, updated_at::text
         FROM classes
+        WHERE (${sId}::uuid IS NULL OR school_id = ${sId}::uuid)
+          AND (${aId}::uuid IS NULL OR academic_period_id = ${aId}::uuid)
         ORDER BY name ASC
       `
       return rows ?? []
     } catch (err) {
       if (err instanceof AppError) throw err
-      logger.error({ err, schoolId }, 'Failed to query classes')
+      logger.error({ err, schoolId, academicPeriodId }, 'Failed to query classes')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getClassById(id: string): Promise<ClassRoom | null> {
+    try {
+      const rows = await this.sql<ClassRoom[]>`
+        SELECT id, school_id, academic_period_id, name, grade, created_at::text, updated_at::text
+        FROM classes
+        WHERE id = ${id}
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to get class by id')
       throw AppError.internal('An unexpected database error occurred.')
     }
   }
 
   async createClass(params: CreateClassParams): Promise<ClassRoom> {
     try {
+      let schoolId = params.schoolId
+      if (!schoolId) {
+        const school = await this.getSchool()
+        schoolId = school?.id ?? 'a0000000-0000-0000-0000-000000000001'
+      }
       const rows = await this.sql<ClassRoom[]>`
         INSERT INTO classes (school_id, academic_period_id, name, grade)
-        VALUES (${params.schoolId}, ${params.academicPeriodId ?? null}, ${params.name}, ${params.grade ?? null})
+        VALUES (${schoolId}, ${params.academicPeriodId ?? null}, ${params.name}, ${params.grade ?? null})
         RETURNING id, school_id, academic_period_id, name, grade, created_at::text, updated_at::text
       `
       if (!rows || rows.length === 0) {
@@ -552,6 +744,592 @@ export class PostgresDomainStore implements DomainStore {
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, params }, 'Failed to create class')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async updateClass(id: string, params: UpdateClassParams): Promise<ClassRoom> {
+    try {
+      const existing = await this.getClassById(id)
+      if (!existing) throw AppError.notFound('Class')
+
+      const rows = await this.sql<ClassRoom[]>`
+        UPDATE classes
+        SET
+          name = COALESCE(${params.name ?? null}, name),
+          grade = COALESCE(${params.grade ?? null}, grade),
+          academic_period_id = COALESCE(${params.academicPeriodId ?? null}, academic_period_id),
+          updated_at = NOW()
+        WHERE id = ${id}
+        RETURNING id, school_id, academic_period_id, name, grade, created_at::text, updated_at::text
+      `
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id, params }, 'Failed to update class')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async listClassEnrollments(filter?: {
+    userId?: string
+    classId?: string
+    academicPeriodId?: string
+    status?: ClassEnrollmentStatus
+  }): Promise<ClassEnrollment[]> {
+    try {
+      const rows = await this.sql<ClassEnrollment[]>`
+        SELECT ce.id, ce.user_id, ce.class_id, ce.academic_period_id, ce.status,
+               ce.created_at::text, ce.updated_at::text,
+               c.name AS class_name, p.full_name AS student_name, p.nis,
+               ap.name AS period_name
+        FROM class_enrollments ce
+        LEFT JOIN classes c ON c.id = ce.class_id
+        LEFT JOIN profiles p ON p.user_id = ce.user_id
+        LEFT JOIN academic_periods ap ON ap.id = ce.academic_period_id
+        WHERE (${filter?.userId ?? null}::text IS NULL OR ce.user_id = ${filter?.userId ?? null})
+          AND (${filter?.classId ?? null}::uuid IS NULL OR ce.class_id = ${filter?.classId ?? null}::uuid)
+          AND (${filter?.academicPeriodId ?? null}::uuid IS NULL OR ce.academic_period_id = ${filter?.academicPeriodId ?? null}::uuid)
+          AND (${filter?.status ?? null}::text IS NULL OR ce.status = ${filter?.status ?? null})
+        ORDER BY ce.created_at DESC
+      `
+      return rows ?? []
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, filter }, 'Failed to list class enrollments')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getActiveClassEnrollment(userId: string, academicPeriodId?: string): Promise<ClassEnrollment | null> {
+    try {
+      let targetPeriodId = academicPeriodId
+      if (!targetPeriodId) {
+        const activePeriod = await this.getActiveAcademicPeriod()
+        if (!activePeriod) return null
+        targetPeriodId = activePeriod.id
+      }
+
+      const rows = await this.sql<ClassEnrollment[]>`
+        SELECT ce.id, ce.user_id, ce.class_id, ce.academic_period_id, ce.status,
+               ce.created_at::text, ce.updated_at::text,
+               c.name AS class_name, p.full_name AS student_name, p.nis,
+               ap.name AS period_name
+        FROM class_enrollments ce
+        LEFT JOIN classes c ON c.id = ce.class_id
+        LEFT JOIN profiles p ON p.user_id = ce.user_id
+        LEFT JOIN academic_periods ap ON ap.id = ce.academic_period_id
+        WHERE ce.user_id = ${userId}
+          AND ce.academic_period_id = ${targetPeriodId}::uuid
+          AND ce.status = 'active'
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId, academicPeriodId }, 'Failed to get active class enrollment')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async enrollStudentInClass(params: EnrollStudentParams): Promise<ClassEnrollment> {
+    try {
+      const cls = await this.getClassById(params.classId)
+      if (!cls) throw AppError.notFound('Class')
+      const period = await this.getAcademicPeriod(params.academicPeriodId)
+      if (!period) throw AppError.notFound('Academic period')
+
+      const beginFn = this.sql.begin ? this.sql.begin.bind(this.sql) : async (cb: (sql: Sql) => Promise<ClassEnrollment>) => cb(this.sql)
+      return await beginFn(async (sql) => {
+        const existing = await sql<ClassEnrollment[]>`
+          SELECT id FROM class_enrollments
+          WHERE user_id = ${params.userId} AND academic_period_id = ${params.academicPeriodId}::uuid AND status = 'active'
+          LIMIT 1
+        `
+        if (existing && existing.length > 0) {
+          throw AppError.conflict('Student already has an active class enrollment in this academic period.')
+        }
+
+        const rows = await sql<ClassEnrollment[]>`
+          INSERT INTO class_enrollments (user_id, class_id, academic_period_id, status)
+          VALUES (${params.userId}, ${params.classId}::uuid, ${params.academicPeriodId}::uuid, 'active')
+          RETURNING id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+        `
+
+        await sql`
+          UPDATE profiles SET class_name = ${cls.name}, updated_at = NOW() WHERE user_id = ${params.userId}
+        `
+
+        return {
+          ...rows[0],
+          class_name: cls.name,
+          period_name: period.name,
+        }
+      })
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to enroll student in class')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async transferStudentEnrollment(
+    params: TransferStudentEnrollmentParams,
+  ): Promise<{ previous: ClassEnrollment; current: ClassEnrollment }> {
+    try {
+      const targetClass = await this.getClassById(params.toClassId)
+      if (!targetClass) throw AppError.notFound('Target class')
+
+      const beginFn = this.sql.begin ? this.sql.begin.bind(this.sql) : async (cb: (sql: Sql) => Promise<{ previous: ClassEnrollment; current: ClassEnrollment }>) => cb(this.sql)
+      return await beginFn(async (sql) => {
+        const activeRows = await sql<ClassEnrollment[]>`
+          SELECT id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+          FROM class_enrollments
+          WHERE user_id = ${params.userId} AND academic_period_id = ${params.academicPeriodId}::uuid AND status = 'active'
+          LIMIT 1
+        `
+        if (!activeRows || activeRows.length === 0) {
+          throw AppError.notFound('Active class enrollment in this academic period')
+        }
+        const prev = activeRows[0]
+        if (prev.class_id === params.toClassId) {
+          throw AppError.validationError('Target class must be different from current class.')
+        }
+
+        const updatedPrevRows = await sql<ClassEnrollment[]>`
+          UPDATE class_enrollments
+          SET status = 'transferred', updated_at = NOW()
+          WHERE id = ${prev.id}
+          RETURNING id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+        `
+
+        const newRows = await sql<ClassEnrollment[]>`
+          INSERT INTO class_enrollments (user_id, class_id, academic_period_id, status)
+          VALUES (${params.userId}, ${params.toClassId}::uuid, ${params.academicPeriodId}::uuid, 'active')
+          RETURNING id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+        `
+
+        await sql`
+          UPDATE profiles SET class_name = ${targetClass.name}, updated_at = NOW() WHERE user_id = ${params.userId}
+        `
+
+        return {
+          previous: updatedPrevRows[0],
+          current: {
+            ...newRows[0],
+            class_name: targetClass.name,
+          },
+        }
+      })
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to transfer student enrollment')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async promoteStudentEnrollment(
+    params: PromoteStudentEnrollmentParams,
+  ): Promise<{ previous: ClassEnrollment; current: ClassEnrollment }> {
+    try {
+      const targetClass = await this.getClassById(params.toClassId)
+      if (!targetClass) throw AppError.notFound('Target class')
+      const targetPeriod = await this.getAcademicPeriod(params.toAcademicPeriodId)
+      if (!targetPeriod) throw AppError.notFound('Target academic period')
+
+      const beginFn = this.sql.begin ? this.sql.begin.bind(this.sql) : async (cb: (sql: Sql) => Promise<{ previous: ClassEnrollment; current: ClassEnrollment }>) => cb(this.sql)
+      return await beginFn(async (sql) => {
+        const sourceRows = await sql<ClassEnrollment[]>`
+          SELECT id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+          FROM class_enrollments
+          WHERE user_id = ${params.userId} AND academic_period_id = ${params.fromAcademicPeriodId}::uuid AND status = 'active'
+          LIMIT 1
+        `
+        if (!sourceRows || sourceRows.length === 0) {
+          throw AppError.notFound('Active class enrollment in source academic period')
+        }
+
+        const existingTarget = await sql<ClassEnrollment[]>`
+          SELECT id FROM class_enrollments
+          WHERE user_id = ${params.userId} AND academic_period_id = ${params.toAcademicPeriodId}::uuid AND status = 'active'
+          LIMIT 1
+        `
+        if (existingTarget && existingTarget.length > 0) {
+          throw AppError.conflict('Student already has an active class enrollment in target academic period.')
+        }
+
+        const updatedSourceRows = await sql<ClassEnrollment[]>`
+          UPDATE class_enrollments
+          SET status = 'promoted', updated_at = NOW()
+          WHERE id = ${sourceRows[0].id}
+          RETURNING id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+        `
+
+        const newRows = await sql<ClassEnrollment[]>`
+          INSERT INTO class_enrollments (user_id, class_id, academic_period_id, status)
+          VALUES (${params.userId}, ${params.toClassId}::uuid, ${params.toAcademicPeriodId}::uuid, 'active')
+          RETURNING id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+        `
+
+        await sql`
+          UPDATE profiles SET class_name = ${targetClass.name}, updated_at = NOW() WHERE user_id = ${params.userId}
+        `
+
+        return {
+          previous: updatedSourceRows[0],
+          current: {
+            ...newRows[0],
+            class_name: targetClass.name,
+            period_name: targetPeriod.name,
+          },
+        }
+      })
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to promote student enrollment')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async exitStudentEnrollment(params: ExitStudentEnrollmentParams): Promise<ClassEnrollment> {
+    try {
+      const status = params.status ?? 'archived'
+      const rows = await this.sql<ClassEnrollment[]>`
+        UPDATE class_enrollments
+        SET status = ${status}, updated_at = NOW()
+        WHERE user_id = ${params.userId} AND academic_period_id = ${params.academicPeriodId}::uuid AND status = 'active'
+        RETURNING id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.notFound('Active class enrollment')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to exit student enrollment')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getStudentEnrollmentHistory(userId: string): Promise<ClassEnrollment[]> {
+    return this.listClassEnrollments({ userId })
+  }
+
+  async listSchedules(filter?: {
+    classId?: string
+    academicPeriodId?: string
+    dayOfWeek?: string
+    isActive?: boolean
+  }): Promise<Schedule[]> {
+    try {
+      const rows = await this.sql<Schedule[]>`
+        SELECT id, school_id, class_id, academic_period_id, location_id,
+               day_of_week, day_of_week AS hari, start_time::text AS mulai_masuk, end_time::text AS selesai_masuk,
+               start_checkout::text AS mulai_pulang, end_checkout::text AS selesai_pulang,
+               grace_period_minutes AS kompensasi_waktu, is_active,
+               created_at::text, updated_at::text
+        FROM schedules
+        WHERE (${filter?.classId ?? null}::uuid IS NULL OR class_id = ${filter?.classId ?? null}::uuid)
+          AND (${filter?.academicPeriodId ?? null}::uuid IS NULL OR academic_period_id = ${filter?.academicPeriodId ?? null}::uuid)
+          AND (${filter?.dayOfWeek?.toLowerCase() ?? null}::text IS NULL OR day_of_week = ${filter?.dayOfWeek?.toLowerCase() ?? null})
+          AND (${filter?.isActive ?? null}::boolean IS NULL OR is_active = ${filter?.isActive ?? null})
+        ORDER BY day_of_week ASC, start_time ASC
+      `
+      return rows ?? []
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, filter }, 'Failed to list schedules')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getScheduleById(id: string): Promise<Schedule | null> {
+    try {
+      const rows = await this.sql<Schedule[]>`
+        SELECT id, school_id, class_id, academic_period_id, location_id,
+               day_of_week, day_of_week AS hari, start_time::text AS mulai_masuk, end_time::text AS selesai_masuk,
+               start_checkout::text AS mulai_pulang, end_checkout::text AS selesai_pulang,
+               grace_period_minutes AS kompensasi_waktu, is_active,
+               created_at::text, updated_at::text
+        FROM schedules
+        WHERE id = ${id}
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to get schedule by id')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async createSchedule(params: CreateScheduleParams): Promise<Schedule> {
+    try {
+      let schoolId = params.schoolId
+      if (!schoolId) {
+        const school = await this.getSchool()
+        schoolId = school?.id ?? null
+      }
+      const rows = await this.sql<Schedule[]>`
+        INSERT INTO schedules (school_id, class_id, academic_period_id, location_id, day_of_week, start_time, end_time, start_checkout, end_checkout, grace_period_minutes, is_active)
+        VALUES (${schoolId}, ${params.classId ?? null}, ${params.academicPeriodId ?? null}, ${params.locationId ?? null}, ${params.dayOfWeek.toLowerCase()}, ${params.startTime}::time, ${params.endTime}::time, ${params.startCheckout}::time, ${params.endCheckout}::time, ${params.gracePeriodMinutes ?? 0}, ${params.isActive ?? true})
+        RETURNING id, school_id, class_id, academic_period_id, location_id, day_of_week, day_of_week AS hari, start_time::text AS mulai_masuk, end_time::text AS selesai_masuk, start_checkout::text AS mulai_pulang, end_checkout::text AS selesai_pulang, grace_period_minutes AS kompensasi_waktu, is_active, created_at::text, updated_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.internal('Failed to create schedule.')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to create schedule')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async updateSchedule(id: string, params: UpdateScheduleParams): Promise<Schedule> {
+    try {
+      const existing = await this.getScheduleById(id)
+      if (!existing) throw AppError.notFound('Schedule')
+
+      const rows = await this.sql<Schedule[]>`
+        UPDATE schedules
+        SET
+          day_of_week = COALESCE(${params.dayOfWeek?.toLowerCase() ?? null}, day_of_week),
+          start_time = COALESCE(${params.startTime ? `${params.startTime}::time` : null}, start_time),
+          end_time = COALESCE(${params.endTime ? `${params.endTime}::time` : null}, end_time),
+          start_checkout = COALESCE(${params.startCheckout ? `${params.startCheckout}::time` : null}, start_checkout),
+          end_checkout = COALESCE(${params.endCheckout ? `${params.endCheckout}::time` : null}, end_checkout),
+          grace_period_minutes = COALESCE(${params.gracePeriodMinutes ?? null}, grace_period_minutes),
+          is_active = COALESCE(${params.isActive ?? null}, is_active),
+          class_id = COALESCE(${params.classId ?? null}, class_id),
+          academic_period_id = COALESCE(${params.academicPeriodId ?? null}, academic_period_id),
+          location_id = COALESCE(${params.locationId ?? null}, location_id),
+          updated_at = NOW()
+        WHERE id = ${id}
+        RETURNING id, school_id, class_id, academic_period_id, location_id, day_of_week, day_of_week AS hari, start_time::text AS mulai_masuk, end_time::text AS selesai_masuk, start_checkout::text AS mulai_pulang, end_checkout::text AS selesai_pulang, grace_period_minutes AS kompensasi_waktu, is_active, created_at::text, updated_at::text
+      `
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id, params }, 'Failed to update schedule')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async deleteSchedule(id: string): Promise<void> {
+    try {
+      const result = await this.sql`DELETE FROM schedules WHERE id = ${id}`
+      if (result.count === 0) throw AppError.notFound('Schedule')
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to delete schedule')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async listLocations(filter?: { isActive?: boolean }): Promise<Location[]> {
+    try {
+      const rows = await this.sql<Location[]>`
+        SELECT id, school_id, name, latitude, longitude, radius_meters, is_active, created_at::text, updated_at::text
+        FROM locations
+        WHERE (${filter?.isActive ?? null}::boolean IS NULL OR is_active = ${filter?.isActive ?? null})
+        ORDER BY name ASC
+      `
+      return rows ?? []
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, filter }, 'Failed to list locations')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getLocationById(id: string): Promise<Location | null> {
+    try {
+      const rows = await this.sql<Location[]>`
+        SELECT id, school_id, name, latitude, longitude, radius_meters, is_active, created_at::text, updated_at::text
+        FROM locations
+        WHERE id = ${id}
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to get location by id')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async createLocation(params: CreateLocationParams): Promise<Location> {
+    try {
+      let schoolId = params.schoolId
+      if (!schoolId) {
+        const school = await this.getSchool()
+        schoolId = school?.id ?? null
+      }
+      const rows = await this.sql<Location[]>`
+        INSERT INTO locations (school_id, name, latitude, longitude, radius_meters, is_active)
+        VALUES (${schoolId}, ${params.name}, ${params.latitude}, ${params.longitude}, ${params.radiusMeters ?? 100.0}, ${params.isActive ?? true})
+        RETURNING id, school_id, name, latitude, longitude, radius_meters, is_active, created_at::text, updated_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.internal('Failed to create location.')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to create location')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async updateLocation(id: string, params: UpdateLocationParams): Promise<Location> {
+    try {
+      const existing = await this.getLocationById(id)
+      if (!existing) throw AppError.notFound('Location')
+
+      const rows = await this.sql<Location[]>`
+        UPDATE locations
+        SET
+          name = COALESCE(${params.name ?? null}, name),
+          latitude = COALESCE(${params.latitude ?? null}, latitude),
+          longitude = COALESCE(${params.longitude ?? null}, longitude),
+          radius_meters = COALESCE(${params.radiusMeters ?? null}, radius_meters),
+          is_active = COALESCE(${params.isActive ?? null}, is_active),
+          updated_at = NOW()
+        WHERE id = ${id}
+        RETURNING id, school_id, name, latitude, longitude, radius_meters, is_active, created_at::text, updated_at::text
+      `
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id, params }, 'Failed to update location')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async deleteLocation(id: string): Promise<void> {
+    try {
+      const result = await this.sql`DELETE FROM locations WHERE id = ${id}`
+      if (result.count === 0) throw AppError.notFound('Location')
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to delete location')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async listCalendarExceptions(filter?: {
+    academicPeriodId?: string
+    startDate?: string
+    endDate?: string
+  }): Promise<CalendarException[]> {
+    try {
+      const rows = await this.sql<CalendarException[]>`
+        SELECT id, school_id, academic_period_id, date::text, reason, is_holiday, created_at::text, updated_at::text
+        FROM calendar_exceptions
+        WHERE (${filter?.academicPeriodId ?? null}::uuid IS NULL OR academic_period_id = ${filter?.academicPeriodId ?? null}::uuid)
+          AND (${filter?.startDate ?? null}::date IS NULL OR date >= ${filter?.startDate ?? null}::date)
+          AND (${filter?.endDate ?? null}::date IS NULL OR date <= ${filter?.endDate ?? null}::date)
+        ORDER BY date ASC
+      `
+      return rows ?? []
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, filter }, 'Failed to list calendar exceptions')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getCalendarExceptionById(id: string): Promise<CalendarException | null> {
+    try {
+      const rows = await this.sql<CalendarException[]>`
+        SELECT id, school_id, academic_period_id, date::text, reason, is_holiday, created_at::text, updated_at::text
+        FROM calendar_exceptions
+        WHERE id = ${id}
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to get calendar exception by id')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getCalendarExceptionByDate(date: string, academicPeriodId?: string): Promise<CalendarException | null> {
+    try {
+      const formattedDate = date.slice(0, 10)
+      const rows = await this.sql<CalendarException[]>`
+        SELECT id, school_id, academic_period_id, date::text, reason, is_holiday, created_at::text, updated_at::text
+        FROM calendar_exceptions
+        WHERE date = ${formattedDate}::date
+          AND (${academicPeriodId ?? null}::uuid IS NULL OR academic_period_id IS NULL OR academic_period_id = ${academicPeriodId ?? null}::uuid)
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, date, academicPeriodId }, 'Failed to get calendar exception by date')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async createCalendarException(params: CreateCalendarExceptionParams): Promise<CalendarException> {
+    try {
+      let schoolId = params.schoolId
+      if (!schoolId) {
+        const school = await this.getSchool()
+        schoolId = school?.id ?? null
+      }
+      const formattedDate = params.date.slice(0, 10)
+      const rows = await this.sql<CalendarException[]>`
+        INSERT INTO calendar_exceptions (school_id, academic_period_id, date, reason, is_holiday)
+        VALUES (${schoolId}, ${params.academicPeriodId ?? null}, ${formattedDate}::date, ${params.reason}, ${params.isHoliday ?? true})
+        RETURNING id, school_id, academic_period_id, date::text, reason, is_holiday, created_at::text, updated_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.internal('Failed to create calendar exception.')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to create calendar exception')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async updateCalendarException(id: string, params: UpdateCalendarExceptionParams): Promise<CalendarException> {
+    try {
+      const existing = await this.getCalendarExceptionById(id)
+      if (!existing) throw AppError.notFound('Calendar exception')
+
+      const formattedDate = params.date ? params.date.slice(0, 10) : null
+      const rows = await this.sql<CalendarException[]>`
+        UPDATE calendar_exceptions
+        SET
+          date = COALESCE(${formattedDate ? `${formattedDate}::date` : null}, date),
+          reason = COALESCE(${params.reason ?? null}, reason),
+          is_holiday = COALESCE(${params.isHoliday ?? null}, is_holiday),
+          academic_period_id = COALESCE(${params.academicPeriodId ?? null}, academic_period_id),
+          updated_at = NOW()
+        WHERE id = ${id}
+        RETURNING id, school_id, academic_period_id, date::text, reason, is_holiday, created_at::text, updated_at::text
+      `
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id, params }, 'Failed to update calendar exception')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async deleteCalendarException(id: string): Promise<void> {
+    try {
+      const result = await this.sql`DELETE FROM calendar_exceptions WHERE id = ${id}`
+      if (result.count === 0) throw AppError.notFound('Calendar exception')
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to delete calendar exception')
       throw AppError.internal('An unexpected database error occurred.')
     }
   }

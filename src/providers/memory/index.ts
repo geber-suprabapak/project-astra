@@ -9,27 +9,36 @@ import {
   type AuditLog,
   type AuditLogEntry,
   type BootstrapStatus,
+  type CalendarException,
   type ClassEnrollment,
+  type ClassEnrollmentStatus,
   type ClassRoom,
   type CreateAcademicPeriodParams,
+  type CreateCalendarExceptionParams,
   type CreateClassParams,
+  type CreateLocationParams,
   type CreatePasswordResetCodeParams,
   type CreateStudentIdentityParams,
   type CreatePermissionParams,
   type CreateRoleParams,
+  type CreateScheduleParams,
   type CreateSchoolParams,
   type CreateStaffParams,
   type DomainStore,
+  type EnrollStudentParams,
+  type ExitStudentEnrollmentParams,
   type IdentityProvider,
   type IdentityUser,
   type IdentityRole,
   type InsertAttendanceData,
   type InsertPermitData,
+  type Location,
   type ObjectStorage,
   type PasswordResetCode,
   type Permission,
   type Permit,
   type ProfileLifecycleStatus,
+  type PromoteStudentEnrollmentParams,
   type Role,
   type RosterReport,
   type RosterStudent,
@@ -37,7 +46,13 @@ import {
   type Schedule,
   type School,
   type StageRosterParams,
+  type TransferStudentEnrollmentParams,
+  type UpdateAcademicPeriodParams,
+  type UpdateCalendarExceptionParams,
+  type UpdateClassParams,
+  type UpdateLocationParams,
   type UpdateRoleParams,
+  type UpdateScheduleParams,
   type UpdateStaffParams,
   type UserMetadata,
   type UserProfile,
@@ -111,10 +126,131 @@ const identityTokenPayloadSchema = z
   })
   .passthrough()
 
+const DEFAULT_LOCATIONS: Location[] = [
+  {
+    id: 'a0000000-0000-0000-0000-000000000001',
+    name: 'School Campus',
+    latitude: -6.200000,
+    longitude: 106.816666,
+    radius_meters: 5000.0,
+    is_active: true,
+  },
+]
+
+const DEFAULT_SCHEDULES: Schedule[] = [
+  {
+    id: 'b0000000-0000-0000-0000-000000000001',
+    day_of_week: 'senin',
+    hari: 'senin',
+    mulai_masuk: '06:00:00',
+    selesai_masuk: '07:15:00',
+    mulai_pulang: '15:00:00',
+    selesai_pulang: '18:00:00',
+    kompensasi_waktu: 15,
+    is_active: true,
+  },
+  {
+    id: 'b0000000-0000-0000-0000-000000000002',
+    day_of_week: 'selasa',
+    hari: 'selasa',
+    mulai_masuk: '06:00:00',
+    selesai_masuk: '07:15:00',
+    mulai_pulang: '15:00:00',
+    selesai_pulang: '18:00:00',
+    kompensasi_waktu: 15,
+    is_active: true,
+  },
+  {
+    id: 'b0000000-0000-0000-0000-000000000003',
+    day_of_week: 'rabu',
+    hari: 'rabu',
+    mulai_masuk: '06:00:00',
+    selesai_masuk: '07:15:00',
+    mulai_pulang: '15:00:00',
+    selesai_pulang: '18:00:00',
+    kompensasi_waktu: 15,
+    is_active: true,
+  },
+  {
+    id: 'b0000000-0000-0000-0000-000000000004',
+    day_of_week: 'kamis',
+    hari: 'kamis',
+    mulai_masuk: '06:00:00',
+    selesai_masuk: '07:15:00',
+    mulai_pulang: '15:00:00',
+    selesai_pulang: '18:00:00',
+    kompensasi_waktu: 15,
+    is_active: true,
+  },
+  {
+    id: 'b0000000-0000-0000-0000-000000000005',
+    day_of_week: 'jumat',
+    hari: 'jumat',
+    mulai_masuk: '06:00:00',
+    selesai_masuk: '07:15:00',
+    mulai_pulang: '11:30:00',
+    selesai_pulang: '14:00:00',
+    kompensasi_waktu: 15,
+    is_active: true,
+  },
+  {
+    id: 'b0000000-0000-0000-0000-000000000006',
+    day_of_week: 'sabtu',
+    hari: 'sabtu',
+    mulai_masuk: '06:00:00',
+    selesai_masuk: '07:15:00',
+    mulai_pulang: '12:00:00',
+    selesai_pulang: '15:00:00',
+    kompensasi_waktu: 15,
+    is_active: true,
+  },
+]
+
+const DEFAULT_ACADEMIC_PERIODS: AcademicPeriod[] = [
+  {
+    id: 'b0000000-0000-0000-0000-000000000001',
+    school_id: '11111111-1111-1111-1111-111111111111',
+    name: '2026/2027 Ganjil',
+    start_date: '2026-07-01',
+    end_date: '2026-12-31',
+    is_active: true,
+    created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-01T00:00:00.000Z',
+  },
+]
+
+const DEFAULT_CLASSES: ClassRoom[] = [
+  {
+    id: 'c0000000-0000-0000-0000-000000000001',
+    school_id: '11111111-1111-1111-1111-111111111111',
+    academic_period_id: 'b0000000-0000-0000-0000-000000000001',
+    name: 'XII RPL 1',
+    grade: 12,
+    created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-01T00:00:00.000Z',
+  },
+]
+
+function calculateDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000 // Earth radius in meters
+  const dLat = ((lat2 - lat1) * Math.PI) / 180
+  const dLon = ((lon2 - lon1) * Math.PI) / 180
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return R * c
+}
+
 export class MemoryDomainStore implements DomainStore {
   public profiles = new Map<string, UserProfile>()
   public absences: Absence[] = []
   public schedules = new Map<string, Schedule>()
+  public locations = new Map<string, Location>()
+  public calendarExceptions = new Map<string, CalendarException>()
   public permits: Permit[] = []
   public schools: School[] = []
   public academicPeriods: AcademicPeriod[] = []
@@ -136,6 +272,18 @@ export class MemoryDomainStore implements DomainStore {
     }
     for (const role of DEFAULT_ROLES) {
       this.roles.set(role.name, { ...role, permissions: [...(role.permissions ?? [])] })
+    }
+    for (const loc of DEFAULT_LOCATIONS) {
+      this.locations.set(loc.id, { ...loc })
+    }
+    for (const sched of DEFAULT_SCHEDULES) {
+      this.schedules.set(sched.id ?? sched.hari, { ...sched })
+    }
+    for (const p of DEFAULT_ACADEMIC_PERIODS) {
+      this.academicPeriods.push({ ...p })
+    }
+    for (const c of DEFAULT_CLASSES) {
+      this.classes.push({ ...c })
     }
   }
 
@@ -184,10 +332,557 @@ export class MemoryDomainStore implements DomainStore {
     return record
   }
 
-  async getActiveSchedule(dayKey: string): Promise<Schedule | null> {
-    const schedule = this.schedules.get(dayKey.toLowerCase())
-    if (!schedule || !schedule.is_active) return null
+  async getActiveSchedule(
+    dayKey: string,
+    params?: { classId?: string; academicPeriodId?: string },
+  ): Promise<Schedule | null> {
+    const day = dayKey.toLowerCase()
+    const activeSchedules = Array.from(this.schedules.values()).filter(
+      (s) => s.is_active && (s.day_of_week?.toLowerCase() === day || s.hari?.toLowerCase() === day),
+    )
+
+    if (activeSchedules.length === 0) return null
+
+    // 1. Match classId + academicPeriodId
+    if (params?.classId && params?.academicPeriodId) {
+      const matched = activeSchedules.find(
+        (s) => s.class_id === params.classId && s.academic_period_id === params.academicPeriodId,
+      )
+      if (matched) return { ...matched }
+    }
+
+    // 2. Match classId only
+    if (params?.classId) {
+      const matched = activeSchedules.find((s) => s.class_id === params.classId)
+      if (matched) return { ...matched }
+    }
+
+    // 3. Match academicPeriodId only
+    if (params?.academicPeriodId) {
+      const matched = activeSchedules.find(
+        (s) => s.academic_period_id === params.academicPeriodId && !s.class_id,
+      )
+      if (matched) return { ...matched }
+    }
+
+    // 4. Match general/school-wide (no classId, no academicPeriodId)
+    const general = activeSchedules.find((s) => !s.class_id && !s.academic_period_id)
+    if (general) return { ...general }
+
+    return { ...activeSchedules[0] }
+  }
+
+  async listSchedules(filter?: {
+    classId?: string
+    academicPeriodId?: string
+    dayOfWeek?: string
+    isActive?: boolean
+  }): Promise<Schedule[]> {
+    let list = Array.from(this.schedules.values())
+    if (filter?.classId !== undefined) {
+      list = list.filter((s) => s.class_id === filter.classId)
+    }
+    if (filter?.academicPeriodId !== undefined) {
+      list = list.filter((s) => s.academic_period_id === filter.academicPeriodId)
+    }
+    if (filter?.dayOfWeek !== undefined) {
+      const day = filter.dayOfWeek.toLowerCase()
+      list = list.filter((s) => s.day_of_week?.toLowerCase() === day || s.hari?.toLowerCase() === day)
+    }
+    if (filter?.isActive !== undefined) {
+      list = list.filter((s) => s.is_active === filter.isActive)
+    }
+    return list.map((s) => ({ ...s }))
+  }
+
+  async getScheduleById(id: string): Promise<Schedule | null> {
+    const s = this.schedules.get(id) ?? Array.from(this.schedules.values()).find((item) => item.id === id)
+    return s ? { ...s } : null
+  }
+
+  async createSchedule(params: CreateScheduleParams): Promise<Schedule> {
+    const now = new Date().toISOString()
+    const id = `sched-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const schedule: Schedule = {
+      id,
+      school_id: params.schoolId ?? this.schools[0]?.id ?? null,
+      class_id: params.classId ?? null,
+      academic_period_id: params.academicPeriodId ?? null,
+      location_id: params.locationId ?? null,
+      day_of_week: params.dayOfWeek.toLowerCase(),
+      hari: params.dayOfWeek.toLowerCase(),
+      mulai_masuk: params.startTime,
+      selesai_masuk: params.endTime,
+      mulai_pulang: params.startCheckout,
+      selesai_pulang: params.endCheckout,
+      kompensasi_waktu: params.gracePeriodMinutes ?? 0,
+      is_active: params.isActive ?? true,
+      created_at: now,
+      updated_at: now,
+    }
+    this.schedules.set(id, schedule)
     return { ...schedule }
+  }
+
+  async updateSchedule(id: string, params: UpdateScheduleParams): Promise<Schedule> {
+    const schedule = this.schedules.get(id) ?? Array.from(this.schedules.values()).find((item) => item.id === id)
+    if (!schedule) throw AppError.notFound('Schedule')
+
+    if (params.dayOfWeek !== undefined) {
+      schedule.day_of_week = params.dayOfWeek.toLowerCase()
+      schedule.hari = params.dayOfWeek.toLowerCase()
+    }
+    if (params.startTime !== undefined) schedule.mulai_masuk = params.startTime
+    if (params.endTime !== undefined) schedule.selesai_masuk = params.endTime
+    if (params.startCheckout !== undefined) schedule.mulai_pulang = params.startCheckout
+    if (params.endCheckout !== undefined) schedule.selesai_pulang = params.endCheckout
+    if (params.gracePeriodMinutes !== undefined) schedule.kompensasi_waktu = params.gracePeriodMinutes
+    if (params.isActive !== undefined) schedule.is_active = params.isActive
+    if (params.classId !== undefined) schedule.class_id = params.classId
+    if (params.academicPeriodId !== undefined) schedule.academic_period_id = params.academicPeriodId
+    if (params.locationId !== undefined) schedule.location_id = params.locationId
+
+    schedule.updated_at = new Date().toISOString()
+    this.schedules.set(schedule.id ?? id, schedule)
+    return { ...schedule }
+  }
+
+  async deleteSchedule(id: string): Promise<void> {
+    const schedule = this.schedules.get(id) ?? Array.from(this.schedules.values()).find((item) => item.id === id)
+    if (!schedule) throw AppError.notFound('Schedule')
+    this.schedules.delete(schedule.id ?? id)
+  }
+
+  async listLocations(filter?: { isActive?: boolean }): Promise<Location[]> {
+    let list = Array.from(this.locations.values())
+    if (filter?.isActive !== undefined) {
+      list = list.filter((loc) => loc.is_active === filter.isActive)
+    }
+    return list.map((loc) => ({ ...loc }))
+  }
+
+  async getLocationById(id: string): Promise<Location | null> {
+    const loc = this.locations.get(id)
+    return loc ? { ...loc } : null
+  }
+
+  async createLocation(params: CreateLocationParams): Promise<Location> {
+    const now = new Date().toISOString()
+    const id = `loc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const location: Location = {
+      id,
+      school_id: params.schoolId ?? this.schools[0]?.id ?? null,
+      name: params.name,
+      latitude: params.latitude,
+      longitude: params.longitude,
+      radius_meters: params.radiusMeters ?? 100.0,
+      is_active: params.isActive ?? true,
+      created_at: now,
+      updated_at: now,
+    }
+    this.locations.set(id, location)
+    return { ...location }
+  }
+
+  async updateLocation(id: string, params: UpdateLocationParams): Promise<Location> {
+    const loc = this.locations.get(id)
+    if (!loc) throw AppError.notFound('Location')
+    if (params.name !== undefined) loc.name = params.name
+    if (params.latitude !== undefined) loc.latitude = params.latitude
+    if (params.longitude !== undefined) loc.longitude = params.longitude
+    if (params.radiusMeters !== undefined) loc.radius_meters = params.radiusMeters
+    if (params.isActive !== undefined) loc.is_active = params.isActive
+    loc.updated_at = new Date().toISOString()
+    this.locations.set(id, loc)
+    return { ...loc }
+  }
+
+  async deleteLocation(id: string): Promise<void> {
+    if (!this.locations.has(id)) throw AppError.notFound('Location')
+    this.locations.delete(id)
+  }
+
+  async listCalendarExceptions(filter?: {
+    academicPeriodId?: string
+    startDate?: string
+    endDate?: string
+  }): Promise<CalendarException[]> {
+    let list = Array.from(this.calendarExceptions.values())
+    if (filter?.academicPeriodId) {
+      list = list.filter((e) => e.academic_period_id === filter.academicPeriodId)
+    }
+    if (filter?.startDate) {
+      list = list.filter((e) => e.date >= filter.startDate!)
+    }
+    if (filter?.endDate) {
+      list = list.filter((e) => e.date <= filter.endDate!)
+    }
+    return list.map((e) => ({ ...e }))
+  }
+
+  async getCalendarExceptionById(id: string): Promise<CalendarException | null> {
+    const e = this.calendarExceptions.get(id)
+    return e ? { ...e } : null
+  }
+
+  async getCalendarExceptionByDate(date: string, academicPeriodId?: string): Promise<CalendarException | null> {
+    const formattedDate = date.slice(0, 10)
+    for (const e of this.calendarExceptions.values()) {
+      if (e.date === formattedDate) {
+        if (!academicPeriodId || !e.academic_period_id || e.academic_period_id === academicPeriodId) {
+          return { ...e }
+        }
+      }
+    }
+    return null
+  }
+
+  async createCalendarException(params: CreateCalendarExceptionParams): Promise<CalendarException> {
+    const now = new Date().toISOString()
+    const id = `cal-exc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const exc: CalendarException = {
+      id,
+      school_id: params.schoolId ?? this.schools[0]?.id ?? null,
+      academic_period_id: params.academicPeriodId ?? null,
+      date: params.date.slice(0, 10),
+      reason: params.reason,
+      is_holiday: params.isHoliday ?? true,
+      created_at: now,
+      updated_at: now,
+    }
+    this.calendarExceptions.set(id, exc)
+    return { ...exc }
+  }
+
+  async updateCalendarException(id: string, params: UpdateCalendarExceptionParams): Promise<CalendarException> {
+    const exc = this.calendarExceptions.get(id)
+    if (!exc) throw AppError.notFound('Calendar exception')
+    if (params.date !== undefined) exc.date = params.date.slice(0, 10)
+    if (params.reason !== undefined) exc.reason = params.reason
+    if (params.isHoliday !== undefined) exc.is_holiday = params.isHoliday
+    if (params.academicPeriodId !== undefined) exc.academic_period_id = params.academicPeriodId
+    exc.updated_at = new Date().toISOString()
+    this.calendarExceptions.set(id, exc)
+    return { ...exc }
+  }
+
+  async deleteCalendarException(id: string): Promise<void> {
+    if (!this.calendarExceptions.has(id)) throw AppError.notFound('Calendar exception')
+    this.calendarExceptions.delete(id)
+  }
+
+  async listAcademicPeriods(filter?: { isActive?: boolean }): Promise<AcademicPeriod[]> {
+    let list = [...this.academicPeriods]
+    if (filter?.isActive !== undefined) {
+      list = list.filter((p) => p.is_active === filter.isActive)
+    }
+    return list.map((p) => ({ ...p }))
+  }
+
+  async getAcademicPeriod(id: string): Promise<AcademicPeriod | null> {
+    const p = this.academicPeriods.find((item) => item.id === id)
+    return p ? { ...p } : null
+  }
+
+  async getActiveAcademicPeriod(): Promise<AcademicPeriod | null> {
+    const period = this.academicPeriods.find((p) => p.is_active)
+    if (!period) return null
+    return { ...period }
+  }
+
+  async createAcademicPeriod(params: CreateAcademicPeriodParams): Promise<AcademicPeriod> {
+    const now = new Date().toISOString()
+    const school = this.schools[0]
+    const schoolId = params.schoolId ?? school?.id ?? 'school-default'
+    if (params.isActive) {
+      for (const p of this.academicPeriods) {
+        p.is_active = false
+      }
+    }
+    const period: AcademicPeriod = {
+      id: `period-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      school_id: schoolId,
+      name: params.name,
+      start_date: params.startDate,
+      end_date: params.endDate,
+      is_active: params.isActive ?? true,
+      created_at: now,
+      updated_at: now,
+    }
+    this.academicPeriods.push(period)
+    return { ...period }
+  }
+
+  async updateAcademicPeriod(id: string, params: UpdateAcademicPeriodParams): Promise<AcademicPeriod> {
+    const period = this.academicPeriods.find((p) => p.id === id)
+    if (!period) throw AppError.notFound('Academic period')
+    if (params.isActive === true) {
+      for (const p of this.academicPeriods) {
+        p.is_active = false
+      }
+    }
+    if (params.name !== undefined) period.name = params.name
+    if (params.startDate !== undefined) period.start_date = params.startDate
+    if (params.endDate !== undefined) period.end_date = params.endDate
+    if (params.isActive !== undefined) period.is_active = params.isActive
+    period.updated_at = new Date().toISOString()
+    return { ...period }
+  }
+
+  async setActiveAcademicPeriod(id: string): Promise<AcademicPeriod> {
+    const period = this.academicPeriods.find((p) => p.id === id)
+    if (!period) throw AppError.notFound('Academic period')
+    for (const p of this.academicPeriods) {
+      p.is_active = p.id === id
+      p.updated_at = new Date().toISOString()
+    }
+    return { ...period }
+  }
+
+  async getClasses(schoolId?: string, academicPeriodId?: string): Promise<ClassRoom[]> {
+    let list = [...this.classes]
+    if (schoolId) list = list.filter((c) => c.school_id === schoolId)
+    if (academicPeriodId) list = list.filter((c) => c.academic_period_id === academicPeriodId)
+    return list.map((c) => ({ ...c }))
+  }
+
+  async getClassById(id: string): Promise<ClassRoom | null> {
+    const cls = this.classes.find((c) => c.id === id)
+    return cls ? { ...cls } : null
+  }
+
+  async createClass(params: CreateClassParams): Promise<ClassRoom> {
+    const now = new Date().toISOString()
+    const school = this.schools[0]
+    const schoolId = params.schoolId ?? school?.id ?? 'school-default'
+    const cls: ClassRoom = {
+      id: `class-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      school_id: schoolId,
+      academic_period_id: params.academicPeriodId ?? null,
+      name: params.name,
+      grade: params.grade ?? null,
+      created_at: now,
+      updated_at: now,
+    }
+    this.classes.push(cls)
+    return { ...cls }
+  }
+
+  async updateClass(id: string, params: UpdateClassParams): Promise<ClassRoom> {
+    const cls = this.classes.find((c) => c.id === id)
+    if (!cls) throw AppError.notFound('Class')
+    if (params.name !== undefined) cls.name = params.name
+    if (params.grade !== undefined) cls.grade = params.grade
+    if (params.academicPeriodId !== undefined) cls.academic_period_id = params.academicPeriodId
+    cls.updated_at = new Date().toISOString()
+    return { ...cls }
+  }
+
+  async listClassEnrollments(filter?: {
+    userId?: string
+    classId?: string
+    academicPeriodId?: string
+    status?: ClassEnrollmentStatus
+  }): Promise<ClassEnrollment[]> {
+    let list = [...this.classEnrollments]
+    if (filter?.userId) list = list.filter((e) => e.user_id === filter.userId)
+    if (filter?.classId) list = list.filter((e) => e.class_id === filter.classId)
+    if (filter?.academicPeriodId) list = list.filter((e) => e.academic_period_id === filter.academicPeriodId)
+    if (filter?.status) list = list.filter((e) => e.status === filter.status)
+
+    return list.map((e) => {
+      const cls = this.classes.find((c) => c.id === e.class_id)
+      const prof = this.profiles.get(e.user_id)
+      const period = this.academicPeriods.find((p) => p.id === e.academic_period_id)
+      return {
+        ...e,
+        class_name: cls?.name ?? null,
+        student_name: prof?.full_name ?? null,
+        nis: prof?.nis ?? null,
+        period_name: period?.name ?? null,
+      }
+    })
+  }
+
+  async getActiveClassEnrollment(userId: string, academicPeriodId?: string): Promise<ClassEnrollment | null> {
+    const periodId = academicPeriodId ?? this.academicPeriods.find((p) => p.is_active)?.id
+    if (!periodId) return null
+    const enrollment = this.classEnrollments.find(
+      (e) => e.user_id === userId && e.academic_period_id === periodId && e.status === 'active',
+    )
+    if (!enrollment) return null
+    const cls = this.classes.find((c) => c.id === enrollment.class_id)
+    const prof = this.profiles.get(enrollment.user_id)
+    const period = this.academicPeriods.find((p) => p.id === enrollment.academic_period_id)
+    return {
+      ...enrollment,
+      class_name: cls?.name ?? null,
+      student_name: prof?.full_name ?? null,
+      nis: prof?.nis ?? null,
+      period_name: period?.name ?? null,
+    }
+  }
+
+  async enrollStudentInClass(params: EnrollStudentParams): Promise<ClassEnrollment> {
+    const existingActive = this.classEnrollments.find(
+      (e) =>
+        e.user_id === params.userId &&
+        e.academic_period_id === params.academicPeriodId &&
+        e.status === 'active',
+    )
+    if (existingActive) {
+      throw AppError.conflict('Student already has an active class enrollment in this academic period.')
+    }
+    const cls = this.classes.find((c) => c.id === params.classId)
+    if (!cls) throw AppError.notFound('Class')
+    const period = this.academicPeriods.find((p) => p.id === params.academicPeriodId)
+    if (!period) throw AppError.notFound('Academic period')
+
+    const now = new Date().toISOString()
+    const enrollment: ClassEnrollment = {
+      id: `enrollment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      user_id: params.userId,
+      class_id: params.classId,
+      academic_period_id: params.academicPeriodId,
+      status: 'active',
+      created_at: now,
+      updated_at: now,
+    }
+    this.classEnrollments.push(enrollment)
+
+    const profile = this.profiles.get(params.userId)
+    if (profile) {
+      profile.class_name = cls.name
+      this.profiles.set(params.userId, profile)
+    }
+
+    return {
+      ...enrollment,
+      class_name: cls.name,
+      period_name: period.name,
+    }
+  }
+
+  async transferStudentEnrollment(
+    params: TransferStudentEnrollmentParams,
+  ): Promise<{ previous: ClassEnrollment; current: ClassEnrollment }> {
+    const currentActive = this.classEnrollments.find(
+      (e) =>
+        e.user_id === params.userId &&
+        e.academic_period_id === params.academicPeriodId &&
+        e.status === 'active',
+    )
+    if (!currentActive) {
+      throw AppError.notFound('Active class enrollment in this academic period')
+    }
+    if (currentActive.class_id === params.toClassId) {
+      throw AppError.validationError('Target class must be different from current class.')
+    }
+    const targetClass = this.classes.find((c) => c.id === params.toClassId)
+    if (!targetClass) throw AppError.notFound('Target class')
+
+    const now = new Date().toISOString()
+    currentActive.status = 'transferred'
+    currentActive.updated_at = now
+
+    const newEnrollment: ClassEnrollment = {
+      id: `enrollment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      user_id: params.userId,
+      class_id: params.toClassId,
+      academic_period_id: params.academicPeriodId,
+      status: 'active',
+      created_at: now,
+      updated_at: now,
+    }
+    this.classEnrollments.push(newEnrollment)
+
+    const profile = this.profiles.get(params.userId)
+    if (profile) {
+      profile.class_name = targetClass.name
+      this.profiles.set(params.userId, profile)
+    }
+
+    return {
+      previous: { ...currentActive },
+      current: {
+        ...newEnrollment,
+        class_name: targetClass.name,
+      },
+    }
+  }
+
+  async promoteStudentEnrollment(
+    params: PromoteStudentEnrollmentParams,
+  ): Promise<{ previous: ClassEnrollment; current: ClassEnrollment }> {
+    const sourceActive = this.classEnrollments.find(
+      (e) =>
+        e.user_id === params.userId &&
+        e.academic_period_id === params.fromAcademicPeriodId &&
+        e.status === 'active',
+    )
+    if (!sourceActive) {
+      throw AppError.notFound('Active class enrollment in source academic period')
+    }
+    const existingTarget = this.classEnrollments.find(
+      (e) =>
+        e.user_id === params.userId &&
+        e.academic_period_id === params.toAcademicPeriodId &&
+        e.status === 'active',
+    )
+    if (existingTarget) {
+      throw AppError.conflict('Student already has an active class enrollment in target academic period.')
+    }
+    const targetClass = this.classes.find((c) => c.id === params.toClassId)
+    if (!targetClass) throw AppError.notFound('Target class')
+    const targetPeriod = this.academicPeriods.find((p) => p.id === params.toAcademicPeriodId)
+    if (!targetPeriod) throw AppError.notFound('Target academic period')
+
+    const now = new Date().toISOString()
+    sourceActive.status = 'promoted'
+    sourceActive.updated_at = now
+
+    const newEnrollment: ClassEnrollment = {
+      id: `enrollment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      user_id: params.userId,
+      class_id: params.toClassId,
+      academic_period_id: params.toAcademicPeriodId,
+      status: 'active',
+      created_at: now,
+      updated_at: now,
+    }
+    this.classEnrollments.push(newEnrollment)
+
+    const profile = this.profiles.get(params.userId)
+    if (profile) {
+      profile.class_name = targetClass.name
+      this.profiles.set(params.userId, profile)
+    }
+
+    return {
+      previous: { ...sourceActive },
+      current: {
+        ...newEnrollment,
+        class_name: targetClass.name,
+        period_name: targetPeriod.name,
+      },
+    }
+  }
+
+  async exitStudentEnrollment(params: ExitStudentEnrollmentParams): Promise<ClassEnrollment> {
+    const active = this.classEnrollments.find(
+      (e) =>
+        e.user_id === params.userId &&
+        e.academic_period_id === params.academicPeriodId &&
+        e.status === 'active',
+    )
+    if (!active) throw AppError.notFound('Active class enrollment')
+    active.status = params.status ?? 'archived'
+    active.updated_at = new Date().toISOString()
+    return { ...active }
+  }
+
+  async getStudentEnrollmentHistory(userId: string): Promise<ClassEnrollment[]> {
+    return this.listClassEnrollments({ userId })
   }
 
   async getActivePermitsToday(
@@ -236,17 +931,74 @@ export class MemoryDomainStore implements DomainStore {
     return permit
   }
 
-  async validateAttendanceAction(_params: {
+  async validateAttendanceAction(params: {
     userId: string
     latitude: number
     longitude: number
   }): Promise<AttendanceActionRpcResponse> {
+    // 1. Check geofence location policy
+    const activeLocations = Array.from(this.locations.values()).filter((l) => l.is_active)
+    if (activeLocations.length === 0) {
+      return {
+        actionable: false,
+        action_type: 'none',
+        message: 'No active attendance location/geofence configured.',
+        details: null,
+      }
+    }
+
+    // Check if user within radius of any active location
+    let matchedLocation: Location | null = null
+    for (const loc of activeLocations) {
+      const dist = calculateDistanceMeters(params.latitude, params.longitude, loc.latitude, loc.longitude)
+      if (dist <= loc.radius_meters) {
+        matchedLocation = loc
+        break
+      }
+    }
+
+    if (!matchedLocation) {
+      const loc = activeLocations[0]
+      return {
+        actionable: false,
+        action_type: 'none',
+        message: `Di luar radius lokasi sekolah (${loc.name}).`,
+        details: {
+          location_name: loc.name,
+        },
+      }
+    }
+
+    // 2. Query today's attendances
+    const now = new Date()
+    const todayWIB = new Date(now.getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    const attendances = this.absences.filter(
+      (a) => a.user_id === params.userId && (a.date === todayWIB || a.created_at.startsWith(todayWIB)),
+    )
+
+    const hasCheckedIn = attendances.some((r) => r.status === 'Hadir' || r.status === 'Terlambat')
+    const hasCheckedOut = attendances.some((r) => r.status === 'Pulang')
+    const hasAbsent = attendances.some((r) => r.status === 'Alpha')
+
+    if (hasAbsent || (hasCheckedIn && hasCheckedOut)) {
+      return {
+        actionable: false,
+        action_type: 'none',
+        message: 'Attendance for today is already complete.',
+        details: {
+          location_name: matchedLocation.name,
+        },
+      }
+    }
+
+    const actionType: 'check_in' | 'check_out' = hasCheckedIn ? 'check_out' : 'check_in'
+
     return {
       actionable: true,
-      action_type: 'check_in',
+      action_type: actionType,
       message: 'Validation successful.',
       details: {
-        location_name: 'School Campus',
+        location_name: matchedLocation.name,
         status: 'Hadir',
       },
     }
@@ -304,6 +1056,17 @@ export class MemoryDomainStore implements DomainStore {
         created_at: now,
         updated_at: now,
       })
+    } else {
+      for (const p of this.academicPeriods) {
+        if (p.school_id === '11111111-1111-1111-1111-111111111111') {
+          p.school_id = school.id
+        }
+      }
+      for (const c of this.classes) {
+        if (c.school_id === '11111111-1111-1111-1111-111111111111') {
+          c.school_id = school.id
+        }
+      }
     }
 
     return { ...school }
@@ -324,50 +1087,6 @@ export class MemoryDomainStore implements DomainStore {
     }
     this.profiles.set(params.userId, profile)
     return { ...profile }
-  }
-
-  async getActiveAcademicPeriod(): Promise<AcademicPeriod | null> {
-    const period = this.academicPeriods.find((p) => p.is_active)
-    if (!period) return null
-    return { ...period }
-  }
-
-  async createAcademicPeriod(params: CreateAcademicPeriodParams): Promise<AcademicPeriod> {
-    const now = new Date().toISOString()
-    const period: AcademicPeriod = {
-      id: `period-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      school_id: params.schoolId,
-      name: params.name,
-      start_date: params.startDate,
-      end_date: params.endDate,
-      is_active: params.isActive,
-      created_at: now,
-      updated_at: now,
-    }
-    this.academicPeriods.push(period)
-    return { ...period }
-  }
-
-  async getClasses(schoolId?: string): Promise<ClassRoom[]> {
-    if (schoolId) {
-      return this.classes.filter((c) => c.school_id === schoolId).map((c) => ({ ...c }))
-    }
-    return this.classes.map((c) => ({ ...c }))
-  }
-
-  async createClass(params: CreateClassParams): Promise<ClassRoom> {
-    const now = new Date().toISOString()
-    const cls: ClassRoom = {
-      id: `class-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      school_id: params.schoolId,
-      academic_period_id: params.academicPeriodId ?? null,
-      name: params.name,
-      grade: params.grade ?? null,
-      created_at: now,
-      updated_at: now,
-    }
-    this.classes.push(cls)
-    return { ...cls }
   }
 
   async stageRosterReport(params: StageRosterParams): Promise<RosterReport> {

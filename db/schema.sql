@@ -93,6 +93,9 @@ CREATE TABLE IF NOT EXISTS class_enrollments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_class_enrollments_user_period ON class_enrollments(user_id, academic_period_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_active_class_enrollment ON class_enrollments(user_id, academic_period_id) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_class_enrollments_class ON class_enrollments(class_id);
+CREATE INDEX IF NOT EXISTS idx_class_enrollments_status ON class_enrollments(status);
 
 -- ----------------------------------------------------------------------------
 -- Table: roster_reports
@@ -125,6 +128,7 @@ CREATE INDEX IF NOT EXISTS idx_roster_reports_status ON roster_reports(status);
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS locations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID REFERENCES schools(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     latitude DOUBLE PRECISION NOT NULL,
     longitude DOUBLE PRECISION NOT NULL,
@@ -134,12 +138,19 @@ CREATE TABLE IF NOT EXISTS locations (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_locations_school ON locations(school_id);
+CREATE INDEX IF NOT EXISTS idx_locations_active ON locations(is_active);
+
 -- ----------------------------------------------------------------------------
 -- Table: schedules
 -- Description: Daily attendance time windows and grace periods in Asia/Jakarta
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS schedules (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID REFERENCES schools(id) ON DELETE CASCADE,
+    class_id UUID REFERENCES classes(id) ON DELETE CASCADE,
+    academic_period_id UUID REFERENCES academic_periods(id) ON DELETE CASCADE,
+    location_id UUID REFERENCES locations(id) ON DELETE SET NULL,
     day_of_week TEXT NOT NULL,
     start_time TIME NOT NULL,
     end_time TIME NOT NULL,
@@ -153,6 +164,26 @@ CREATE TABLE IF NOT EXISTS schedules (
 );
 
 CREATE INDEX IF NOT EXISTS idx_schedules_day_active ON schedules(day_of_week, is_active);
+CREATE INDEX IF NOT EXISTS idx_schedules_class_day ON schedules(class_id, day_of_week);
+CREATE INDEX IF NOT EXISTS idx_schedules_period_day ON schedules(academic_period_id, day_of_week);
+
+-- ----------------------------------------------------------------------------
+-- Table: calendar_exceptions
+-- Description: School calendar exceptions and holidays
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS calendar_exceptions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID REFERENCES schools(id) ON DELETE CASCADE,
+    academic_period_id UUID REFERENCES academic_periods(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    reason TEXT NOT NULL,
+    is_holiday BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_calendar_exceptions_date ON calendar_exceptions(date);
+CREATE INDEX IF NOT EXISTS idx_calendar_exceptions_period ON calendar_exceptions(academic_period_id);
 
 -- ----------------------------------------------------------------------------
 -- Table: attendances

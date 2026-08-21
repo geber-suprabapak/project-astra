@@ -75,6 +75,12 @@ export interface Absence {
 }
 
 export interface Schedule {
+  id?: string
+  school_id?: string | null
+  class_id?: string | null
+  academic_period_id?: string | null
+  location_id?: string | null
+  day_of_week?: string
   hari: string
   mulai_masuk: string | null
   selesai_masuk: string | null
@@ -82,6 +88,8 @@ export interface Schedule {
   selesai_pulang: string | null
   kompensasi_waktu: number | null
   is_active: boolean
+  created_at?: string
+  updated_at?: string
 }
 
 export interface Permit {
@@ -169,11 +177,18 @@ export interface AcademicPeriod {
 }
 
 export interface CreateAcademicPeriodParams {
-  schoolId: string
+  schoolId?: string
   name: string
   startDate: string
   endDate: string
-  isActive: boolean
+  isActive?: boolean
+}
+
+export interface UpdateAcademicPeriodParams {
+  name?: string
+  startDate?: string
+  endDate?: string
+  isActive?: boolean
 }
 
 export interface ClassRoom {
@@ -187,20 +202,150 @@ export interface ClassRoom {
 }
 
 export interface CreateClassParams {
-  schoolId: string
+  schoolId?: string
   academicPeriodId?: string | null
   name: string
   grade?: number | null
 }
+
+export interface UpdateClassParams {
+  name?: string
+  grade?: number | null
+  academicPeriodId?: string | null
+}
+
+export const classEnrollmentStatusSchema = z.enum([
+  'active',
+  'transferred',
+  'promoted',
+  'graduated',
+  'archived',
+])
+export type ClassEnrollmentStatus = z.infer<typeof classEnrollmentStatusSchema>
 
 export interface ClassEnrollment {
   id: string
   user_id: string
   class_id: string
   academic_period_id: string
-  status: 'active' | 'transferred' | 'promoted' | 'graduated' | 'archived'
+  status: ClassEnrollmentStatus
   created_at?: string
   updated_at?: string
+  class_name?: string | null
+  student_name?: string | null
+  nis?: string | null
+  period_name?: string | null
+}
+
+export interface EnrollStudentParams {
+  userId: string
+  classId: string
+  academicPeriodId: string
+}
+
+export interface TransferStudentEnrollmentParams {
+  userId: string
+  fromClassId?: string
+  toClassId: string
+  academicPeriodId: string
+  reason?: string
+}
+
+export interface PromoteStudentEnrollmentParams {
+  userId: string
+  fromAcademicPeriodId: string
+  toAcademicPeriodId: string
+  toClassId: string
+  reason?: string
+}
+
+export interface ExitStudentEnrollmentParams {
+  userId: string
+  academicPeriodId: string
+  status?: 'graduated' | 'archived'
+  reason?: string
+}
+
+export interface Location {
+  id: string
+  school_id?: string | null
+  name: string
+  latitude: number
+  longitude: number
+  radius_meters: number
+  is_active: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+export interface CreateLocationParams {
+  name: string
+  latitude: number
+  longitude: number
+  radiusMeters?: number
+  isActive?: boolean
+  schoolId?: string | null
+}
+
+export interface UpdateLocationParams {
+  name?: string
+  latitude?: number
+  longitude?: number
+  radiusMeters?: number
+  isActive?: boolean
+}
+
+export interface CreateScheduleParams {
+  dayOfWeek: string
+  startTime: string
+  endTime: string
+  startCheckout: string
+  endCheckout: string
+  gracePeriodMinutes?: number
+  isActive?: boolean
+  schoolId?: string | null
+  classId?: string | null
+  academicPeriodId?: string | null
+  locationId?: string | null
+}
+
+export interface UpdateScheduleParams {
+  dayOfWeek?: string
+  startTime?: string
+  endTime?: string
+  startCheckout?: string
+  endCheckout?: string
+  gracePeriodMinutes?: number
+  isActive?: boolean
+  classId?: string | null
+  academicPeriodId?: string | null
+  locationId?: string | null
+}
+
+export interface CalendarException {
+  id: string
+  school_id?: string | null
+  academic_period_id?: string | null
+  date: string
+  reason: string
+  is_holiday: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+export interface CreateCalendarExceptionParams {
+  date: string
+  reason: string
+  isHoliday?: boolean
+  academicPeriodId?: string | null
+  schoolId?: string | null
+}
+
+export interface UpdateCalendarExceptionParams {
+  date?: string
+  reason?: string
+  isHoliday?: boolean
+  academicPeriodId?: string | null
 }
 
 export interface RosterRowInput {
@@ -365,6 +510,66 @@ export interface DomainStore {
     longitude: number
   }): Promise<SaveAttendanceRecordRpcResponse>
 
+  // Academic Periods domain methods
+  listAcademicPeriods(filter?: { isActive?: boolean }): Promise<AcademicPeriod[]>
+  getAcademicPeriod(id: string): Promise<AcademicPeriod | null>
+  getActiveAcademicPeriod(): Promise<AcademicPeriod | null>
+  createAcademicPeriod(params: CreateAcademicPeriodParams): Promise<AcademicPeriod>
+  updateAcademicPeriod(id: string, params: UpdateAcademicPeriodParams): Promise<AcademicPeriod>
+  setActiveAcademicPeriod(id: string): Promise<AcademicPeriod>
+
+  // Classes domain methods
+  getClasses(schoolId?: string, academicPeriodId?: string): Promise<ClassRoom[]>
+  getClassById(id: string): Promise<ClassRoom | null>
+  createClass(params: CreateClassParams): Promise<ClassRoom>
+  updateClass(id: string, params: UpdateClassParams): Promise<ClassRoom>
+
+  // Class Enrollment domain methods
+  listClassEnrollments(filter?: {
+    userId?: string
+    classId?: string
+    academicPeriodId?: string
+    status?: ClassEnrollmentStatus
+  }): Promise<ClassEnrollment[]>
+  getActiveClassEnrollment(userId: string, academicPeriodId?: string): Promise<ClassEnrollment | null>
+  enrollStudentInClass(params: EnrollStudentParams): Promise<ClassEnrollment>
+  transferStudentEnrollment(params: TransferStudentEnrollmentParams): Promise<{ previous: ClassEnrollment; current: ClassEnrollment }>
+  promoteStudentEnrollment(params: PromoteStudentEnrollmentParams): Promise<{ previous: ClassEnrollment; current: ClassEnrollment }>
+  exitStudentEnrollment(params: ExitStudentEnrollmentParams): Promise<ClassEnrollment>
+  getStudentEnrollmentHistory(userId: string): Promise<ClassEnrollment[]>
+
+  // Schedules domain methods
+  listSchedules(filter?: {
+    classId?: string
+    academicPeriodId?: string
+    dayOfWeek?: string
+    isActive?: boolean
+  }): Promise<Schedule[]>
+  getScheduleById(id: string): Promise<Schedule | null>
+  getActiveSchedule(dayKey: string, params?: { classId?: string; academicPeriodId?: string }): Promise<Schedule | null>
+  createSchedule(params: CreateScheduleParams): Promise<Schedule>
+  updateSchedule(id: string, params: UpdateScheduleParams): Promise<Schedule>
+  deleteSchedule(id: string): Promise<void>
+
+  // Calendar Exceptions domain methods
+  listCalendarExceptions(filter?: {
+    academicPeriodId?: string
+    startDate?: string
+    endDate?: string
+  }): Promise<CalendarException[]>
+  getCalendarExceptionById(id: string): Promise<CalendarException | null>
+  getCalendarExceptionByDate(date: string, academicPeriodId?: string): Promise<CalendarException | null>
+  createCalendarException(params: CreateCalendarExceptionParams): Promise<CalendarException>
+  updateCalendarException(id: string, params: UpdateCalendarExceptionParams): Promise<CalendarException>
+  deleteCalendarException(id: string): Promise<void>
+
+  // Location / Geofence domain methods
+  listLocations(filter?: { isActive?: boolean }): Promise<Location[]>
+  getLocationById(id: string): Promise<Location | null>
+  createLocation(params: CreateLocationParams): Promise<Location>
+  updateLocation(id: string, params: UpdateLocationParams): Promise<Location>
+  deleteLocation(id: string): Promise<void>
+
   // Bootstrap & Roster domain methods
   getSchool(): Promise<School | null>
   getSchoolBySlug(slug: string): Promise<School | null>
@@ -374,10 +579,6 @@ export interface DomainStore {
     fullName?: string | null
     email?: string | null
   }): Promise<UserProfile>
-  getActiveAcademicPeriod(): Promise<AcademicPeriod | null>
-  createAcademicPeriod(params: CreateAcademicPeriodParams): Promise<AcademicPeriod>
-  getClasses(schoolId?: string): Promise<ClassRoom[]>
-  createClass(params: CreateClassParams): Promise<ClassRoom>
   stageRosterReport(params: StageRosterParams): Promise<RosterReport>
   getRosterReport(id: string): Promise<RosterReport | null>
   acceptRosterReport(id: string, acceptedBy: string): Promise<RosterReport>

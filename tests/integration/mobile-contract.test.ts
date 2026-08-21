@@ -68,15 +68,33 @@ describe('integration: /v1/mobile contract boundary', () => {
 
     // Seed active schedule for today's WIB day
     const dayKey = getDayKeyWIB()
+    domainStore.schedules.clear()
     domainStore.schedules.set(dayKey, {
+      id: `sched-${dayKey}`,
       hari: dayKey,
+      day_of_week: dayKey,
       mulai_masuk: '00:00:00',
       selesai_masuk: '23:59:59',
-      mulai_pulang: '12:00:00',
+      mulai_pulang: '00:00:00',
       selesai_pulang: '23:59:59',
       kompensasi_waktu: 30,
       is_active: true,
     })
+
+    // Seed active class enrollment
+    const activePeriod = domainStore.academicPeriods.find((p) => p.is_active)
+    const activeClass = domainStore.classes[0]
+    if (activePeriod && activeClass) {
+      domainStore.classEnrollments.push({
+        id: 'enroll-student-123',
+        user_id: userId,
+        class_id: activeClass.id,
+        academic_period_id: activePeriod.id,
+        status: 'active',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+    }
 
     identityProvider.passwords.set('budi@sekolah.sch.id', 'current-password123')
 
