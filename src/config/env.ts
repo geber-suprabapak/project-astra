@@ -55,6 +55,7 @@ export const envSchema = z
     ROBIN_IDENTIFY_TIMEOUT_MS: positiveInt.default(30000),
     ROBIN_ENROLL_TIMEOUT_MS: positiveInt.default(60000),
     ROBIN_ENROLL_STATUS_TIMEOUT_MS: positiveInt.default(5000),
+    ROBIN_SERVICE_TOKEN: z.string().min(1).default('dev-robin-service-token'),
 
     REDIS_URL: z.string().url().optional(),
     REDIS_KEY_PREFIX: z.string().min(1).default('astra:ratelimit'),
@@ -157,6 +158,7 @@ export const env = {
   robinIdentifyTimeoutMs: raw.ROBIN_IDENTIFY_TIMEOUT_MS,
   robinEnrollTimeoutMs: raw.ROBIN_ENROLL_TIMEOUT_MS,
   robinEnrollStatusTimeoutMs: raw.ROBIN_ENROLL_STATUS_TIMEOUT_MS,
+  robinServiceToken: raw.ROBIN_SERVICE_TOKEN,
 
   redisUrl: raw.REDIS_URL,
   redisKeyPrefix: raw.REDIS_KEY_PREFIX,

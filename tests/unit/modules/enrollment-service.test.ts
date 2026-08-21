@@ -241,7 +241,7 @@ describe('enrollment service', () => {
         providers,
       })
 
-      expect(mockDeleteEnrollment).toHaveBeenCalledWith('token-123', 'req-456')
+      expect(mockDeleteEnrollment).toHaveBeenCalledWith('token-123', 'req-456', 'student-del')
 
       const activeFiles = await domainStore.listFiles({
         userId: 'student-del',

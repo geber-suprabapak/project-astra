@@ -1016,7 +1016,7 @@ export async function resetStudentFaceEnrollment(params: {
     throw AppError.notFound('Student profile')
   }
 
-  await params.providers.robinClient.deleteEnrollment(undefined, undefined)
+  await params.providers.robinClient.deleteEnrollment(undefined, undefined, params.userId)
   await params.providers.objectStorage.deleteFaceEnrollmentImages(params.userId)
   await params.providers.domainStore.deleteFaceEnrollmentFiles(params.userId)
   await params.providers.domainStore.deleteFaceEnrollment(params.userId)

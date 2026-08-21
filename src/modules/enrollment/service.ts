@@ -150,7 +150,7 @@ export async function deleteEnrollment(params: {
     throw AppError.forbidden('Only approved students can manage face enrollment.')
   }
 
-  await providers.robinClient.deleteEnrollment(params.token, params.requestId)
+  await providers.robinClient.deleteEnrollment(params.token, params.requestId, params.userId)
   await providers.objectStorage.deleteFaceEnrollmentImages(params.userId)
   await providers.domainStore.deleteFaceEnrollmentFiles(params.userId)
   await providers.domainStore.deleteFaceEnrollment(params.userId)
