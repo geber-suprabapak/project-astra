@@ -1,9 +1,9 @@
 import { AppError } from '../../lib/errors/app-error.js'
+import { ErrorCode } from '../../lib/errors/codes.js'
 import { defaultProviders } from '../../providers/index.js'
 import type {
   AppProviders,
   AttendanceRecord,
-  CalendarException,
   Schedule,
 } from '../../providers/types.js'
 import {
@@ -493,5 +493,157 @@ export async function submit(
     attendance_type: params.actionType,
     status_label: insertStatus,
     processed_ms: processTimeMs,
+  }
+}
+async function requireApprovedStudent(
+  userId: string,
+  providers: AppProviders,
+): Promise<void> {
+  const profile = await providers.domainStore.getUserProfile(userId)
+  if (profile.role !== 'student' || profile.lifecycle_status !== 'approved') {
+    throw new AppError(ErrorCode.FORBIDDEN, 403, 'Only approved students can access attendance history.')
+  }
+}
+
+export async function getAttendanceHistory(params: {
+  userId: string
+  startDate?: string
+  endDate?: string
+  limit?: number
+  providers: AppProviders
+}): Promise<{ items: AttendanceRecord[]; total: number }> {
+  await requireApprovedStudent(params.userId, params.providers)
+
+  const all = await params.providers.domainStore.listAttendances({
+    userId: params.userId,
+    limit: 100,
+  })
+  const filtered = all.filter((record) => {
+    if (params.startDate && record.date < params.startDate) return false
+    if (params.endDate && record.date > params.endDate) return false
+    return true
+  })
+  const limit = Math.min(Math.max(params.limit ?? 100, 1), 100)
+
+  return {
+    items: filtered.slice(0, limit),
+    total: filtered.length,
+  }
+}
+
+export async function getStudentAttendanceHistory(params: {
+  userId: string
+  startDate?: string
+  endDate?: string
+  limit?: number
+  providers: AppProviders
+}): Promise<{ items: AttendanceRecord[]; total: number }> {
+  return getAttendanceHistory(params)
+}
+
+export async function getAttendanceCalendar(params: {
+  userId: string
+  year: number
+  month: number
+  providers: AppProviders
+}): Promise<{
+  year: number
+  month: number
+  start_date: string
+  end_date: string
+  stats: { hadir: number; terlambat: number; alpha: number; sakit: number; izin: number }
+  items: Array<{
+    date: string
+    status: string
+    check_in_time?: string
+    check_out_time?: string
+    is_late?: boolean
+    attachment_url?: string | null
+    holiday_reason?: string
+  }>
+}> {
+  await requireApprovedStudent(params.userId, params.providers)
+  const startDate = `${params.year}-${String(params.month).padStart(2, '0')}-01`
+  const lastDay = new Date(Date.UTC(params.year, params.month, 0)).getUTCDate()
+  const endDate = `${params.year}-${String(params.month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+
+  const [attendance, permits, exceptions] = await Promise.all([
+    params.providers.domainStore.listAttendances({ userId: params.userId, limit: 100 }),
+    params.providers.domainStore.getPermitHistory(params.userId),
+    params.providers.domainStore.listCalendarExceptions({ startDate, endDate }),
+  ])
+  const monthAttendance = attendance.filter((record) => record.date >= startDate && record.date <= endDate)
+  const approvedPermits = permits.filter(
+    (permit) =>
+      permit.approval_status === 'approved' &&
+      permit.tanggal.slice(0, 10) >= startDate &&
+      permit.tanggal.slice(0, 10) <= endDate,
+  )
+
+  const items: Array<{
+    date: string
+    status: string
+    check_in_time?: string
+    check_out_time?: string
+    is_late?: boolean
+    attachment_url?: string | null
+    holiday_reason?: string
+  }> = []
+  const byDate = new Map<string, AttendanceRecord[]>()
+  for (const record of monthAttendance) {
+    const records = byDate.get(record.date) ?? []
+    records.push(record)
+    byDate.set(record.date, records)
+  }
+
+  for (const [date, records] of byDate) {
+    const checkIn = records.find((record) => record.action_type === 'check_in')
+    const checkOut = records.find((record) => record.action_type === 'check_out')
+    const late = records.some((record) => record.status === 'Terlambat')
+    const absent = records.some((record) => record.status === 'Alpha')
+    items.push({
+      date,
+      status: absent ? 'absent' : late ? 'late' : 'present',
+      check_in_time: checkIn?.created_at,
+      check_out_time: checkOut?.created_at,
+      is_late: late,
+    })
+  }
+
+  for (const permit of approvedPermits) {
+    const date = permit.tanggal.slice(0, 10)
+    const attachmentUrl = permit.link_foto
+      ? await params.providers.objectStorage.getSignedPermitUrl(permit.link_foto)
+      : null
+    items.push({
+      date,
+      status: permit.kategori_izin === 'sakit' ? 'sick' : 'leave',
+      attachment_url: attachmentUrl,
+    })
+  }
+
+  for (const exception of exceptions) {
+    if (exception.is_holiday) {
+      items.push({
+        date: exception.date,
+        status: 'holiday',
+        holiday_reason: exception.reason,
+      })
+    }
+  }
+
+  return {
+    year: params.year,
+    month: params.month,
+    start_date: startDate,
+    end_date: endDate,
+    stats: {
+      hadir: monthAttendance.filter((record) => record.status === 'Hadir').length > 0 ? 1 : 0,
+      terlambat: monthAttendance.filter((record) => record.status === 'Terlambat').length > 0 ? 1 : 0,
+      alpha: monthAttendance.filter((record) => record.status === 'Alpha').length > 0 ? 1 : 0,
+      sakit: approvedPermits.filter((permit) => permit.kategori_izin === 'sakit').length,
+      izin: approvedPermits.filter((permit) => permit.kategori_izin !== 'sakit').length,
+    },
+    items: items.sort((a, b) => a.date.localeCompare(b.date)),
   }
 }
