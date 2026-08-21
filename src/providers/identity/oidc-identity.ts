@@ -188,6 +188,108 @@ export class OidcIdentityProvider implements IdentityProvider {
     }
   }
 
+  async createStaffIdentity(params: {
+    email: string
+    fullName: string
+    role: string
+    password?: string
+  }): Promise<{ userId: string; email: string }> {
+    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
+      return {
+        userId: `logto-staff-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        email: params.email,
+      }
+    }
+
+    try {
+      const response = await fetch(
+        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            primaryEmail: params.email,
+            name: params.fullName,
+            password: params.password,
+            customData: { role: params.role },
+          }),
+        },
+      )
+      if (!response.ok) {
+        logger.error({ status: response.status, email: params.email }, 'Logto create user failed')
+        if (response.status === 409 || response.status === 422) {
+          throw AppError.conflict(`Identity already exists for email "${params.email}".`)
+        }
+        throw AppError.internal('Failed to create user in identity provider.')
+      }
+      // SAFETY: response JSON contains id from Logto user creation
+      const data = (await response.json()) as { id: string }
+      return { userId: data.id, email: params.email }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, email: params.email }, 'Logto create user error')
+      throw AppError.internal('Failed to create user in identity provider.')
+    }
+  }
+
+  async requestPasswordResetEmail(email: string): Promise<void> {
+    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
+      return
+    }
+
+    try {
+      const response = await fetch(
+        `${this.logtoEndpoint.replace(/\/$/, '')}/api/interaction/verification/password-reset`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        },
+      )
+      if (!response.ok) {
+        logger.warn({ status: response.status, email }, 'Logto password reset email request failed')
+      }
+    } catch (err) {
+      logger.warn({ err, email }, 'Logto password reset email error')
+    }
+  }
+
+  async revokeUserSessions(userId: string): Promise<void> {
+    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
+      return
+    }
+
+    try {
+      await fetch(
+        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/sign-out`,
+        {
+          method: 'POST',
+        },
+      )
+    } catch (err) {
+      logger.warn({ err, userId }, 'Logto sign-out error during session revocation')
+    }
+  }
+
+  async assignRoles(userId: string, roles: string[]): Promise<void> {
+    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
+      return
+    }
+
+    try {
+      await fetch(
+        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/roles`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roleNames: roles }),
+        },
+      )
+    } catch (err) {
+      logger.warn({ err, userId, roles }, 'Logto role assignment error')
+    }
+  }
+
   async checkHealth(): Promise<boolean> {
     if (this.jwksUrl) {
       try {

@@ -13,23 +13,85 @@ import {
   type ClassRoom,
   type CreateAcademicPeriodParams,
   type CreateClassParams,
+  type CreatePermissionParams,
+  type CreateRoleParams,
   type CreateSchoolParams,
+  type CreateStaffParams,
   type DomainStore,
   type IdentityProvider,
   type IdentityUser,
   type InsertAttendanceData,
   type InsertPermitData,
   type ObjectStorage,
+  type Permission,
   type Permit,
+  type Role,
   type RosterReport,
   type SaveAttendanceRecordRpcResponse,
   type Schedule,
   type School,
   type StageRosterParams,
+  type UpdateRoleParams,
+  type UpdateStaffParams,
   type UserMetadata,
   type UserProfile,
 } from '../types.js'
 import { isMfaVerified } from '../identity/claims.js'
+
+const DEFAULT_PERMISSIONS: Permission[] = [
+  { id: 'd0000000-0000-0000-0000-000000000001', name: 'admin:read', description: 'Read administrative state and session' },
+  { id: 'd0000000-0000-0000-0000-000000000002', name: 'admin:write', description: 'Write administrative configuration' },
+  { id: 'd0000000-0000-0000-0000-000000000003', name: 'roles:manage', description: 'Create and modify roles and permissions' },
+  { id: 'd0000000-0000-0000-0000-000000000004', name: 'staff:manage', description: 'Create and manage staff members and assign roles' },
+  { id: 'd0000000-0000-0000-0000-000000000005', name: 'student:manage', description: 'Manage student profiles and approvals' },
+  { id: 'd0000000-0000-0000-0000-000000000006', name: 'roster:manage', description: 'Stage and review student roster imports' },
+  { id: 'd0000000-0000-0000-0000-000000000007', name: 'attendance:read', description: 'View attendance records' },
+  { id: 'd0000000-0000-0000-0000-000000000008', name: 'attendance:write', description: 'Submit attendance check-in/out' },
+  { id: 'd0000000-0000-0000-0000-000000000009', name: 'attendance:manual', description: 'Record manual attendance exceptions' },
+  { id: 'd0000000-0000-0000-0000-000000000010', name: 'leave:read', description: 'View leave requests' },
+  { id: 'd0000000-0000-0000-0000-000000000011', name: 'leave:submit', description: 'Submit leave requests' },
+  { id: 'd0000000-0000-0000-0000-000000000012', name: 'leave:approve', description: 'Approve or reject leave requests' },
+  { id: 'd0000000-0000-0000-0000-000000000013', name: 'profile:read', description: 'View profile information' },
+  { id: 'd0000000-0000-0000-0000-000000000014', name: 'profile:write', description: 'Update profile information' },
+]
+
+const DEFAULT_ROLES: Role[] = [
+  {
+    id: 'c0000000-0000-0000-0000-000000000001',
+    name: 'platform_admin',
+    description: 'Platform Administrator with full access',
+    is_active: true,
+    permissions: ['admin:read', 'admin:write', 'roles:manage', 'staff:manage', 'student:manage', 'roster:manage'],
+  },
+  {
+    id: 'c0000000-0000-0000-0000-000000000002',
+    name: 'school_admin',
+    description: 'School Administrator for school-level operations',
+    is_active: true,
+    permissions: ['admin:read', 'staff:manage', 'student:manage', 'roster:manage', 'attendance:read', 'attendance:manual', 'leave:read', 'leave:approve'],
+  },
+  {
+    id: 'c0000000-0000-0000-0000-000000000003',
+    name: 'teacher',
+    description: 'Teacher with attendance and leave management access',
+    is_active: true,
+    permissions: ['attendance:read', 'attendance:manual', 'leave:read', 'leave:approve'],
+  },
+  {
+    id: 'c0000000-0000-0000-0000-000000000004',
+    name: 'staff',
+    description: 'General staff with operational read access',
+    is_active: true,
+    permissions: ['attendance:read', 'leave:read'],
+  },
+  {
+    id: 'c0000000-0000-0000-0000-000000000005',
+    name: 'student',
+    description: 'Student with attendance check-in and leave submission access',
+    is_active: true,
+    permissions: ['attendance:read', 'attendance:write', 'leave:read', 'leave:submit'],
+  },
+]
 
 const identityTokenPayloadSchema = z
   .object({
@@ -54,8 +116,21 @@ export class MemoryDomainStore implements DomainStore {
   public classEnrollments: ClassEnrollment[] = []
   public rosterReports = new Map<string, RosterReport>()
   public auditLogs: AuditLog[] = []
+  public roles = new Map<string, Role>()
+  public permissions = new Map<string, Permission>()
+  public userRoles = new Map<string, Set<string>>()
+  public revokedSessions = new Set<string>()
   public signupOpen = false
   public isHealthy = true
+
+  constructor() {
+    for (const perm of DEFAULT_PERMISSIONS) {
+      this.permissions.set(perm.name, { ...perm })
+    }
+    for (const role of DEFAULT_ROLES) {
+      this.roles.set(role.name, { ...role, permissions: [...(role.permissions ?? [])] })
+    }
+  }
 
   async getUserProfile(userId: string): Promise<UserProfile> {
     const profile = this.profiles.get(userId)
@@ -435,6 +510,228 @@ export class MemoryDomainStore implements DomainStore {
     })
   }
 
+  async getRoles(activeOnly = false): Promise<Role[]> {
+    const roles = Array.from(this.roles.values())
+    if (activeOnly) {
+      return roles.filter((r) => r.is_active)
+    }
+    return roles.map((r) => ({ ...r, permissions: [...(r.permissions ?? [])] }))
+  }
+
+  async getRoleById(id: string): Promise<Role | null> {
+    for (const role of this.roles.values()) {
+      if (role.id === id) {
+        return { ...role, permissions: [...(role.permissions ?? [])] }
+      }
+    }
+    return null
+  }
+
+  async getRoleByName(name: string): Promise<Role | null> {
+    const role = this.roles.get(name.toLowerCase())
+    if (!role) return null
+    return { ...role, permissions: [...(role.permissions ?? [])] }
+  }
+
+  async createRole(params: CreateRoleParams): Promise<Role> {
+    const nameLower = params.name.toLowerCase()
+    if (this.roles.has(nameLower)) {
+      throw AppError.conflict(`Role with name "${params.name}" already exists.`)
+    }
+    const role: Role = {
+      id: `role-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name: nameLower,
+      description: params.description ?? null,
+      is_active: true,
+      permissions: params.permissions ? [...params.permissions] : [],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    this.roles.set(nameLower, role)
+    return { ...role }
+  }
+
+  async updateRole(id: string, params: UpdateRoleParams): Promise<Role> {
+    let targetRole: Role | null = null
+    let targetKey: string | null = null
+    for (const [key, role] of this.roles.entries()) {
+      if (role.id === id) {
+        targetRole = role
+        targetKey = key
+        break
+      }
+    }
+    if (!targetRole || !targetKey) {
+      throw AppError.notFound('Role')
+    }
+
+    if (params.name && params.name.toLowerCase() !== targetRole.name) {
+      const newNameLower = params.name.toLowerCase()
+      if (this.roles.has(newNameLower)) {
+        throw AppError.conflict(`Role with name "${params.name}" already exists.`)
+      }
+      this.roles.delete(targetKey)
+      targetRole.name = newNameLower
+      targetKey = newNameLower
+    }
+
+    if (params.description !== undefined) {
+      targetRole.description = params.description
+    }
+    if (params.permissions !== undefined) {
+      targetRole.permissions = [...params.permissions]
+    }
+    if (params.isActive !== undefined) {
+      targetRole.is_active = params.isActive
+    }
+    targetRole.updated_at = new Date().toISOString()
+    this.roles.set(targetKey, targetRole)
+    return { ...targetRole, permissions: [...(targetRole.permissions ?? [])] }
+  }
+
+  async getPermissions(): Promise<Permission[]> {
+    return Array.from(this.permissions.values()).map((p) => ({ ...p }))
+  }
+
+  async createPermission(params: CreatePermissionParams): Promise<Permission> {
+    const nameLower = params.name.toLowerCase()
+    if (this.permissions.has(nameLower)) {
+      throw AppError.conflict(`Permission with name "${params.name}" already exists.`)
+    }
+    const perm: Permission = {
+      id: `perm-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name: nameLower,
+      description: params.description ?? null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    this.permissions.set(nameLower, perm)
+    return { ...perm }
+  }
+
+  async getUserRoles(userId: string): Promise<string[]> {
+    const assigned = this.userRoles.get(userId)
+    const result = new Set<string>()
+    if (assigned) {
+      for (const r of assigned) result.add(r)
+    }
+    const profile = this.profiles.get(userId)
+    if (profile?.role) {
+      result.add(profile.role)
+    }
+    return Array.from(result)
+  }
+
+  async assignUserRoles(userId: string, roleNames: string[]): Promise<void> {
+    const set = new Set<string>()
+    for (const r of roleNames) {
+      set.add(r.toLowerCase())
+    }
+    this.userRoles.set(userId, set)
+  }
+
+  async getUserEffectivePermissions(userId: string): Promise<string[]> {
+    const roles = await this.getUserRoles(userId)
+    const permissions = new Set<string>()
+    for (const roleName of roles) {
+      const role = this.roles.get(roleName.toLowerCase())
+      if (role && role.is_active && role.permissions) {
+        for (const p of role.permissions) {
+          permissions.add(p)
+        }
+      }
+    }
+    return Array.from(permissions).sort()
+  }
+
+  async createStaffProfile(params: CreateStaffParams): Promise<UserProfile> {
+    for (const p of this.profiles.values()) {
+      if (p.email && p.email.toLowerCase() === params.email.toLowerCase()) {
+        throw AppError.conflict(`Email "${params.email}" is already registered.`)
+      }
+    }
+
+    const userId = params.userId ?? `staff-${Date.now()}`
+    // SAFETY: role is verified against active roles in service
+    const primaryRole = params.role as UserProfile['role']
+    const profile: UserProfile = {
+      user_id: userId,
+      full_name: params.fullName,
+      email: params.email,
+      role: primaryRole,
+      lifecycle_status: 'approved',
+      gender: params.gender ?? null,
+    }
+    this.profiles.set(userId, profile)
+
+    const allRoles = new Set<string>([params.role])
+    if (params.roles) {
+      for (const r of params.roles) allRoles.add(r)
+    }
+    this.userRoles.set(userId, allRoles)
+
+    return { ...profile }
+  }
+
+  async getStaffProfiles(): Promise<UserProfile[]> {
+    const result: UserProfile[] = []
+    for (const p of this.profiles.values()) {
+      if (p.role && p.role !== 'student') {
+        result.push({ ...p })
+      }
+    }
+    return result
+  }
+
+  async getStaffProfile(userId: string): Promise<UserProfile | null> {
+    const profile = this.profiles.get(userId)
+    if (!profile || profile.role === 'student') return null
+    return { ...profile }
+  }
+
+  async updateStaffProfile(userId: string, updates: UpdateStaffParams): Promise<UserProfile> {
+    const profile = this.profiles.get(userId)
+    if (!profile) {
+      throw AppError.notFound('Staff profile')
+    }
+
+    if (updates.fullName !== undefined) {
+      profile.full_name = updates.fullName
+    }
+    if (updates.gender !== undefined) {
+      profile.gender = updates.gender
+    }
+    if (updates.role !== undefined) {
+      // SAFETY: updates.role is validated by schema and service
+      profile.role = updates.role as UserProfile['role']
+      const existingRoles = this.userRoles.get(userId) ?? new Set<string>()
+      existingRoles.add(updates.role)
+      this.userRoles.set(userId, existingRoles)
+    }
+    if (updates.roles !== undefined) {
+      const set = new Set<string>(updates.roles)
+      if (updates.role) set.add(updates.role)
+      this.userRoles.set(userId, set)
+    }
+    if (updates.lifecycleStatus !== undefined) {
+      profile.lifecycle_status = updates.lifecycleStatus
+      if (updates.lifecycleStatus === 'disabled' || updates.lifecycleStatus === 'rejected') {
+        this.revokedSessions.add(userId)
+      }
+    }
+
+    this.profiles.set(userId, profile)
+    return { ...profile }
+  }
+
+  async revokeUserSessions(userId: string): Promise<void> {
+    this.revokedSessions.add(userId)
+  }
+
+  async isSessionRevoked(userId: string): Promise<boolean> {
+    return this.revokedSessions.has(userId)
+  }
+
   async checkHealth(): Promise<boolean> {
     return this.isHealthy
   }
@@ -488,6 +785,7 @@ export class MemoryObjectStorage implements ObjectStorage {
 export class MemoryIdentityProvider implements IdentityProvider {
   public users = new Map<string, IdentityUser>()
   public passwords = new Map<string, string>()
+  public revokedUsers = new Set<string>()
   public isHealthy = true
 
   async verifyToken(token: string): Promise<IdentityUser> {
@@ -553,6 +851,55 @@ export class MemoryIdentityProvider implements IdentityProvider {
     const existing = this.users.get(userId)
     if (existing) {
       this.users.set(userId, { ...existing, ...metadata })
+    }
+  }
+
+  async createStaffIdentity(params: {
+    email: string
+    fullName: string
+    role: string
+    password?: string
+  }): Promise<{ userId: string; email: string }> {
+    const userId = `staff-identity-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    // SAFETY: role string cast to IdentityRole array
+    const role = params.role as NonNullable<IdentityUser['roles']>[number]
+    this.users.set(userId, {
+      userId,
+      email: params.email,
+      roles: [role],
+      scopes: ['openid', 'profile', 'admin:read'],
+      mfaVerified: true,
+      mustChangePassword: false,
+    })
+    if (params.password) {
+      this.passwords.set(params.email, params.password)
+    }
+    return { userId, email: params.email }
+  }
+
+  async requestPasswordResetEmail(email: string): Promise<void> {
+    let found = false
+    for (const u of this.users.values()) {
+      if (u.email === email) {
+        found = true
+        break
+      }
+    }
+    if (!found) {
+      // Simulate silent success
+    }
+  }
+
+  async revokeUserSessions(userId: string): Promise<void> {
+    this.revokedUsers.add(userId)
+  }
+
+  async assignRoles(userId: string, roles: string[]): Promise<void> {
+    const user = this.users.get(userId)
+    if (user) {
+      // SAFETY: string roles cast to IdentityRole array
+      user.roles = roles as IdentityUser['roles']
+      this.users.set(userId, user)
     }
   }
 

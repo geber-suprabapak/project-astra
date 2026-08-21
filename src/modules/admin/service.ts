@@ -4,14 +4,21 @@ import type {
   BootstrapStatus,
   IdentityRole,
   IdentityUser,
+  Permission,
   ProfileLifecycleStatus,
   RejectedRosterRow,
+  Role,
   RosterReport,
   RosterRowInput,
   School,
   UserProfile,
 } from '../../providers/types.js'
-import { privilegedSessionSchema, type PrivilegedSession } from './schema.js'
+import {
+  privilegedSessionSchema,
+  type EffectivePermissionsResponse,
+  type PrivilegedSession,
+  type StaffResponse,
+} from './schema.js'
 
 export function getPrivilegedSession(params: {
   userId: string
@@ -284,4 +291,409 @@ export async function openStudentSignup(params: {
   })
 
   return { signup_open: true }
+}
+
+export async function listRoles(params: {
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<Role[]> {
+  if (params.actorRole !== 'platform_admin' && params.actorRole !== 'school_admin') {
+    throw AppError.forbidden()
+  }
+
+  return params.providers.domainStore.getRoles()
+}
+
+export async function getRole(params: {
+  id: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<Role> {
+  if (params.actorRole !== 'platform_admin' && params.actorRole !== 'school_admin') {
+    throw AppError.forbidden()
+  }
+
+  const role = await params.providers.domainStore.getRoleById(params.id)
+  if (!role) {
+    throw AppError.notFound('Role')
+  }
+
+  return role
+}
+
+export async function createRole(params: {
+  name: string
+  description?: string | null
+  permissions?: string[]
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<Role> {
+  if (params.actorRole !== 'platform_admin') {
+    throw AppError.forbidden()
+  }
+
+  const role = await params.providers.domainStore.createRole({
+    name: params.name,
+    description: params.description,
+    permissions: params.permissions,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'create_role',
+    entity_type: 'role',
+    entity_id: role.id,
+    details: {
+      name: role.name,
+      permissions: role.permissions,
+    },
+  })
+
+  return role
+}
+
+export async function updateRole(params: {
+  id: string
+  name?: string
+  description?: string | null
+  permissions?: string[]
+  isActive?: boolean
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<Role> {
+  if (params.actorRole !== 'platform_admin') {
+    throw AppError.forbidden()
+  }
+
+  const updated = await params.providers.domainStore.updateRole(params.id, {
+    name: params.name,
+    description: params.description,
+    permissions: params.permissions,
+    isActive: params.isActive,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'update_role',
+    entity_type: 'role',
+    entity_id: updated.id,
+    details: {
+      name: updated.name,
+      is_active: updated.is_active,
+      permissions: updated.permissions,
+    },
+  })
+
+  return updated
+}
+
+export async function listPermissions(params: {
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<Permission[]> {
+  if (params.actorRole !== 'platform_admin' && params.actorRole !== 'school_admin') {
+    throw AppError.forbidden()
+  }
+
+  return params.providers.domainStore.getPermissions()
+}
+
+export async function createPermission(params: {
+  name: string
+  description?: string | null
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<Permission> {
+  if (params.actorRole !== 'platform_admin') {
+    throw AppError.forbidden()
+  }
+
+  const perm = await params.providers.domainStore.createPermission({
+    name: params.name,
+    description: params.description,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'create_permission',
+    entity_type: 'permission',
+    entity_id: perm.id,
+    details: {
+      name: perm.name,
+    },
+  })
+
+  return perm
+}
+
+export async function listStaff(params: {
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<StaffResponse[]> {
+  if (params.actorRole !== 'platform_admin' && params.actorRole !== 'school_admin') {
+    throw AppError.forbidden()
+  }
+
+  const profiles = await params.providers.domainStore.getStaffProfiles()
+  const results: StaffResponse[] = []
+
+  for (const p of profiles) {
+    const roles = await params.providers.domainStore.getUserRoles(p.user_id)
+    const effectivePermissions = await params.providers.domainStore.getUserEffectivePermissions(
+      p.user_id,
+    )
+    results.push({
+      ...p,
+      roles,
+      effective_permissions: effectivePermissions,
+    })
+  }
+
+  return results
+}
+
+export async function getStaff(params: {
+  userId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<StaffResponse> {
+  if (params.actorRole !== 'platform_admin' && params.actorRole !== 'school_admin') {
+    throw AppError.forbidden()
+  }
+
+  const profile = await params.providers.domainStore.getStaffProfile(params.userId)
+  if (!profile) {
+    throw AppError.notFound('Staff profile')
+  }
+
+  const roles = await params.providers.domainStore.getUserRoles(params.userId)
+  const effectivePermissions = await params.providers.domainStore.getUserEffectivePermissions(
+    params.userId,
+  )
+
+  return {
+    ...profile,
+    roles,
+    effective_permissions: effectivePermissions,
+  }
+}
+
+export async function createStaff(params: {
+  userId?: string
+  email: string
+  fullName: string
+  role: string
+  roles?: string[]
+  gender?: string | null
+  password?: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<StaffResponse> {
+  if (params.actorRole !== 'platform_admin' && params.actorRole !== 'school_admin') {
+    throw AppError.forbidden()
+  }
+
+  if (params.actorRole === 'school_admin') {
+    if (params.role === 'platform_admin' || params.roles?.includes('platform_admin')) {
+      throw AppError.forbidden()
+    }
+  }
+
+  const targetRole = await params.providers.domainStore.getRoleByName(params.role)
+  if (!targetRole || !targetRole.is_active) {
+    throw AppError.validationError(`Role "${params.role}" does not exist or is inactive.`)
+  }
+
+  if (params.roles) {
+    for (const r of params.roles) {
+      const extra = await params.providers.domainStore.getRoleByName(r)
+      if (!extra || !extra.is_active) {
+        throw AppError.validationError(`Role "${r}" does not exist or is inactive.`)
+      }
+    }
+  }
+
+  let identityUserId = params.userId
+  if (params.providers.identityProvider.createStaffIdentity) {
+    const identity = await params.providers.identityProvider.createStaffIdentity({
+      email: params.email,
+      fullName: params.fullName,
+      role: params.role,
+      password: params.password,
+    })
+    identityUserId = identityUserId ?? identity.userId
+  }
+
+  const profile = await params.providers.domainStore.createStaffProfile({
+    userId: identityUserId,
+    fullName: params.fullName,
+    email: params.email,
+    role: params.role,
+    roles: params.roles,
+    gender: params.gender,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'create_staff',
+    entity_type: 'profile',
+    entity_id: profile.user_id,
+    details: {
+      user_id: profile.user_id,
+      email: profile.email,
+      full_name: profile.full_name,
+      role: profile.role,
+      roles: params.roles,
+    },
+  })
+
+  const roles = await params.providers.domainStore.getUserRoles(profile.user_id)
+  const effectivePermissions = await params.providers.domainStore.getUserEffectivePermissions(
+    profile.user_id,
+  )
+
+  return {
+    ...profile,
+    roles,
+    effective_permissions: effectivePermissions,
+  }
+}
+
+export async function updateStaff(params: {
+  userId: string
+  fullName?: string | null
+  role?: string
+  roles?: string[]
+  lifecycleStatus?: ProfileLifecycleStatus
+  gender?: string | null
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<StaffResponse> {
+  if (params.actorRole !== 'platform_admin' && params.actorRole !== 'school_admin') {
+    throw AppError.forbidden()
+  }
+
+  if (params.actorRole === 'school_admin') {
+    if (params.role === 'platform_admin' || params.roles?.includes('platform_admin')) {
+      throw AppError.forbidden()
+    }
+  }
+
+  if (params.role) {
+    const targetRole = await params.providers.domainStore.getRoleByName(params.role)
+    if (!targetRole || !targetRole.is_active) {
+      throw AppError.validationError(`Role "${params.role}" does not exist or is inactive.`)
+    }
+  }
+
+  if (params.roles) {
+    for (const r of params.roles) {
+      const extra = await params.providers.domainStore.getRoleByName(r)
+      if (!extra || !extra.is_active) {
+        throw AppError.validationError(`Role "${r}" does not exist or is inactive.`)
+      }
+    }
+  }
+
+  const updated = await params.providers.domainStore.updateStaffProfile(params.userId, {
+    fullName: params.fullName,
+    role: params.role,
+    roles: params.roles,
+    lifecycleStatus: params.lifecycleStatus,
+    gender: params.gender,
+  })
+
+  if (
+    params.lifecycleStatus === 'disabled' ||
+    params.lifecycleStatus === 'rejected' ||
+    params.role ||
+    params.roles
+  ) {
+    await params.providers.identityProvider.revokeUserSessions?.(params.userId)
+  }
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'update_staff',
+    entity_type: 'profile',
+    entity_id: params.userId,
+    details: {
+      user_id: params.userId,
+      role: updated.role,
+      lifecycle_status: updated.lifecycle_status,
+      full_name: updated.full_name,
+    },
+  })
+
+  const roles = await params.providers.domainStore.getUserRoles(params.userId)
+  const effectivePermissions = await params.providers.domainStore.getUserEffectivePermissions(
+    params.userId,
+  )
+
+  return {
+    ...updated,
+    roles,
+    effective_permissions: effectivePermissions,
+  }
+}
+
+export async function requestStaffPasswordReset(params: {
+  userId: string
+  email?: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<{ success: boolean; message: string }> {
+  if (params.actorRole !== 'platform_admin' && params.actorRole !== 'school_admin') {
+    throw AppError.forbidden()
+  }
+
+  const staff = await params.providers.domainStore.getUserProfile(params.userId)
+  const targetEmail = params.email ?? staff.email
+  if (!targetEmail) {
+    throw AppError.validationError('Staff profile has no associated email.')
+  }
+
+  await params.providers.identityProvider.requestPasswordResetEmail?.(targetEmail)
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'request_staff_password_reset',
+    entity_type: 'profile',
+    entity_id: params.userId,
+    details: {
+      user_id: params.userId,
+      email: targetEmail,
+      requested_by: params.actorId,
+    },
+  })
+
+  return {
+    success: true,
+    message: 'Password recovery email initiated.',
+  }
+}
+
+export async function getStaffEffectivePermissions(params: {
+  userId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<EffectivePermissionsResponse> {
+  if (params.actorRole !== 'platform_admin' && params.actorRole !== 'school_admin') {
+    throw AppError.forbidden()
+  }
+
+  const roles = await params.providers.domainStore.getUserRoles(params.userId)
+  const permissions = await params.providers.domainStore.getUserEffectivePermissions(params.userId)
+
+  return {
+    user_id: params.userId,
+    roles,
+    permissions,
+  }
 }

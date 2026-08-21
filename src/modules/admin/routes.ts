@@ -9,17 +9,35 @@ import type { AppProviders } from '../../providers/types.js'
 import type { AppEnv } from '../../types/context.js'
 import {
   bootstrapSchoolSchema,
+  createPermissionSchema,
+  createRoleSchema,
   createSchoolAdminSchema,
+  createStaffSchema,
+  requestStaffPasswordResetSchema,
   stageRosterSchema,
+  updateRoleSchema,
+  updateStaffSchema,
 } from './schema.js'
 import {
   acceptRosterReport,
   bootstrapSchool,
+  createPermission,
+  createRole,
   createSchoolAdmin,
+  createStaff,
   getBootstrapStatus,
   getPrivilegedSession,
+  getRole,
   getRosterReport,
+  getStaff,
+  getStaffEffectivePermissions,
+  listPermissions,
+  listRoles,
+  listStaff,
   openStudentSignup,
+  requestStaffPasswordReset,
+  updateRole,
+  updateStaff,
   validateAndStageRoster,
 } from './service.js'
 
@@ -166,6 +184,226 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
     })
 
     return successResponse(c, result, 'Student signup is now open.')
+  })
+
+  // GET /v1/admin/roles
+  router.get('/roles', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const roles = await listRoles({
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, roles, 'Roles retrieved successfully.')
+  })
+
+  // GET /v1/admin/roles/:id
+  router.get('/roles/:id', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const role = await getRole({
+      id,
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, role, 'Role retrieved successfully.')
+  })
+
+  // POST /v1/admin/roles
+  router.post('/roles', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json()
+    const parsed = createRoleSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+
+    const role = await createRole({
+      name: parsed.data.name,
+      description: parsed.data.description,
+      permissions: parsed.data.permissions,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, role, 'Role created successfully.', 201)
+  })
+
+  // PATCH /v1/admin/roles/:id
+  router.patch('/roles/:id', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const body = await c.req.json()
+    const parsed = updateRoleSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+
+    const isActive = parsed.data.is_active ?? parsed.data.isActive
+    const role = await updateRole({
+      id,
+      name: parsed.data.name,
+      description: parsed.data.description,
+      permissions: parsed.data.permissions,
+      isActive,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, role, 'Role updated successfully.')
+  })
+
+  // GET /v1/admin/permissions
+  router.get('/permissions', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const permissions = await listPermissions({
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, permissions, 'Permissions retrieved successfully.')
+  })
+
+  // POST /v1/admin/permissions
+  router.post('/permissions', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json()
+    const parsed = createPermissionSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+
+    const perm = await createPermission({
+      name: parsed.data.name,
+      description: parsed.data.description,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, perm, 'Permission created successfully.', 201)
+  })
+
+  // GET /v1/admin/staff
+  router.get('/staff', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const staff = await listStaff({
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, staff, 'Staff profiles retrieved successfully.')
+  })
+
+  // GET /v1/admin/staff/:userId
+  router.get('/staff/:userId', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const userId = c.req.param('userId')
+    const staff = await getStaff({
+      userId,
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, staff, 'Staff profile retrieved successfully.')
+  })
+
+  // POST /v1/admin/staff
+  router.post('/staff', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json()
+    const parsed = createStaffSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+
+    const userId = parsed.data.user_id ?? parsed.data.userId
+    const fullName = (parsed.data.full_name ?? parsed.data.fullName)!
+
+    const staff = await createStaff({
+      userId,
+      email: parsed.data.email,
+      fullName,
+      role: parsed.data.role,
+      roles: parsed.data.roles,
+      gender: parsed.data.gender,
+      password: parsed.data.password,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, staff, 'Staff profile created successfully.', 201)
+  })
+
+  // PATCH /v1/admin/staff/:userId
+  router.patch('/staff/:userId', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const userId = c.req.param('userId')
+    const body = await c.req.json()
+    const parsed = updateStaffSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+
+    const fullName = parsed.data.full_name ?? parsed.data.fullName
+    const lifecycleStatus = parsed.data.lifecycle_status ?? parsed.data.lifecycleStatus
+
+    const staff = await updateStaff({
+      userId,
+      fullName,
+      role: parsed.data.role,
+      roles: parsed.data.roles,
+      lifecycleStatus,
+      gender: parsed.data.gender,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, staff, 'Staff profile updated successfully.')
+  })
+
+  // POST /v1/admin/staff/:userId/reset-password
+  router.post('/staff/:userId/reset-password', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const userId = c.req.param('userId')
+    let email: string | undefined
+    try {
+      const body = await c.req.json()
+      const parsed = requestStaffPasswordResetSchema.safeParse(body)
+      if (parsed.success) {
+        email = parsed.data.email
+      }
+    } catch {
+      // Body is optional
+    }
+
+    const result = await requestStaffPasswordReset({
+      userId,
+      email,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, result, result.message)
+  })
+
+  // GET /v1/admin/staff/:userId/effective-permissions
+  router.get('/staff/:userId/effective-permissions', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const userId = c.req.param('userId')
+    const result = await getStaffEffectivePermissions({
+      userId,
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, result, 'Effective permissions retrieved successfully.')
   })
 
   return router

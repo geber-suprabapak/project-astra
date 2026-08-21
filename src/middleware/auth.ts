@@ -26,6 +26,11 @@ export const auth: MiddlewareHandler<AppEnv> = async (c, next) => {
     throw AppError.authInvalid('Token missing scope claim.')
   }
 
+  const isRevoked = await providers.domainStore.isSessionRevoked(identityUser.userId)
+  if (isRevoked) {
+    throw AppError.authInvalid('Session has been revoked.')
+  }
+
   let profile
   try {
     profile = await providers.domainStore.getUserProfile(identityUser.userId)
@@ -40,7 +45,14 @@ export const auth: MiddlewareHandler<AppEnv> = async (c, next) => {
     throw AppError.forbidden()
   }
 
-  if (!profile.role || !identityUser.roles?.includes(profile.role)) {
+  const userRoles = await providers.domainStore.getUserRoles(identityUser.userId)
+  const tokenRoles = new Set(identityUser.roles ?? [])
+  // SAFETY: assigned role strings are checked against identity token role set
+  const hasMatchingRole =
+    Boolean(profile.role && tokenRoles.has(profile.role)) ||
+    userRoles.some((r) => tokenRoles.has(r as NonNullable<IdentityUser['roles']>[number]))
+
+  if (!hasMatchingRole) {
     throw AppError.forbidden()
   }
 

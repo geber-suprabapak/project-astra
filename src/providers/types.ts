@@ -35,6 +35,15 @@ export interface IdentityProvider {
   updatePassword(userId: string, newPassword: string): Promise<void>
   updateUserMetadata(userId: string, metadata: UserMetadata): Promise<void>
   checkHealth(): Promise<boolean>
+  createStaffIdentity?(params: {
+    email: string
+    fullName: string
+    role: string
+    password?: string
+  }): Promise<{ userId: string; email: string }>
+  requestPasswordResetEmail?(email: string): Promise<void>
+  revokeUserSessions?(userId: string): Promise<void>
+  assignRoles?(userId: string, roles: string[]): Promise<void>
 }
 
 export interface AppProviders {
@@ -257,6 +266,65 @@ export interface AuditLog {
   created_at: string
 }
 
+export interface Role {
+  id: string
+  name: string
+  description?: string | null
+  is_active: boolean
+  permissions?: string[]
+  created_at?: string
+  updated_at?: string
+}
+
+export interface Permission {
+  id: string
+  name: string
+  description?: string | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface CreateRoleParams {
+  name: string
+  description?: string | null
+  permissions?: string[]
+}
+
+export interface UpdateRoleParams {
+  name?: string
+  description?: string | null
+  permissions?: string[]
+  isActive?: boolean
+}
+
+export interface CreatePermissionParams {
+  name: string
+  description?: string | null
+}
+
+export interface CreateStaffParams {
+  userId?: string
+  fullName: string
+  email: string
+  role: string
+  roles?: string[]
+  gender?: string | null
+}
+
+export interface UpdateStaffParams {
+  fullName?: string | null
+  role?: string
+  roles?: string[]
+  lifecycleStatus?: ProfileLifecycleStatus
+  gender?: string | null
+}
+
+export interface UserEffectivePermissions {
+  userId: string
+  roles: string[]
+  permissions: string[]
+}
+
 export interface DomainStore {
   getUserProfile(userId: string): Promise<UserProfile>
   updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<void>
@@ -305,6 +373,28 @@ export interface DomainStore {
   insertAuditLog(entry: AuditLogEntry): Promise<void>
   getAuditLogs(entityType?: string, entityId?: string): Promise<AuditLog[]>
 
+  // Roles & Permissions RBAC domain methods
+  getRoles(activeOnly?: boolean): Promise<Role[]>
+  getRoleById(id: string): Promise<Role | null>
+  getRoleByName(name: string): Promise<Role | null>
+  createRole(params: CreateRoleParams): Promise<Role>
+  updateRole(id: string, params: UpdateRoleParams): Promise<Role>
+  getPermissions(): Promise<Permission[]>
+  createPermission(params: CreatePermissionParams): Promise<Permission>
+  getUserRoles(userId: string): Promise<string[]>
+  assignUserRoles(userId: string, roleNames: string[]): Promise<void>
+  getUserEffectivePermissions(userId: string): Promise<string[]>
+
+  // Staff domain methods
+  createStaffProfile(params: CreateStaffParams): Promise<UserProfile>
+  getStaffProfiles(): Promise<UserProfile[]>
+  getStaffProfile(userId: string): Promise<UserProfile | null>
+  updateStaffProfile(userId: string, updates: UpdateStaffParams): Promise<UserProfile>
+
+  // Session revocation
+  revokeUserSessions(userId: string): Promise<void>
+  isSessionRevoked(userId: string): Promise<boolean>
+
   checkHealth(): Promise<boolean>
   close?(): Promise<void>
 }
@@ -320,3 +410,4 @@ export interface ObjectStorage {
 
 export type UserMetadataValue = string | number | boolean | null | undefined
 export type UserMetadata = Record<string, UserMetadataValue>
+

@@ -280,6 +280,78 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
 
 -- ----------------------------------------------------------------------------
+-- Table: roles
+-- Description: Global RBAC roles defined by platform administrator
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS roles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_roles_name ON roles(name);
+CREATE INDEX IF NOT EXISTS idx_roles_is_active ON roles(is_active);
+
+-- ----------------------------------------------------------------------------
+-- Table: permissions
+-- Description: Global API permissions defined by platform administrator
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS permissions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_permissions_name ON permissions(name);
+
+-- ----------------------------------------------------------------------------
+-- Table: role_permissions
+-- Description: Mapping of permissions to roles
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS role_permissions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    permission_id UUID NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_role_permission UNIQUE (role_id, permission_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_role_permissions_role ON role_permissions(role_id);
+CREATE INDEX IF NOT EXISTS idx_role_permissions_permission ON role_permissions(permission_id);
+
+-- ----------------------------------------------------------------------------
+-- Table: user_roles
+-- Description: Multi-role assignments for users
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS user_roles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL REFERENCES profiles(user_id) ON DELETE CASCADE,
+    role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_user_role UNIQUE (user_id, role_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_roles_user ON user_roles(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_roles_role ON user_roles(role_id);
+
+-- ----------------------------------------------------------------------------
+-- Table: revoked_sessions
+-- Description: Revoked user sessions following critical RBAC or profile changes
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS revoked_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL,
+    revoked_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_revoked_sessions_user ON revoked_sessions(user_id);
+
+-- ----------------------------------------------------------------------------
 -- Default Seed Data
 -- ----------------------------------------------------------------------------
 
@@ -297,4 +369,62 @@ VALUES
   ('b0000000-0000-0000-0000-000000000004', 'kamis', '06:00:00', '07:15:00', '15:00:00', '18:00:00', 15, true),
   ('b0000000-0000-0000-0000-000000000005', 'jumat', '06:00:00', '07:15:00', '11:30:00', '14:00:00', 15, true),
   ('b0000000-0000-0000-0000-000000000006', 'sabtu', '06:00:00', '07:15:00', '12:00:00', '15:00:00', 15, true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Default Roles
+INSERT INTO roles (id, name, description, is_active)
+VALUES
+  ('c0000000-0000-0000-0000-000000000001', 'platform_admin', 'Platform Administrator with full access', true),
+  ('c0000000-0000-0000-0000-000000000002', 'school_admin', 'School Administrator for school-level operations', true),
+  ('c0000000-0000-0000-0000-000000000003', 'teacher', 'Teacher with attendance and leave management access', true),
+  ('c0000000-0000-0000-0000-000000000004', 'staff', 'General staff with operational read access', true),
+  ('c0000000-0000-0000-0000-000000000005', 'student', 'Student with attendance check-in and leave submission access', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Default Permissions
+INSERT INTO permissions (id, name, description)
+VALUES
+  ('d0000000-0000-0000-0000-000000000001', 'admin:read', 'Read administrative state and session'),
+  ('d0000000-0000-0000-0000-000000000002', 'admin:write', 'Write administrative configuration'),
+  ('d0000000-0000-0000-0000-000000000003', 'roles:manage', 'Create and modify roles and permissions'),
+  ('d0000000-0000-0000-0000-000000000004', 'staff:manage', 'Create and manage staff members and assign roles'),
+  ('d0000000-0000-0000-0000-000000000005', 'student:manage', 'Manage student profiles and approvals'),
+  ('d0000000-0000-0000-0000-000000000006', 'roster:manage', 'Stage and review student roster imports'),
+  ('d0000000-0000-0000-0000-000000000007', 'attendance:read', 'View attendance records'),
+  ('d0000000-0000-0000-0000-000000000008', 'attendance:write', 'Submit attendance check-in/out'),
+  ('d0000000-0000-0000-0000-000000000009', 'attendance:manual', 'Record manual attendance exceptions'),
+  ('d0000000-0000-0000-0000-000000000010', 'leave:read', 'View leave requests'),
+  ('d0000000-0000-0000-0000-000000000011', 'leave:submit', 'Submit leave requests'),
+  ('d0000000-0000-0000-0000-000000000012', 'leave:approve', 'Approve or reject leave requests'),
+  ('d0000000-0000-0000-0000-000000000013', 'profile:read', 'View profile information'),
+  ('d0000000-0000-0000-0000-000000000014', 'profile:write', 'Update profile information')
+ON CONFLICT (id) DO NOTHING;
+
+-- Default Role-Permissions
+INSERT INTO role_permissions (id, role_id, permission_id)
+VALUES
+  ('e0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000001'),
+  ('e0000000-0000-0000-0000-000000000002', 'c0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000002'),
+  ('e0000000-0000-0000-0000-000000000003', 'c0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000003'),
+  ('e0000000-0000-0000-0000-000000000004', 'c0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000004'),
+  ('e0000000-0000-0000-0000-000000000005', 'c0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000005'),
+  ('e0000000-0000-0000-0000-000000000006', 'c0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000006'),
+  ('e0000000-0000-0000-0000-000000000007', 'c0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000001'),
+  ('e0000000-0000-0000-0000-000000000008', 'c0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000004'),
+  ('e0000000-0000-0000-0000-000000000009', 'c0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000005'),
+  ('e0000000-0000-0000-0000-000000000010', 'c0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000006'),
+  ('e0000000-0000-0000-0000-000000000011', 'c0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000007'),
+  ('e0000000-0000-0000-0000-000000000012', 'c0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000009'),
+  ('e0000000-0000-0000-0000-000000000013', 'c0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000010'),
+  ('e0000000-0000-0000-0000-000000000014', 'c0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000012'),
+  ('e0000000-0000-0000-0000-000000000015', 'c0000000-0000-0000-0000-000000000003', 'd0000000-0000-0000-0000-000000000007'),
+  ('e0000000-0000-0000-0000-000000000016', 'c0000000-0000-0000-0000-000000000003', 'd0000000-0000-0000-0000-000000000009'),
+  ('e0000000-0000-0000-0000-000000000017', 'c0000000-0000-0000-0000-000000000003', 'd0000000-0000-0000-0000-000000000010'),
+  ('e0000000-0000-0000-0000-000000000018', 'c0000000-0000-0000-0000-000000000003', 'd0000000-0000-0000-0000-000000000012'),
+  ('e0000000-0000-0000-0000-000000000019', 'c0000000-0000-0000-0000-000000000004', 'd0000000-0000-0000-0000-000000000007'),
+  ('e0000000-0000-0000-0000-000000000020', 'c0000000-0000-0000-0000-000000000004', 'd0000000-0000-0000-0000-000000000010'),
+  ('e0000000-0000-0000-0000-000000000021', 'c0000000-0000-0000-0000-000000000005', 'd0000000-0000-0000-0000-000000000007'),
+  ('e0000000-0000-0000-0000-000000000022', 'c0000000-0000-0000-0000-000000000005', 'd0000000-0000-0000-0000-000000000008'),
+  ('e0000000-0000-0000-0000-000000000023', 'c0000000-0000-0000-0000-000000000005', 'd0000000-0000-0000-0000-000000000010'),
+  ('e0000000-0000-0000-0000-000000000024', 'c0000000-0000-0000-0000-000000000005', 'd0000000-0000-0000-0000-000000000011')
 ON CONFLICT (id) DO NOTHING;

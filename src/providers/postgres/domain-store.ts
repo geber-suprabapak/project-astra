@@ -13,16 +13,23 @@ import type {
   ClassRoom,
   CreateAcademicPeriodParams,
   CreateClassParams,
+  CreatePermissionParams,
+  CreateRoleParams,
   CreateSchoolParams,
+  CreateStaffParams,
   DomainStore,
   InsertAttendanceData,
   InsertPermitData,
+  Permission,
   Permit,
+  Role,
   RosterReport,
   SaveAttendanceRecordRpcResponse,
   Schedule,
   School,
   StageRosterParams,
+  UpdateRoleParams,
+  UpdateStaffParams,
   UserProfile,
 } from '../types.js'
 
@@ -753,6 +760,463 @@ export class PostgresDomainStore implements DomainStore {
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, entityType, entityId }, 'Failed to query audit logs')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getRoles(activeOnly = false): Promise<Role[]> {
+    try {
+      if (activeOnly) {
+        const rows = await this.sql<Role[]>`
+          SELECT r.id, r.name, r.description, r.is_active, r.created_at::text, r.updated_at::text,
+                 COALESCE(ARRAY_AGG(p.name) FILTER (WHERE p.name IS NOT NULL), '{}') as permissions
+          FROM roles r
+          LEFT JOIN role_permissions rp ON r.id = rp.role_id
+          LEFT JOIN permissions p ON rp.permission_id = p.id
+          WHERE r.is_active = true
+          GROUP BY r.id, r.name, r.description, r.is_active, r.created_at, r.updated_at
+          ORDER BY r.name ASC
+        `
+        return rows ?? []
+      }
+      const rows = await this.sql<Role[]>`
+        SELECT r.id, r.name, r.description, r.is_active, r.created_at::text, r.updated_at::text,
+               COALESCE(ARRAY_AGG(p.name) FILTER (WHERE p.name IS NOT NULL), '{}') as permissions
+        FROM roles r
+        LEFT JOIN role_permissions rp ON r.id = rp.role_id
+        LEFT JOIN permissions p ON rp.permission_id = p.id
+        GROUP BY r.id, r.name, r.description, r.is_active, r.created_at, r.updated_at
+        ORDER BY r.name ASC
+      `
+      return rows ?? []
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, activeOnly }, 'Failed to query roles')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getRoleById(id: string): Promise<Role | null> {
+    try {
+      const rows = await this.sql<Role[]>`
+        SELECT r.id, r.name, r.description, r.is_active, r.created_at::text, r.updated_at::text,
+               COALESCE(ARRAY_AGG(p.name) FILTER (WHERE p.name IS NOT NULL), '{}') as permissions
+        FROM roles r
+        LEFT JOIN role_permissions rp ON r.id = rp.role_id
+        LEFT JOIN permissions p ON rp.permission_id = p.id
+        WHERE r.id = ${id}
+        GROUP BY r.id, r.name, r.description, r.is_active, r.created_at, r.updated_at
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to query role by ID')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getRoleByName(name: string): Promise<Role | null> {
+    try {
+      const rows = await this.sql<Role[]>`
+        SELECT r.id, r.name, r.description, r.is_active, r.created_at::text, r.updated_at::text,
+               COALESCE(ARRAY_AGG(p.name) FILTER (WHERE p.name IS NOT NULL), '{}') as permissions
+        FROM roles r
+        LEFT JOIN role_permissions rp ON r.id = rp.role_id
+        LEFT JOIN permissions p ON rp.permission_id = p.id
+        WHERE LOWER(r.name) = LOWER(${name})
+        GROUP BY r.id, r.name, r.description, r.is_active, r.created_at, r.updated_at
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, name }, 'Failed to query role by name')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async createRole(params: CreateRoleParams): Promise<Role> {
+    try {
+      const nameLower = params.name.toLowerCase()
+      const existing = await this.getRoleByName(nameLower)
+      if (existing) {
+        throw AppError.conflict(`Role with name "${params.name}" already exists.`)
+      }
+
+      let createdRoleId: string | null = null
+      await this.sql.begin(async (sql) => {
+        const rows = await sql<{ id: string }[]>`
+          INSERT INTO roles (name, description, is_active)
+          VALUES (${nameLower}, ${params.description ?? null}, true)
+          RETURNING id
+        `
+        if (!rows || rows.length === 0) {
+          throw AppError.internal('Failed to insert role.')
+        }
+        createdRoleId = rows[0].id
+
+        if (params.permissions && params.permissions.length > 0) {
+          for (const permName of params.permissions) {
+            const permRows = await sql<{ id: string }[]>`
+              SELECT id FROM permissions WHERE LOWER(name) = LOWER(${permName}) LIMIT 1
+            `
+            if (permRows.length > 0) {
+              await sql`
+                INSERT INTO role_permissions (role_id, permission_id)
+                VALUES (${createdRoleId}, ${permRows[0].id})
+                ON CONFLICT DO NOTHING
+              `
+            }
+          }
+        }
+      })
+
+      if (!createdRoleId) {
+        throw AppError.internal('Failed to create role.')
+      }
+
+      const roleWithPerms = await this.getRoleById(createdRoleId)
+      if (!roleWithPerms) {
+        throw AppError.internal('Failed to load created role.')
+      }
+      return roleWithPerms
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to create role')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async updateRole(id: string, params: UpdateRoleParams): Promise<Role> {
+    try {
+      const existing = await this.getRoleById(id)
+      if (!existing) {
+        throw AppError.notFound('Role')
+      }
+
+      if (params.name && params.name.toLowerCase() !== existing.name.toLowerCase()) {
+        const nameExisting = await this.getRoleByName(params.name.toLowerCase())
+        if (nameExisting && nameExisting.id !== id) {
+          throw AppError.conflict(`Role with name "${params.name}" already exists.`)
+        }
+      }
+
+      await this.sql.begin(async (sql) => {
+        const nameLower = params.name ? params.name.toLowerCase() : existing.name
+        const description =
+          (params.description !== undefined ? params.description : existing.description) ?? null
+        const isActive =
+          params.isActive !== undefined ? params.isActive : (existing.is_active ?? true)
+
+        await sql`
+          UPDATE roles
+          SET name = ${nameLower}, description = ${description}, is_active = ${isActive}, updated_at = NOW()
+          WHERE id = ${id}
+        `
+
+        if (params.permissions !== undefined) {
+          await sql`DELETE FROM role_permissions WHERE role_id = ${id}`
+          for (const permName of params.permissions) {
+            const permRows = await sql<{ id: string }[]>`
+              SELECT id FROM permissions WHERE LOWER(name) = LOWER(${permName}) LIMIT 1
+            `
+            if (permRows.length > 0) {
+              await sql`
+                INSERT INTO role_permissions (role_id, permission_id)
+                VALUES (${id}, ${permRows[0].id})
+                ON CONFLICT DO NOTHING
+              `
+            }
+          }
+        }
+      })
+
+      const updated = await this.getRoleById(id)
+      if (!updated) {
+        throw AppError.internal('Failed to load updated role.')
+      }
+      return updated
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id, params }, 'Failed to update role')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getPermissions(): Promise<Permission[]> {
+    try {
+      const rows = await this.sql<Permission[]>`
+        SELECT id, name, description, created_at::text, updated_at::text
+        FROM permissions
+        ORDER BY name ASC
+      `
+      return rows ?? []
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err }, 'Failed to query permissions')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async createPermission(params: CreatePermissionParams): Promise<Permission> {
+    try {
+      const nameLower = params.name.toLowerCase()
+      const rows = await this.sql<Permission[]>`
+        INSERT INTO permissions (name, description)
+        VALUES (${nameLower}, ${params.description ?? null})
+        RETURNING id, name, description, created_at::text, updated_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.internal('Failed to create permission.')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to create permission')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getUserRoles(userId: string): Promise<string[]> {
+    try {
+      const rows = await this.sql<{ name: string }[]>`
+        SELECT DISTINCT r.name
+        FROM roles r
+        JOIN user_roles ur ON r.id = ur.role_id
+        WHERE ur.user_id = ${userId}
+        UNION
+        SELECT role as name
+        FROM profiles
+        WHERE user_id = ${userId} AND role IS NOT NULL
+      `
+      return rows.map((r) => r.name)
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId }, 'Failed to query user roles')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async assignUserRoles(userId: string, roleNames: string[]): Promise<void> {
+    try {
+      await this.sql.begin(async (sql) => {
+        await sql`DELETE FROM user_roles WHERE user_id = ${userId}`
+        for (const roleName of roleNames) {
+          const roleRows = await sql<{ id: string }[]>`
+            SELECT id FROM roles WHERE LOWER(name) = LOWER(${roleName}) LIMIT 1
+          `
+          if (roleRows.length > 0) {
+            await sql`
+              INSERT INTO user_roles (user_id, role_id)
+              VALUES (${userId}, ${roleRows[0].id})
+              ON CONFLICT DO NOTHING
+            `
+          }
+        }
+      })
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId, roleNames }, 'Failed to assign user roles')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getUserEffectivePermissions(userId: string): Promise<string[]> {
+    try {
+      const rows = await this.sql<{ name: string }[]>`
+        SELECT DISTINCT p.name
+        FROM permissions p
+        JOIN role_permissions rp ON p.id = rp.permission_id
+        JOIN roles r ON rp.role_id = r.id
+        WHERE r.is_active = true
+          AND (
+            r.id IN (SELECT role_id FROM user_roles WHERE user_id = ${userId})
+            OR LOWER(r.name) IN (SELECT LOWER(role) FROM profiles WHERE user_id = ${userId})
+          )
+        ORDER BY p.name ASC
+      `
+      return rows.map((r) => r.name)
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId }, 'Failed to query effective permissions')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async createStaffProfile(params: CreateStaffParams): Promise<UserProfile> {
+    try {
+      const emailLower = params.email.toLowerCase()
+      const existingEmail = await this.sql<{ user_id: string }[]>`
+        SELECT user_id FROM profiles WHERE LOWER(email) = ${emailLower} LIMIT 1
+      `
+      if (existingEmail.length > 0) {
+        throw AppError.conflict(`Email "${params.email}" is already registered.`)
+      }
+
+      const userId = params.userId ?? `staff-${Date.now()}`
+      let profile: UserProfile | null = null
+
+      await this.sql.begin(async (sql) => {
+        const rows = await sql<UserProfile[]>`
+          INSERT INTO profiles (user_id, full_name, email, role, lifecycle_status, gender)
+          VALUES (${userId}, ${params.fullName}, ${params.email}, ${params.role}, 'approved', ${params.gender ?? null})
+          RETURNING user_id, full_name, email, nis, class_name, absence_number, avatar_url, role, lifecycle_status, gender
+        `
+        if (!rows || rows.length === 0) {
+          throw AppError.internal('Failed to create staff profile.')
+        }
+        profile = rows[0]
+
+        const allRoles = new Set<string>([params.role])
+        if (params.roles) {
+          for (const r of params.roles) allRoles.add(r)
+        }
+        for (const roleName of allRoles) {
+          const roleRows = await sql<{ id: string }[]>`
+            SELECT id FROM roles WHERE LOWER(name) = LOWER(${roleName}) LIMIT 1
+          `
+          if (roleRows.length > 0) {
+            await sql`
+              INSERT INTO user_roles (user_id, role_id)
+              VALUES (${userId}, ${roleRows[0].id})
+              ON CONFLICT DO NOTHING
+            `
+          }
+        }
+      })
+
+      if (!profile) {
+        throw AppError.internal('Failed to create staff profile.')
+      }
+      return profile
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to create staff profile')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getStaffProfiles(): Promise<UserProfile[]> {
+    try {
+      const rows = await this.sql<UserProfile[]>`
+        SELECT user_id, full_name, email, nis, class_name, absence_number, avatar_url, role, lifecycle_status, gender
+        FROM profiles
+        WHERE role != 'student'
+        ORDER BY created_at DESC
+      `
+      return rows ?? []
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err }, 'Failed to query staff profiles')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getStaffProfile(userId: string): Promise<UserProfile | null> {
+    try {
+      const rows = await this.sql<UserProfile[]>`
+        SELECT user_id, full_name, email, nis, class_name, absence_number, avatar_url, role, lifecycle_status, gender
+        FROM profiles
+        WHERE user_id = ${userId} AND role != 'student'
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId }, 'Failed to query staff profile')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async updateStaffProfile(userId: string, updates: UpdateStaffParams): Promise<UserProfile> {
+    try {
+      const existing = await this.getUserProfile(userId)
+      if (!existing) {
+        throw AppError.notFound('Staff profile')
+      }
+
+      await this.sql.begin(async (sql) => {
+        const fullName =
+          (updates.fullName !== undefined ? updates.fullName : existing.full_name) ?? null
+        const gender =
+          (updates.gender !== undefined ? updates.gender : existing.gender) ?? null
+        const role =
+          (updates.role !== undefined ? updates.role : existing.role) ?? 'student'
+        const lifecycleStatus =
+          (updates.lifecycleStatus !== undefined
+            ? updates.lifecycleStatus
+            : existing.lifecycle_status) ?? 'approved'
+
+        await sql`
+          UPDATE profiles
+          SET full_name = ${fullName}, gender = ${gender}, role = ${role}, lifecycle_status = ${lifecycleStatus}, updated_at = NOW()
+          WHERE user_id = ${userId}
+        `
+
+        if (updates.roles !== undefined || updates.role !== undefined) {
+          const allRoles = new Set<string>()
+          if (updates.role) allRoles.add(updates.role)
+          if (updates.roles) {
+            for (const r of updates.roles) allRoles.add(r)
+          }
+          await sql`DELETE FROM user_roles WHERE user_id = ${userId}`
+          for (const roleName of allRoles) {
+            const roleRows = await sql<{ id: string }[]>`
+              SELECT id FROM roles WHERE LOWER(name) = LOWER(${roleName}) LIMIT 1
+            `
+            if (roleRows.length > 0) {
+              await sql`
+                INSERT INTO user_roles (user_id, role_id)
+                VALUES (${userId}, ${roleRows[0].id})
+                ON CONFLICT DO NOTHING
+              `
+            }
+          }
+        }
+
+        if (
+          updates.lifecycleStatus === 'disabled' ||
+          updates.lifecycleStatus === 'rejected' ||
+          (updates.role && updates.role !== existing.role)
+        ) {
+          await sql`
+            INSERT INTO revoked_sessions (user_id)
+            VALUES (${userId})
+          `
+        }
+      })
+
+      return this.getUserProfile(userId)
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId, updates }, 'Failed to update staff profile')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async revokeUserSessions(userId: string): Promise<void> {
+    try {
+      await this.sql`
+        INSERT INTO revoked_sessions (user_id)
+        VALUES (${userId})
+      `
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId }, 'Failed to revoke user sessions')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async isSessionRevoked(userId: string): Promise<boolean> {
+    try {
+      const rows = await this.sql<{ count: string }[]>`
+        SELECT COUNT(*) as count FROM revoked_sessions WHERE user_id = ${userId}
+      `
+      return Number(rows[0]?.count ?? 0) > 0
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId }, 'Failed to check session revocation')
       throw AppError.internal('An unexpected database error occurred.')
     }
   }
