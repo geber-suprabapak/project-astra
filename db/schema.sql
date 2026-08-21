@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     class_name TEXT,
     absence_number TEXT,
     avatar_url TEXT,
+    notification_token TEXT,
     role TEXT NOT NULL DEFAULT 'student',
     gender TEXT,
     lifecycle_status TEXT NOT NULL DEFAULT 'approved',
@@ -72,6 +73,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     CONSTRAINT profiles_role_check CHECK (role IN ('platform_admin', 'school_admin', 'teacher', 'student', 'staff')),
     CONSTRAINT profiles_lifecycle_check CHECK (lifecycle_status IN ('pending', 'approved', 'rejected', 'disabled'))
 );
+ 
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS notification_token TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles(user_id);
 CREATE INDEX IF NOT EXISTS idx_profiles_nis ON profiles(nis);
