@@ -16,6 +16,7 @@ import type { AppProviders } from './providers/types.js'
 import { env } from './config/env.js'
 import { logger } from './lib/logging/logger.js'
 import type { AppEnv } from './types/context.js'
+const API_CONTRACT_VERSION = 'v1'
 
 export interface AppDeps {
   providers?: Partial<AppProviders>
@@ -50,8 +51,8 @@ export function createApp(deps: AppDeps = {}) {
     cors({
       origin: env.corsAllowedOrigins.length > 0 ? env.corsAllowedOrigins : '*',
       allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
-      exposeHeaders: ['X-Request-ID'],
+      allowHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'X-Astra-Contract-Version'],
+      exposeHeaders: ['X-Request-ID', 'X-Astra-Contract-Version'],
       maxAge: 3600,
     }),
   )
@@ -59,6 +60,7 @@ export function createApp(deps: AppDeps = {}) {
   // Basic security headers for API responses
   app.use('*', async (c, next) => {
     await next()
+    c.header('X-Astra-Contract-Version', API_CONTRACT_VERSION)
     c.header('X-Content-Type-Options', 'nosniff')
     c.header('X-Frame-Options', 'DENY')
     c.header('Referrer-Policy', 'no-referrer')
