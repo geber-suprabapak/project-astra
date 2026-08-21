@@ -1,4 +1,11 @@
+import { z } from 'zod'
 import type { RobinClient } from '../clients/robin/client.js'
+
+export const profileLifecycleStatusSchema = z.enum(['pending', 'approved', 'rejected', 'disabled'])
+export type ProfileLifecycleStatus = z.infer<typeof profileLifecycleStatusSchema>
+
+export const identityRoleSchema = z.enum(['platform_admin', 'school_admin', 'teacher', 'student', 'staff'])
+export type IdentityRole = z.infer<typeof identityRoleSchema>
 
 export interface UserProfile {
   user_id: string
@@ -8,8 +15,33 @@ export interface UserProfile {
   class_name?: string | null
   absence_number?: string | null
   avatar_url?: string | null
-  role?: string | null
+  role?: IdentityRole | null
+  lifecycle_status: ProfileLifecycleStatus
   gender?: string | null
+}
+
+export interface IdentityUser {
+  userId: string
+  email?: string | null
+  roles?: readonly IdentityRole[]
+  scopes?: readonly string[]
+  mfaVerified?: boolean
+  mustChangePassword?: boolean
+}
+
+export interface IdentityProvider {
+  verifyToken(token: string): Promise<IdentityUser>
+  verifyPassword(email: string, password: string): Promise<void>
+  updatePassword(userId: string, newPassword: string): Promise<void>
+  updateUserMetadata(userId: string, metadata: UserMetadata): Promise<void>
+  checkHealth(): Promise<boolean>
+}
+
+export interface AppProviders {
+  domainStore: DomainStore
+  objectStorage: ObjectStorage
+  identityProvider: IdentityProvider
+  robinClient: RobinClient
 }
 
 export interface Absence {
@@ -125,24 +157,3 @@ export interface ObjectStorage {
 
 export type UserMetadataValue = string | number | boolean | null | undefined
 export type UserMetadata = Record<string, UserMetadataValue>
-
-export interface IdentityUser {
-  userId: string
-  email?: string | null
-  [key: string]: UserMetadataValue
-}
-
-export interface IdentityProvider {
-  verifyToken(token: string): Promise<IdentityUser>
-  verifyPassword(email: string, password: string): Promise<void>
-  updatePassword(userId: string, newPassword: string): Promise<void>
-  updateUserMetadata(userId: string, metadata: UserMetadata): Promise<void>
-  checkHealth(): Promise<boolean>
-}
-
-export interface AppProviders {
-  domainStore: DomainStore
-  objectStorage: ObjectStorage
-  identityProvider: IdentityProvider
-  robinClient: RobinClient
-}

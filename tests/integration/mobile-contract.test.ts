@@ -62,6 +62,7 @@ describe('integration: /v1/mobile contract boundary', () => {
       absence_number: '10',
       avatar_url: 'student-123/avatar.jpg',
       role: 'student',
+      lifecycle_status: 'approved',
       gender: 'L',
     })
 
@@ -241,7 +242,11 @@ describe('integration: /v1/mobile contract boundary', () => {
     it('POST /v1/mobile/face/enrollment accepts 10 JPEG images', async () => {
       const formData = new FormData()
       for (let i = 1; i <= 10; i += 1) {
-        formData.append('files', new Blob([`sample-img-${i}`], { type: 'image/jpeg' }), `face${i}.jpg`)
+        formData.append(
+          'files',
+          new Blob([`sample-img-${i}`], { type: 'image/jpeg' }),
+          `face${i}.jpg`,
+        )
       }
 
       const res = await app.request('/v1/mobile/face/enrollment', {
@@ -270,11 +275,7 @@ describe('integration: /v1/mobile contract boundary', () => {
       formData.append('category', 'sakit')
       formData.append('description', 'Demam tinggi dan flu berat')
       formData.append('date', today)
-      formData.append(
-        'attachment',
-        new Blob(['surat-dokter'], { type: 'image/jpeg' }),
-        'surat.jpg',
-      )
+      formData.append('attachment', new Blob(['surat-dokter'], { type: 'image/jpeg' }), 'surat.jpg')
 
       const res = await app.request('/v1/mobile/permits', {
         method: 'POST',

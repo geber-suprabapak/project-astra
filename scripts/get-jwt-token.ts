@@ -1,5 +1,6 @@
 import { SignJWT } from 'jose'
 import { env } from '../src/config/env.js'
+import { identityRoleSchema } from '../src/providers/types.js'
 
 function parseArgs(argv: string[]): Map<string, string | boolean> {
   const args = new Map<string, string | boolean>()
@@ -29,20 +30,37 @@ function asString(value: string | boolean | undefined): string | null {
 const args = parseArgs(process.argv.slice(2))
 const userId = asString(args.get('user-id')) ?? env.authUserId ?? 'test-student-1'
 const email = asString(args.get('email')) ?? env.authEmail ?? 'student@sekolah.sch.id'
-const role = asString(args.get('role')) ?? 'student'
+const requestedRole = asString(args.get('role')) ?? 'student'
+const parsedRole = identityRoleSchema.safeParse(requestedRole)
+if (!parsedRole.success) {
+  throw new Error(`Unsupported role: ${requestedRole}`)
+}
+const role = parsedRole.data
 const secretKey =
   asString(args.get('secret')) ??
   env.oidcJwtSecret ??
   'test-jwt-secret-that-is-long-enough-32-chars'
 const audience = asString(args.get('audience')) ?? env.oidcAudience ?? 'authenticated'
 const issuer = asString(args.get('issuer')) ?? env.oidcIssuer ?? 'https://auth.school.test'
+const scope =
+  asString(args.get('scope')) ??
+  (role === 'platform_admin' || role === 'school_admin'
+    ? 'openid profile admin:read'
+    : 'openid profile')
+const mfaVerified = args.get('mfa') === true || asString(args.get('mfa'))?.toLowerCase() === 'true'
+const mustChangePassword =
+  asString(args.get('must-change-password'))?.toLowerCase() === 'true' ||
+  (args.get('must-change-password') === undefined && role === 'platform_admin')
 
 const secret = new TextEncoder().encode(secretKey)
 
 const token = await new SignJWT({
   email,
   role,
-  name: 'Test Student',
+  roles: [role],
+  scope,
+  mfa_verified: mfaVerified,
+  must_change_password: mustChangePassword,
 })
   .setProtectedHeader({ alg: 'HS256' })
   .setSubject(userId)
@@ -62,6 +80,10 @@ if (args.get('json') === true) {
         user_id: userId,
         email,
         role,
+        roles: [role],
+        scope,
+        mfa_verified: mfaVerified,
+        must_change_password: mustChangePassword,
       },
       null,
       2,

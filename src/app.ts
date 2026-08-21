@@ -9,6 +9,7 @@ import {
 } from './modules/health/routes.js'
 import { type ReadinessResult } from './modules/health/service.js'
 import { createV1Mobile, v1Mobile } from './routes/v1-mobile.js'
+import { adminRouter } from './modules/admin/routes.js'
 import { defaultProviders } from './providers/index.js'
 import type { AppProviders } from './providers/types.js'
 import { env } from './config/env.js'
@@ -19,6 +20,7 @@ export interface AppDeps {
   providers?: Partial<AppProviders>
   getReadiness?: () => Promise<ReadinessResult>
   v1Mobile?: Hono<AppEnv>
+  adminRouter?: Hono<AppEnv>
   healthRouter?: Hono<AppEnv>
 }
 
@@ -104,7 +106,9 @@ export function createApp(deps: AppDeps = {}) {
   // Root health probes (no auth, no /v1 prefix)
   app.route('/', rootHealth)
 
-  // API routes
+  // Platform administration routes require an approved profile, matching role, and protected identity context.
+  app.route('/v1/admin', deps.adminRouter ?? adminRouter)
+  // Mobile API routes
   app.route('/v1/mobile', mobileRouter)
 
   // Error handler (must be last)

@@ -1,20 +1,36 @@
+import { z } from 'zod'
 import { AppError } from '../../lib/errors/app-error.js'
-import type {
-  Absence,
-  ActivePermitSummary,
-  AttendanceActionRpcResponse,
-  DomainStore,
-  IdentityProvider,
-  IdentityUser,
-  InsertAttendanceData,
-  InsertPermitData,
-  ObjectStorage,
-  Permit,
-  SaveAttendanceRecordRpcResponse,
-  Schedule,
-  UserMetadata,
-  UserProfile,
+import {
+  identityRoleSchema,
+  type Absence,
+  type ActivePermitSummary,
+  type AttendanceActionRpcResponse,
+  type DomainStore,
+  type IdentityProvider,
+  type IdentityUser,
+  type InsertAttendanceData,
+  type InsertPermitData,
+  type ObjectStorage,
+  type Permit,
+  type SaveAttendanceRecordRpcResponse,
+  type Schedule,
+  type UserMetadata,
+  type UserProfile,
 } from '../types.js'
+import { isMfaVerified } from '../identity/claims.js'
+
+
+const identityTokenPayloadSchema = z
+  .object({
+    sub: z.string().min(1),
+    email: z.string().nullable().optional(),
+    roles: z.array(identityRoleSchema).optional(),
+    scope: z.string().min(1).optional(),
+    amr: z.array(z.string().min(1)).optional(),
+    mfa_verified: z.boolean().optional(),
+    must_change_password: z.boolean().optional(),
+  })
+  .passthrough()
 
 export class MemoryDomainStore implements DomainStore {
   public profiles = new Map<string, UserProfile>()
@@ -204,23 +220,43 @@ export class MemoryIdentityProvider implements IdentityProvider {
     }
 
     if (token.startsWith('user-')) {
-      return { userId: token }
+      return {
+        userId: token,
+        roles: ['student'],
+        scopes: ['openid', 'profile'],
+        mfaVerified: false,
+        mustChangePassword: false,
+      }
     }
 
-    // Attempt base64 decode of mock tokens or sub
     try {
       if (token.includes('.')) {
         const parts = token.split('.')
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'))
-        if (payload.sub) {
-          return { userId: payload.sub, email: payload.email, ...payload }
+        const rawPayload: unknown = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'))
+        const parsedPayload = identityTokenPayloadSchema.safeParse(rawPayload)
+        if (parsedPayload.success) {
+          const { data } = parsedPayload
+          return {
+            userId: data.sub,
+            email: data.email,
+            roles: data.roles ?? [],
+            scopes: data.scope?.split(' ').filter(Boolean) ?? [],
+            mfaVerified: isMfaVerified(data.mfa_verified, data.amr),
+            mustChangePassword: data.must_change_password,
+          }
         }
       }
     } catch {
-      // Fall through
+      // Fall through to the plain mock token path.
     }
 
-    return { userId: token }
+    return {
+      userId: token,
+      roles: ['student'],
+      scopes: ['openid', 'profile'],
+      mfaVerified: false,
+      mustChangePassword: false,
+    }
   }
 
   async verifyPassword(email: string, password: string): Promise<void> {

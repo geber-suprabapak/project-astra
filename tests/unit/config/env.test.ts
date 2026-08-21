@@ -52,6 +52,19 @@ describe('env config', () => {
     ).toContain('REDIS_URL')
   })
 
+  it('requires OIDC_ISSUER in production', () => {
+    const parsed = parseEnv({
+      ...baseEnv,
+      NODE_ENV: 'production',
+      REDIS_URL: 'redis://localhost:6379',
+    })
+
+    expect(parsed.success).toBe(false)
+    expect(
+      parsed.success ? [] : parsed.error.issues.map((issue) => issue.path.join('.')),
+    ).toContain('OIDC_ISSUER')
+  })
+
   it('allows non-production envs without REDIS_URL', () => {
     const parsed = parseEnv(baseEnv)
 

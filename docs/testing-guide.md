@@ -41,6 +41,21 @@ Generate a token for a specific user and role:
 bun run auth:token -- --user-id student-123 --role student --email student@sekolah.sch.id
 ```
 
+For privileged-session checks, generate a fully protected administrator token:
+
+```bash
+bun run auth:token -- \
+  --user-id platform-admin-1 \
+  --role platform_admin \
+  --mfa true \
+  --must-change-password false \
+  --json
+```
+
+The Astra admin boundary requires the token `roles` claim to match the approved
+profile role, `scope` to include `admin:read`, `mfa_verified` to be true, and
+`must_change_password` to be false.
+
 ## Postman Setup
 
 Set the request header:

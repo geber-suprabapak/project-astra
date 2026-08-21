@@ -34,6 +34,7 @@ describe('PostgresDomainStore (Greenfield)', () => {
           absence_number: '1',
           avatar_url: null,
           role: 'student',
+          lifecycle_status: 'approved',
           gender: 'L',
         },
       ]
@@ -45,6 +46,7 @@ describe('PostgresDomainStore (Greenfield)', () => {
     expect(profile.user_id).toBe('user-123')
     expect(profile.full_name).toBe('Test Student')
     expect(profile.nis).toBe('12345')
+    expect(profile.lifecycle_status).toBe('approved')
   })
 
   it('getUserProfile throws notFound when profile does not exist', async () => {
@@ -161,7 +163,11 @@ describe('PostgresDomainStore (Greenfield)', () => {
     })
 
     const store = new PostgresDomainStore({ sql: mockSql })
-    const permits = await store.getActivePermitsToday('user-123', '2026-08-20T00:00:00+07:00', '2026-08-20T23:59:59+07:00')
+    const permits = await store.getActivePermitsToday(
+      'user-123',
+      '2026-08-20T00:00:00+07:00',
+      '2026-08-20T23:59:59+07:00',
+    )
 
     expect(permits.length).toBe(1)
     expect(permits[0].kategori_izin).toBe('sakit')
@@ -208,7 +214,7 @@ describe('PostgresDomainStore (Greenfield)', () => {
           {
             id: 'loc-1',
             name: 'Campus Central',
-            latitude: -6.200000,
+            latitude: -6.2,
             longitude: 106.816666,
             radius_meters: 100,
           },

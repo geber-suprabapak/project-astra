@@ -158,6 +158,7 @@ export const rateLimits = {
   profileAvatar: rateLimit({ windowMs: 3_600_000, max: 10, routeKey: 'profile-avatar' }),
   profilePassword: rateLimit({ windowMs: 3_600_000, max: 5, routeKey: 'profile-pass' }),
   time: rateLimit({ windowMs: 60_000, max: 30, routeKey: 'time' }),
+  adminSession: rateLimit({ windowMs: 60_000, max: 30, routeKey: 'admin-session' }),
 }
 
 export { RATE_LIMIT_SCRIPT, defaultStore, rateLimitBackend }

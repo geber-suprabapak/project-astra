@@ -159,6 +159,17 @@ Stable error codes:
 | `PATCH` | `/v1/mobile/profile/avatar`         | Yes  | Upload or clear avatar                        |
 | `PATCH` | `/v1/mobile/profile/password`       | Yes  | Change password                               |
 | `GET`   | `/v1/mobile/time`                   | Yes  | Return canonical BFF time                     |
+| `GET`   | `/v1/admin/session`                    | Yes  | Validate and return the active privileged identity context |
+
+### Protected identity context
+Astra verifies every bearer token with the configured OIDC issuer, JWKS/signature, and
+audience before loading the matching PostgreSQL profile.
+
+Tokens used for privileged administration must carry a matching `roles` claim, include
+the `openid profile admin:read` scopes, prove MFA through `mfa_verified` or an MFA
+`amr` value, and set `must_change_password` to `false`. Astra denies pending,
+rejected, disabled, or missing profiles before any protected route runs.
+
 
 ## Health Semantics
 
@@ -213,7 +224,7 @@ All configuration is parsed and validated at boot via `src/config/env.ts`.
 | -------- | ------------------ | ----------- |
 | `OIDC_JWT_SECRET` | _(Required if no JWKS)_ | Secret key for symmetric HS256 JWT verification. |
 | `OIDC_JWKS_URL` | _(Required if no Secret)_ | JWKS URL for asymmetric JWT verification. |
-| `OIDC_ISSUER` | _(Optional)_ | Expected token issuer claim. |
+| `OIDC_ISSUER` | **Required for token verification** | Expected token issuer claim; production boot rejects it when absent. |
 | `OIDC_AUDIENCE` | `authenticated` | Expected token audience claim. |
 | `LOGTO_ENDPOINT` | _(Optional)_ | Logto Management API endpoint URL. |
 | `LOGTO_APP_ID` | _(Optional)_ | Logto Management API M2M App ID. |

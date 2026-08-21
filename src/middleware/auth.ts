@@ -2,7 +2,9 @@ import type { MiddlewareHandler } from 'hono'
 import { defaultProviders } from '../providers/index.js'
 import { env } from '../config/env.js'
 import { AppError } from '../lib/errors/app-error.js'
+import { ErrorCode } from '../lib/errors/codes.js'
 import type { AppEnv } from '../types/context.js'
+import type { IdentityUser } from '../providers/types.js'
 
 export const auth: MiddlewareHandler<AppEnv> = async (c, next) => {
   const authHeader = c.req.header('Authorization')
@@ -11,19 +13,43 @@ export const auth: MiddlewareHandler<AppEnv> = async (c, next) => {
   }
 
   const token = authHeader.slice(7)
-  const identityProvider =
-    c.get('providers')?.identityProvider ?? defaultProviders.identityProvider
+  const providers = c.get('providers') ?? defaultProviders
 
+  let identityUser: IdentityUser
   try {
-    const identityUser = await identityProvider.verifyToken(token)
-
-    c.set('userId', identityUser.userId)
-    c.set('rawToken', token)
-    c.set('tenantKey', env.tenantKey)
+    identityUser = await providers.identityProvider.verifyToken(token)
   } catch (err) {
     if (err instanceof AppError) throw err
     throw AppError.authInvalid()
   }
+  if (!identityUser.scopes || identityUser.scopes.length === 0) {
+    throw AppError.authInvalid('Token missing scope claim.')
+  }
+
+  let profile
+  try {
+    profile = await providers.domainStore.getUserProfile(identityUser.userId)
+  } catch (err) {
+    if (err instanceof AppError && err.code === ErrorCode.RESOURCE_NOT_FOUND) {
+      throw AppError.forbidden()
+    }
+    throw err
+  }
+
+  if (profile.lifecycle_status !== 'approved') {
+    throw AppError.forbidden()
+  }
+
+  if (!profile.role || !identityUser.roles?.includes(profile.role)) {
+    throw AppError.forbidden()
+  }
+
+  c.set('userId', identityUser.userId)
+  c.set('rawToken', token)
+  c.set('identityUser', identityUser)
+  c.set('profileLifecycleStatus', profile.lifecycle_status)
+  c.set('profileRole', profile.role ?? null)
+  c.set('tenantKey', env.tenantKey)
 
   await next()
 }

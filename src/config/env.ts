@@ -92,6 +92,13 @@ export const envSchema = z
           path: ['REDIS_URL'],
         })
       }
+      if (!data.OIDC_ISSUER) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'OIDC_ISSUER must be set in production',
+          path: ['OIDC_ISSUER'],
+        })
+      }
     }
   })
 

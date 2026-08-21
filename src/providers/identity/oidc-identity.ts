@@ -3,7 +3,8 @@ import { z } from 'zod'
 import { env } from '../../config/env.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { logger } from '../../lib/logging/logger.js'
-import type { IdentityProvider, IdentityUser, UserMetadata } from '../types.js'
+import { identityRoleSchema, type IdentityProvider, type IdentityUser, type UserMetadata } from '../types.js'
+import { isMfaVerified } from './claims.js'
 
 export interface OidcIdentityProviderOptions {
   issuer?: string
@@ -44,11 +45,14 @@ export class OidcIdentityProvider implements IdentityProvider {
 
   async verifyToken(token: string): Promise<IdentityUser> {
     try {
+      if (!this.issuer) {
+        throw AppError.authInvalid('OIDC issuer configuration missing.')
+      }
+
       const verifyOptions: JWTVerifyOptions = {
         audience: this.audience,
-      }
-      if (this.issuer) {
-        verifyOptions.issuer = this.issuer
+        issuer: this.issuer,
+        requiredClaims: ['exp'],
       }
 
       let payload: JWTPayload
@@ -71,11 +75,32 @@ export class OidcIdentityProvider implements IdentityProvider {
         throw AppError.authInvalid('Token missing subject claim.')
       }
 
-      const parsedEmail = z.string().safeParse(payload['email'])
+      const parsedEmail = z.string().safeParse(payload.email)
+      const parsedRoles = z.array(identityRoleSchema).safeParse(payload.roles)
+      const parsedScope = z.string().min(1).safeParse(payload.scope)
+      if (!parsedScope.success) {
+        throw AppError.authInvalid('Token missing scope claim.')
+      }
+      const scopes = parsedScope.data.split(' ').filter(Boolean)
+      if (scopes.length === 0) {
+        throw AppError.authInvalid('Token missing scope claim.')
+      }
+      const parsedMfa = z.boolean().safeParse(payload.mfa_verified)
+      const parsedAmr = z.array(z.string().min(1)).safeParse(payload.amr)
+      const parsedMustChangePassword = z.boolean().safeParse(payload.must_change_password)
 
       return {
         userId: parsedSub.data,
         email: parsedEmail.success ? parsedEmail.data : null,
+        roles: parsedRoles.success ? parsedRoles.data : [],
+        scopes,
+        mfaVerified: isMfaVerified(
+          parsedMfa.success ? parsedMfa.data : undefined,
+          parsedAmr.success ? parsedAmr.data : undefined,
+        ),
+        mustChangePassword: parsedMustChangePassword.success
+          ? parsedMustChangePassword.data
+          : undefined,
       }
     } catch (err) {
       if (err instanceof AppError) throw err
@@ -89,11 +114,14 @@ export class OidcIdentityProvider implements IdentityProvider {
     }
 
     try {
-      const response = await fetch(`${this.logtoEndpoint.replace(/\/$/, '')}/api/interaction/verification`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      })
+      const response = await fetch(
+        `${this.logtoEndpoint.replace(/\/$/, '')}/api/interaction/verification`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        },
+      )
       if (!response.ok) {
         throw AppError.authInvalid('Current password is incorrect.')
       }
@@ -119,7 +147,10 @@ export class OidcIdentityProvider implements IdentityProvider {
         },
       )
       if (!response.ok) {
-        logger.error({ userId, status: response.status }, 'Logto update password returned error status')
+        logger.error(
+          { userId, status: response.status },
+          'Logto update password returned error status',
+        )
         throw AppError.internal('Failed to update password in identity provider.')
       }
     } catch (err) {
@@ -144,7 +175,10 @@ export class OidcIdentityProvider implements IdentityProvider {
         },
       )
       if (!response.ok) {
-        logger.error({ userId, status: response.status }, 'Logto update user metadata returned error status')
+        logger.error(
+          { userId, status: response.status },
+          'Logto update user metadata returned error status',
+        )
         throw AppError.internal('Failed to update user metadata in identity provider.')
       }
     } catch (err) {
