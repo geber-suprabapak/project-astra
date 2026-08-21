@@ -626,8 +626,66 @@ export interface DomainStore {
   getActivePasswordResetCode(userId: string, code: string): Promise<PasswordResetCode | null>
   markPasswordResetCodeUsed(codeId: string): Promise<void>
 
+  // File metadata and lifecycle methods
+  createFileRecord(params: CreateFileRecordParams): Promise<FileRecord>
+  getFileRecord(id: string): Promise<FileRecord | null>
+  listFiles(filter?: { userId?: string; purpose?: FilePurpose; lifecycle?: FileLifecycle }): Promise<FileRecord[]>
+  updateFileLifecycle(id: string, lifecycle: FileLifecycle): Promise<FileRecord>
+  deleteFileRecord(id: string): Promise<void>
+  deleteFaceEnrollmentFiles(userId: string): Promise<number>
+
+  // Face enrollment lifecycle methods
+  getFaceEnrollment(userId: string): Promise<FaceEnrollmentRecord | null>
+  saveFaceEnrollment(params: SaveFaceEnrollmentParams): Promise<FaceEnrollmentRecord>
+  deleteFaceEnrollment(userId: string): Promise<void>
+
   checkHealth(): Promise<boolean>
   close?(): Promise<void>
+}
+
+export const filePurposeSchema = z.enum(['avatar', 'permit_attachment', 'face_enrollment'])
+export type FilePurpose = z.infer<typeof filePurposeSchema>
+
+export const fileLifecycleSchema = z.enum(['pending_upload', 'available', 'rejected', 'deleted'])
+export type FileLifecycle = z.infer<typeof fileLifecycleSchema>
+
+export interface FileRecord {
+  id: string
+  user_id: string
+  purpose: FilePurpose
+  object_path: string
+  content_type: string
+  size_bytes?: number | null
+  lifecycle: FileLifecycle
+  created_at?: string
+  updated_at?: string
+}
+
+export interface CreateFileRecordParams {
+  userId: string
+  purpose: FilePurpose
+  objectPath: string
+  contentType: string
+  sizeBytes?: number | null
+  lifecycle?: FileLifecycle
+}
+
+export const faceEnrollmentStatusSchema = z.enum(['not_enrolled', 'pending', 'enrolled', 'failed'])
+export type FaceEnrollmentStatus = z.infer<typeof faceEnrollmentStatusSchema>
+
+export interface FaceEnrollmentRecord {
+  id: string
+  user_id: string
+  status: FaceEnrollmentStatus
+  sample_count: number
+  created_at?: string
+  updated_at?: string
+}
+
+export interface SaveFaceEnrollmentParams {
+  userId: string
+  status: FaceEnrollmentStatus
+  sampleCount?: number
 }
 
 export interface RosterStudent {
@@ -661,9 +719,14 @@ export interface ObjectStorage {
   getSignedAvatarUrl(path: string): Promise<string | null>
   uploadPermitAttachment(userId: string, file: Buffer, contentType: string): Promise<string>
   getSignedPermitUrl(path: string): Promise<string | null>
+  uploadFaceEnrollmentImage(userId: string, imageIndex: number, file: Buffer, contentType: string): Promise<string>
+  deleteFaceEnrollmentImages(userId: string): Promise<void>
+  getSignedFaceEnrollmentUrl(path: string): Promise<string | null>
+  getPresignedUploadUrl?(params: { bucket?: string; key: string; contentType: string; expiresInSeconds?: number }): Promise<string>
   checkHealth(): Promise<boolean>
 }
 
 export type UserMetadataValue = string | number | boolean | null | undefined
 export type UserMetadata = Record<string, UserMetadataValue>
+
 

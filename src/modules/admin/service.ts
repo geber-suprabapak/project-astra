@@ -949,13 +949,45 @@ export async function correctStudentEmail(params: {
     entity_id: params.userId,
     details: {
       nis: profile.nis,
-      old_email: oldEmail,
+      previous_email: oldEmail,
       new_email: params.email,
     },
   })
 
   return updated
 }
+
+export async function resetStudentFaceEnrollment(params: {
+  userId: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<void> {
+  if (params.actorRole !== 'school_admin' && params.actorRole !== 'platform_admin') {
+    throw AppError.forbidden()
+  }
+
+  const profile = await params.providers.domainStore.getUserProfile(params.userId)
+  if (profile.role !== 'student') {
+    throw AppError.notFound('Student profile')
+  }
+
+  await params.providers.robinClient.deleteEnrollment(undefined, undefined)
+  await params.providers.objectStorage.deleteFaceEnrollmentImages(params.userId)
+  await params.providers.domainStore.deleteFaceEnrollmentFiles(params.userId)
+  await params.providers.domainStore.deleteFaceEnrollment(params.userId)
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'reset_student_face_enrollment',
+    entity_type: 'face_enrollment',
+    entity_id: params.userId,
+    details: {
+      nis: profile.nis,
+    },
+  })
+}
+
 
 // ---------------------------------------------------------------------------
 // Academic Attendance Policy Service Operations

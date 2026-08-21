@@ -17,6 +17,7 @@ import type {
   CreateAcademicPeriodParams,
   CreateCalendarExceptionParams,
   CreateClassParams,
+  CreateFileRecordParams,
   CreateLocationParams,
   CreatePasswordResetCodeParams,
   CreatePermissionParams,
@@ -27,6 +28,10 @@ import type {
   DomainStore,
   EnrollStudentParams,
   ExitStudentEnrollmentParams,
+  FaceEnrollmentRecord,
+  FileLifecycle,
+  FilePurpose,
+  FileRecord,
   InsertAttendanceData,
   InsertPermitData,
   Location,
@@ -39,6 +44,7 @@ import type {
   RosterReport,
   RosterStudent,
   SaveAttendanceRecordRpcResponse,
+  SaveFaceEnrollmentParams,
   Schedule,
   School,
   StageRosterParams,
@@ -2190,6 +2196,178 @@ export class PostgresDomainStore implements DomainStore {
       throw AppError.internal('An unexpected database error occurred.')
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // File records & metadata
+  // ---------------------------------------------------------------------------
+
+  async createFileRecord(params: CreateFileRecordParams): Promise<FileRecord> {
+    try {
+      const rows = await this.sql<FileRecord[]>`
+        INSERT INTO files (user_id, purpose, object_path, content_type, size_bytes, lifecycle)
+        VALUES (
+          ${params.userId},
+          ${params.purpose},
+          ${params.objectPath},
+          ${params.contentType},
+          ${params.sizeBytes ?? null},
+          ${params.lifecycle ?? 'available'}
+        )
+        RETURNING id, user_id, purpose, object_path, content_type, size_bytes, lifecycle, created_at::text, updated_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.internal('Failed to create file record.')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to create file record')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getFileRecord(id: string): Promise<FileRecord | null> {
+    try {
+      const rows = await this.sql<FileRecord[]>`
+        SELECT id, user_id, purpose, object_path, content_type, size_bytes, lifecycle, created_at::text, updated_at::text
+        FROM files
+        WHERE id = ${id}
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to get file record')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async listFiles(filter?: {
+    userId?: string
+    purpose?: FilePurpose
+    lifecycle?: FileLifecycle
+  }): Promise<FileRecord[]> {
+    try {
+      const rows = await this.sql<FileRecord[]>`
+        SELECT id, user_id, purpose, object_path, content_type, size_bytes, lifecycle, created_at::text, updated_at::text
+        FROM files
+        WHERE (${filter?.userId ?? null}::text IS NULL OR user_id = ${filter?.userId ?? null})
+          AND (${filter?.purpose ?? null}::text IS NULL OR purpose = ${filter?.purpose ?? null})
+          AND (${filter?.lifecycle ?? null}::text IS NULL OR lifecycle = ${filter?.lifecycle ?? null})
+        ORDER BY created_at DESC
+      `
+      return rows
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, filter }, 'Failed to list file records')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async updateFileLifecycle(id: string, lifecycle: FileLifecycle): Promise<FileRecord> {
+    try {
+      const rows = await this.sql<FileRecord[]>`
+        UPDATE files
+        SET lifecycle = ${lifecycle}, updated_at = NOW()
+        WHERE id = ${id}
+        RETURNING id, user_id, purpose, object_path, content_type, size_bytes, lifecycle, created_at::text, updated_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.notFound('File record')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id, lifecycle }, 'Failed to update file lifecycle')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async deleteFileRecord(id: string): Promise<void> {
+    try {
+      await this.sql`
+        UPDATE files
+        SET lifecycle = 'deleted', updated_at = NOW()
+        WHERE id = ${id}
+      `
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to delete file record')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async deleteFaceEnrollmentFiles(userId: string): Promise<number> {
+    try {
+      const result = await this.sql`
+        UPDATE files
+        SET lifecycle = 'deleted', updated_at = NOW()
+        WHERE user_id = ${userId} AND purpose = 'face_enrollment' AND lifecycle != 'deleted'
+      `
+      return result.count ?? 0
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId }, 'Failed to delete face enrollment files')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Face enrollment lifecycle
+  // ---------------------------------------------------------------------------
+
+  async getFaceEnrollment(userId: string): Promise<FaceEnrollmentRecord | null> {
+    try {
+      const rows = await this.sql<FaceEnrollmentRecord[]>`
+        SELECT id, user_id, status, sample_count, created_at::text, updated_at::text
+        FROM face_enrollments
+        WHERE user_id = ${userId}
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId }, 'Failed to get face enrollment')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async saveFaceEnrollment(params: SaveFaceEnrollmentParams): Promise<FaceEnrollmentRecord> {
+    try {
+      const rows = await this.sql<FaceEnrollmentRecord[]>`
+        INSERT INTO face_enrollments (user_id, status, sample_count, updated_at)
+        VALUES (${params.userId}, ${params.status}, ${params.sampleCount ?? 10}, NOW())
+        ON CONFLICT (user_id) DO UPDATE
+        SET status = EXCLUDED.status,
+            sample_count = EXCLUDED.sample_count,
+            updated_at = NOW()
+        RETURNING id, user_id, status, sample_count, created_at::text, updated_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.internal('Failed to save face enrollment record.')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to save face enrollment')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async deleteFaceEnrollment(userId: string): Promise<void> {
+    try {
+      await this.sql`
+        UPDATE face_enrollments
+        SET status = 'not_enrolled', sample_count = 0, updated_at = NOW()
+        WHERE user_id = ${userId}
+      `
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId }, 'Failed to delete face enrollment')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
 
   async checkHealth(): Promise<boolean> {
     try {

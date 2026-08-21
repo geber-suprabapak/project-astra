@@ -16,6 +16,7 @@ import {
   type CreateAcademicPeriodParams,
   type CreateCalendarExceptionParams,
   type CreateClassParams,
+  type CreateFileRecordParams,
   type CreateLocationParams,
   type CreatePasswordResetCodeParams,
   type CreateStudentIdentityParams,
@@ -27,6 +28,10 @@ import {
   type DomainStore,
   type EnrollStudentParams,
   type ExitStudentEnrollmentParams,
+  type FaceEnrollmentRecord,
+  type FileLifecycle,
+  type FilePurpose,
+  type FileRecord,
   type IdentityProvider,
   type IdentityUser,
   type IdentityRole,
@@ -43,6 +48,7 @@ import {
   type RosterReport,
   type RosterStudent,
   type SaveAttendanceRecordRpcResponse,
+  type SaveFaceEnrollmentParams,
   type Schedule,
   type School,
   type StageRosterParams,
@@ -263,6 +269,8 @@ export class MemoryDomainStore implements DomainStore {
   public userRoles = new Map<string, Set<string>>()
   public revokedSessions = new Set<string>()
   public resetCodes: PasswordResetCode[] = []
+  public files = new Map<string, FileRecord>()
+  public faceEnrollments = new Map<string, FaceEnrollmentRecord>()
   public signupOpen = false
   public isHealthy = true
 
@@ -1580,6 +1588,131 @@ export class MemoryDomainStore implements DomainStore {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // File records & metadata
+  // ---------------------------------------------------------------------------
+
+  async createFileRecord(params: CreateFileRecordParams): Promise<FileRecord> {
+    const id = `file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const now = new Date().toISOString()
+    const record: FileRecord = {
+      id,
+      user_id: params.userId,
+      purpose: params.purpose,
+      object_path: params.objectPath,
+      content_type: params.contentType,
+      size_bytes: params.sizeBytes ?? null,
+      lifecycle: params.lifecycle ?? 'available',
+      created_at: now,
+      updated_at: now,
+    }
+    this.files.set(id, record)
+    return { ...record }
+  }
+
+  async getFileRecord(id: string): Promise<FileRecord | null> {
+    const record = this.files.get(id)
+    return record ? { ...record } : null
+  }
+
+  async listFiles(filter?: {
+    userId?: string
+    purpose?: FilePurpose
+    lifecycle?: FileLifecycle
+  }): Promise<FileRecord[]> {
+    let result = Array.from(this.files.values())
+    if (filter?.userId) {
+      result = result.filter((f) => f.user_id === filter.userId)
+    }
+    if (filter?.purpose) {
+      result = result.filter((f) => f.purpose === filter.purpose)
+    }
+    if (filter?.lifecycle) {
+      result = result.filter((f) => f.lifecycle === filter.lifecycle)
+    }
+    return result.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
+  }
+
+  async updateFileLifecycle(id: string, lifecycle: FileLifecycle): Promise<FileRecord> {
+    const record = this.files.get(id)
+    if (!record) {
+      throw AppError.notFound('File record')
+    }
+    const updated: FileRecord = {
+      ...record,
+      lifecycle,
+      updated_at: new Date().toISOString(),
+    }
+    this.files.set(id, updated)
+    return { ...updated }
+  }
+
+  async deleteFileRecord(id: string): Promise<void> {
+    const record = this.files.get(id)
+    if (record) {
+      this.files.set(id, {
+        ...record,
+        lifecycle: 'deleted',
+        updated_at: new Date().toISOString(),
+      })
+    }
+  }
+
+  async deleteFaceEnrollmentFiles(userId: string): Promise<number> {
+    let count = 0
+    for (const [id, file] of this.files.entries()) {
+      if (
+        file.user_id === userId &&
+        file.purpose === 'face_enrollment' &&
+        file.lifecycle !== 'deleted'
+      ) {
+        this.files.set(id, {
+          ...file,
+          lifecycle: 'deleted',
+          updated_at: new Date().toISOString(),
+        })
+        count++
+      }
+    }
+    return count
+  }
+
+  // ---------------------------------------------------------------------------
+  // Face enrollment lifecycle
+  // ---------------------------------------------------------------------------
+
+  async getFaceEnrollment(userId: string): Promise<FaceEnrollmentRecord | null> {
+    const record = this.faceEnrollments.get(userId)
+    return record ? { ...record } : null
+  }
+
+  async saveFaceEnrollment(params: SaveFaceEnrollmentParams): Promise<FaceEnrollmentRecord> {
+    const existing = this.faceEnrollments.get(params.userId)
+    const now = new Date().toISOString()
+    const record: FaceEnrollmentRecord = {
+      id: existing?.id ?? `face-enrollment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      user_id: params.userId,
+      status: params.status,
+      sample_count: params.sampleCount ?? existing?.sample_count ?? 10,
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    }
+    this.faceEnrollments.set(params.userId, record)
+    return { ...record }
+  }
+
+  async deleteFaceEnrollment(userId: string): Promise<void> {
+    const existing = this.faceEnrollments.get(userId)
+    if (existing) {
+      this.faceEnrollments.set(userId, {
+        ...existing,
+        status: 'not_enrolled',
+        sample_count: 0,
+        updated_at: new Date().toISOString(),
+      })
+    }
+  }
+
   async checkHealth(): Promise<boolean> {
     return this.isHealthy
   }
@@ -1623,6 +1756,40 @@ export class MemoryObjectStorage implements ObjectStorage {
   async getSignedPermitUrl(path: string): Promise<string | null> {
     if (!path) return null
     return `https://storage.local/signed/${encodeURIComponent(path)}?expires=604800`
+  }
+
+  async uploadFaceEnrollmentImage(
+    userId: string,
+    imageIndex: number,
+    file: Buffer,
+    contentType: string,
+  ): Promise<string> {
+    const ext = contentType === 'image/png' ? 'png' : 'jpg'
+    const path = `${userId}/face_${imageIndex}.${ext}`
+    this.objects.set(path, { buffer: file, contentType })
+    return path
+  }
+
+  async deleteFaceEnrollmentImages(userId: string): Promise<void> {
+    for (const key of Array.from(this.objects.keys())) {
+      if (key.startsWith(`${userId}/face_`)) {
+        this.objects.delete(key)
+      }
+    }
+  }
+
+  async getSignedFaceEnrollmentUrl(path: string): Promise<string | null> {
+    if (!path) return null
+    return `https://storage.local/signed/${encodeURIComponent(path)}?expires=86400`
+  }
+
+  async getPresignedUploadUrl(params: {
+    bucket?: string
+    key: string
+    contentType: string
+    expiresInSeconds?: number
+  }): Promise<string> {
+    return `https://storage.local/presigned-upload/${encodeURIComponent(params.key)}?expires=${params.expiresInSeconds ?? 900}`
   }
 
   async checkHealth(): Promise<boolean> {

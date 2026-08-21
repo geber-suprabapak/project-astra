@@ -273,6 +273,24 @@ CREATE INDEX IF NOT EXISTS idx_files_user ON files(user_id);
 CREATE INDEX IF NOT EXISTS idx_files_lifecycle ON files(lifecycle);
 
 -- ----------------------------------------------------------------------------
+-- Table: face_enrollments
+-- Description: Student face enrollment lifecycle and sample counts
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS face_enrollments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL REFERENCES profiles(user_id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'enrolled',
+    sample_count INTEGER NOT NULL DEFAULT 10,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT face_enrollments_status_check CHECK (status IN ('not_enrolled', 'pending', 'enrolled', 'failed'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_face_enrollments_user ON face_enrollments(user_id);
+CREATE INDEX IF NOT EXISTS idx_face_enrollments_status ON face_enrollments(status);
+
+
+-- ----------------------------------------------------------------------------
 -- Table: notification_outbox
 -- Description: Transactional outbox for asynchronous notification delivery
 -- ----------------------------------------------------------------------------

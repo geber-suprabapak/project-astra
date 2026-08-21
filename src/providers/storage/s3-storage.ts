@@ -70,7 +70,12 @@ export class S3ObjectStorage implements ObjectStorage {
     return new URL(`${new URL(base).protocol}//${bucket}.${host}/${encodedKey}`)
   }
 
-  private signUrl(bucket: string, key: string, expiresInSeconds: number): string {
+  private signUrl(
+    bucket: string,
+    key: string,
+    expiresInSeconds: number,
+    method: 'GET' | 'PUT' = 'GET',
+  ): string {
     const now = new Date()
     const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '')
     const dateStamp = amzDate.slice(0, 8)
@@ -98,7 +103,7 @@ export class S3ObjectStorage implements ObjectStorage {
     const payloadHash = 'UNSIGNED-PAYLOAD'
 
     const canonicalRequest = [
-      'GET',
+      method,
       canonicalUri,
       canonicalQuery,
       canonicalHeaders,
@@ -268,6 +273,69 @@ export class S3ObjectStorage implements ObjectStorage {
     }
   }
 
+  async uploadFaceEnrollmentImage(
+    userId: string,
+    imageIndex: number,
+    file: Buffer,
+    contentType: string,
+  ): Promise<string> {
+    const ext = extFromContentType(contentType)
+    const path = `${userId}/face_${imageIndex}.${ext}`
+
+    try {
+      const response = await this.executeS3Request(
+        'PUT',
+        this.bucketAvatars,
+        path,
+        file,
+        contentType,
+      )
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '')
+        logger.error({ status: response.status, errorText }, 'S3 face enrollment upload failed')
+        throw AppError.storageUploadFailed()
+      }
+      return path
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err }, 'S3 face enrollment upload failed with unexpected error')
+      throw AppError.storageUploadFailed()
+    }
+  }
+
+  async deleteFaceEnrollmentImages(userId: string): Promise<void> {
+    const extensions = ['jpg', 'jpeg', 'png', 'webp']
+    const deletePromises: Promise<unknown>[] = []
+    for (let i = 1; i <= 20; i++) {
+      for (const ext of extensions) {
+        deletePromises.push(
+          this.executeS3Request('DELETE', this.bucketAvatars, `${userId}/face_${i}.${ext}`),
+        )
+      }
+    }
+    await Promise.allSettled(deletePromises)
+  }
+
+  async getSignedFaceEnrollmentUrl(path: string): Promise<string | null> {
+    if (!path) return null
+    try {
+      return this.signUrl(this.bucketAvatars, path, AVATAR_TTL_SECONDS)
+    } catch {
+      return null
+    }
+  }
+
+  async getPresignedUploadUrl(params: {
+    bucket?: string
+    key: string
+    contentType: string
+    expiresInSeconds?: number
+  }): Promise<string> {
+    const bucket = params.bucket ?? this.bucketAvatars
+    const ttl = params.expiresInSeconds ?? 900
+    return this.signUrl(bucket, params.key, ttl, 'PUT')
+  }
+
   async checkHealth(): Promise<boolean> {
     try {
       const res = await this.executeS3Request('HEAD', this.bucketAvatars, '', undefined, undefined, 3000)
@@ -277,3 +345,4 @@ export class S3ObjectStorage implements ObjectStorage {
     }
   }
 }
+

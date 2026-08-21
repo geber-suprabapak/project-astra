@@ -7,6 +7,7 @@ import { createProfileRouter, profileRouter } from '../modules/profile/routes.js
 import { timeRouter } from '../modules/time/routes.js'
 import { createMobileHealthRouter, mobileHealthRouter } from '../modules/health/routes.js'
 import { createStudentAuthRouter, studentAuthRouter } from '../modules/auth/routes.js'
+import { createFilesRouter, filesRouter } from '../modules/files/routes.js'
 import type { AppProviders } from '../providers/types.js'
 import type { AppEnv } from '../types/context.js'
 
@@ -19,6 +20,7 @@ export interface V1MobileDeps {
   permitsRouter?: Hono<AppEnv>
   profileRouter?: Hono<AppEnv>
   authRouter?: Hono<AppEnv>
+  filesRouter?: Hono<AppEnv>
 }
 
 export function createV1Mobile(deps: V1MobileDeps = {}) {
@@ -47,6 +49,9 @@ export function createV1Mobile(deps: V1MobileDeps = {}) {
   const auth =
     deps.authRouter ??
     (deps.providers ? createStudentAuthRouter({ providers: deps.providers }) : studentAuthRouter)
+  const files =
+    deps.filesRouter ??
+    (deps.providers ? createFilesRouter({ providers: deps.providers }) : filesRouter)
 
   router.route('/health', health)
   router.route('/auth', auth)
@@ -55,9 +60,11 @@ export function createV1Mobile(deps: V1MobileDeps = {}) {
   router.route('/face/enrollment', enrollment)
   router.route('/permits', permits)
   router.route('/profile', profile)
+  router.route('/files', files)
   router.route('/time', timeRouter)
 
   return router
 }
 
 export const v1Mobile = createV1Mobile()
+

@@ -208,7 +208,31 @@ export class RobinClient {
       totalEmbeddings: data.total_embeddings ?? files.length,
     }
   }
+
+  // -------------------------------------------------------------------------
+  // Delete enrollment — clears derived embeddings in Robin/Qdrant
+  // -------------------------------------------------------------------------
+  async deleteEnrollment(token?: string, requestId?: string): Promise<void> {
+    try {
+      const headers = robinHeaders(token, requestId)
+      const res = await fetchWithTimeout(
+        `${this.baseUrl}/v1/enroll`,
+        { method: 'DELETE', headers },
+        env.robinEnrollTimeoutMs,
+      )
+      if (!res.ok && res.status !== 404) {
+        logger.warn({ status: res.status }, 'Robin delete enrollment returned non-ok status')
+      }
+    } catch (err) {
+      if (err instanceof AppError && err.code === 'UPSTREAM_TIMEOUT') {
+        logger.warn('Robin delete enrollment timed out')
+        return
+      }
+      logger.warn({ err }, 'Robin delete enrollment request failed')
+    }
+  }
 }
 
 // Singleton
 export const robinClient = new RobinClient(env.robinBaseUrl)
+

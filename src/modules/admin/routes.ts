@@ -80,6 +80,7 @@ import {
   promoteStudentEnrollment,
   rejectStudent,
   requestStaffPasswordReset,
+  resetStudentFaceEnrollment,
   setActiveAcademicPeriod,
   transferStudentEnrollment,
   updateAcademicPeriod,
@@ -364,6 +365,20 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
     })
 
     return successResponse(c, student, 'Student email corrected successfully.')
+  })
+
+  // DELETE /v1/admin/students/:userId/face-enrollment
+  router.delete('/students/:userId/face-enrollment', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const userId = c.req.param('userId')
+    await resetStudentFaceEnrollment({
+      userId,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, null, 'Student face enrollment reset successfully.')
   })
 
   // GET /v1/admin/roles
