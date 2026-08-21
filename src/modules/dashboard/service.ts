@@ -1,13 +1,5 @@
-import {
-  getActivePermitsToday,
-  getActiveSchedule,
-  getTodayAbsences,
-  getUserProfile,
-  type Absence,
-  type Schedule,
-} from '../../clients/supabase/admin.js'
-import { getSignedAvatarUrl } from '../../clients/supabase/storage.js'
-import { robinClient } from '../../clients/robin/client.js'
+import { defaultProviders } from '../../providers/index.js'
+import type { Absence, AppProviders, Schedule } from '../../providers/types.js'
 import { env } from '../../config/env.js'
 
 // ---------------------------------------------------------------------------
@@ -33,7 +25,7 @@ export interface DayBounds {
   endISO: string
 }
 
-/** Returns WIB day bounds as ISO strings for perizinan range query */
+/** Returns WIB day bounds as ISO strings for leave requests range query */
 export function getWIBDayBounds(dateWIB: string): DayBounds {
   return {
     startISO: `${dateWIB}T00:00:00+07:00`,
@@ -177,6 +169,9 @@ export function computePrimaryAction(params: {
   schedule: Schedule | null
   attendanceStatus: AttendanceStatus
   baseDateWIB: string
+  hasActiveAcademicPeriod?: boolean
+  hasActiveClassEnrollment?: boolean
+  calendarHolidayReason?: string | null
 }): PrimaryAction {
   const {
     robinHealthy,
@@ -185,6 +180,9 @@ export function computePrimaryAction(params: {
     schedule,
     attendanceStatus,
     baseDateWIB,
+    hasActiveAcademicPeriod = true,
+    hasActiveClassEnrollment = true,
+    calendarHolidayReason = null,
   } = params
 
   if (!robinHealthy) {
@@ -214,6 +212,36 @@ export function computePrimaryAction(params: {
       reason_code: 'ATTENDANCE_BLOCKED',
       label: 'Izin aktif hari ini',
       reason_message: 'You have an active permit for today.',
+    }
+  }
+
+  if (!hasActiveAcademicPeriod) {
+    return {
+      allowed: false,
+      type: null,
+      reason_code: 'ATTENDANCE_BLOCKED',
+      label: 'Periode akademik tidak aktif',
+      reason_message: 'No active academic period configured.',
+    }
+  }
+
+  if (!hasActiveClassEnrollment) {
+    return {
+      allowed: false,
+      type: null,
+      reason_code: 'ATTENDANCE_BLOCKED',
+      label: 'Belum terdaftar di kelas',
+      reason_message: 'Student has no active class enrollment for the current academic period.',
+    }
+  }
+
+  if (calendarHolidayReason) {
+    return {
+      allowed: false,
+      type: null,
+      reason_code: 'ATTENDANCE_BLOCKED',
+      label: 'Hari libur / kalender khusus',
+      reason_message: `Today is a scheduled calendar exception/holiday: ${calendarHolidayReason}`,
     }
   }
 
@@ -277,7 +305,7 @@ function computeTotalWorkHours(absences: Absence[]): number | null {
 }
 
 // ---------------------------------------------------------------------------
-// Dashboard orchestrator — matches plan.md §7.1 response shape
+// Dashboard orchestrator — matches response shape
 // ---------------------------------------------------------------------------
 
 export interface DashboardResponse {
@@ -328,6 +356,7 @@ export async function getDashboard(
   userId: string,
   token: string,
   requestId: string,
+  providers: AppProviders = defaultProviders,
 ): Promise<DashboardResponse> {
   const now = new Date()
   const todayWIB = getTodayWIB(now)
@@ -335,18 +364,32 @@ export async function getDashboard(
   const { startISO, endISO } = getWIBDayBounds(todayWIB)
 
   // All parallel fetches
-  const [profile, absences, schedule, activePermits, robinReady, enrollStatus] = await Promise.all([
-    getUserProfile(userId),
-    getTodayAbsences(userId, todayWIB),
-    getActiveSchedule(dayKey),
-    getActivePermitsToday(userId, startISO, endISO),
-    robinClient.checkReadiness(),
-    robinClient.getEnrollmentStatus(token, requestId).catch(() => ({
-      status: 'not_enrolled' as const,
-      embeddingCount: 0,
-      message: 'Unavailable.',
-    })),
-  ])
+  const [profile, absences, activePermits, robinReady, enrollStatus, activePeriod] =
+    await Promise.all([
+      providers.domainStore.getUserProfile(userId),
+      providers.domainStore.getTodayAbsences(userId, todayWIB),
+      providers.domainStore.getActivePermitsToday(userId, startISO, endISO),
+      providers.robinClient.checkReadiness(),
+      providers.robinClient.getEnrollmentStatus(token, requestId).catch(() => ({
+        status: 'not_enrolled' as const,
+        embeddingCount: 0,
+        message: 'Unavailable.',
+      })),
+      providers.domainStore.getActiveAcademicPeriod(),
+    ])
+
+  const activeEnrollment = activePeriod
+    ? await providers.domainStore.getActiveClassEnrollment(userId, activePeriod.id)
+    : null
+
+  const calendarException = activePeriod
+    ? await providers.domainStore.getCalendarExceptionByDate(todayWIB, activePeriod.id)
+    : null
+
+  const schedule = await providers.domainStore.getActiveSchedule(dayKey, {
+    classId: activeEnrollment?.class_id,
+    academicPeriodId: activePeriod?.id,
+  })
 
   const attendanceStatus = computeAttendanceStatus(absences)
 
@@ -355,7 +398,9 @@ export async function getDashboard(
     attendanceStatus.today = 'leave'
   }
 
-  const avatarUrl = profile.avatar_url ? await getSignedAvatarUrl(profile.avatar_url) : null
+  const avatarUrl = profile.avatar_url
+    ? await providers.objectStorage.getSignedAvatarUrl(profile.avatar_url)
+    : null
 
   const primaryAction = computePrimaryAction({
     robinHealthy: robinReady.healthy,
@@ -364,6 +409,9 @@ export async function getDashboard(
     schedule,
     attendanceStatus,
     baseDateWIB: todayWIB,
+    hasActiveAcademicPeriod: Boolean(activePeriod),
+    hasActiveClassEnrollment: Boolean(activeEnrollment),
+    calendarHolidayReason: calendarException?.is_holiday ? calendarException.reason : null,
   })
 
   // Compute normalized schedule
@@ -390,7 +438,7 @@ export async function getDashboard(
       full_name: profile.full_name,
       email: profile.email,
       nis: profile.nis,
-      class_name: profile.class_name,
+      class_name: activeEnrollment?.class_name ?? profile.class_name,
       absence_number: profile.absence_number,
       avatar_url: avatarUrl,
       role: profile.role,

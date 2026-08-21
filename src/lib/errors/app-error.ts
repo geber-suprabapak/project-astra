@@ -34,8 +34,8 @@ export class AppError extends Error {
     return new AppError(ErrorCode.AUTH_INVALID, 401, message)
   }
 
-  static forbidden(): AppError {
-    return new AppError(ErrorCode.FORBIDDEN, 403, 'Access denied.')
+  static forbidden(message = 'Access denied.', details?: AppErrorDetails): AppError {
+    return new AppError(ErrorCode.FORBIDDEN, 403, message, details)
   }
 
   static validationError(details?: AppErrorDetails): AppError {

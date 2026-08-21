@@ -8,6 +8,7 @@ import {
   RobinIdentifyResponseSchema,
   type RobinEnrollResult,
   type RobinEnrollStatus,
+  type RobinIdentifyResult,
 } from './schemas.js'
 
 const ENROLL_STATUS_TIMEOUT_MS = () => env.robinEnrollStatusTimeoutMs
@@ -43,14 +44,37 @@ async function fetchWithTimeout(
   }
 }
 
-function robinHeaders(token?: string, requestId?: string): RobinRequestHeaders {
+function userIdFromToken(token?: string): string | undefined {
+  if (!token) return undefined
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return undefined
+    // SAFETY: Astra has already validated the bearer token; only its subject is copied as context.
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+      sub?: string
+    }
+    return claims.sub
+  } catch {
+    return undefined
+  }
+}
+
+function robinHeaders(token?: string, requestId?: string, userId?: string): RobinRequestHeaders {
   const headers: RobinRequestHeaders = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
+    Authorization: `Bearer ${env.robinServiceToken}`,
   }
-  if (token) headers['Authorization'] = `Bearer ${token}`
+  const resolvedUserId = userId ?? userIdFromToken(token)
+  if (resolvedUserId) headers['X-Astra-User-Id'] = resolvedUserId
   if (requestId) headers['X-Request-ID'] = requestId
   return headers
+}
+
+function assertRobinContract(res: Response): void {
+  if (res.headers.get('X-Robin-Contract-Version') !== 'v1') {
+    throw AppError.dependencyUnavailable('Robin contract')
+  }
 }
 
 export class RobinClient {
@@ -60,9 +84,6 @@ export class RobinClient {
     this.baseUrl = baseUrl.replace(/\/$/, '')
   }
 
-  // -------------------------------------------------------------------------
-  // Readiness check — timeout: env.robinReadyTimeoutMs
-  // -------------------------------------------------------------------------
   async checkReadiness(): Promise<{ healthy: boolean }> {
     try {
       const res = await fetchWithTimeout(
@@ -70,6 +91,7 @@ export class RobinClient {
         { method: 'GET', headers: { Accept: 'application/json' } },
         env.robinReadyTimeoutMs,
       )
+      assertRobinContract(res)
       return { healthy: res.ok }
     } catch (err) {
       if (err instanceof AppError && err.code === 'UPSTREAM_TIMEOUT') {
@@ -81,15 +103,11 @@ export class RobinClient {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Identify — timeout: env.robinIdentifyTimeoutMs
-  // Returns only processTimeMs — never leaks student_id/name/confidence
-  // -------------------------------------------------------------------------
   async identify(
     imageBase64: string,
     token: string,
     requestId: string,
-  ): Promise<{ processTimeMs: number }> {
+  ): Promise<RobinIdentifyResult> {
     const res = await fetchWithTimeout(
       `${this.baseUrl}/v1/identify`,
       {
@@ -99,32 +117,36 @@ export class RobinClient {
       },
       env.robinIdentifyTimeoutMs,
     )
+    assertRobinContract(res)
 
     if (!res.ok) {
       const errorJson = await res.json().catch(() => null)
-      const errorSchema = z.object({ message: z.string() })
+      const errorSchema = z.object({
+        message: z.string().optional(),
+        detail: z.string().optional(),
+      })
       const parsedError = errorSchema.safeParse(errorJson)
-      throw AppError.attendanceBlocked(
-        parsedError.success ? parsedError.data.message : 'Face not recognized.',
-      )
+      const msg = parsedError.success
+        ? parsedError.data.message || parsedError.data.detail || 'Face not recognized.'
+        : 'Face not recognized.'
+      throw AppError.attendanceBlocked(msg)
     }
 
     const parsed = RobinIdentifyResponseSchema.safeParse(await res.json())
     if (!parsed.success) throw AppError.internal('Unexpected Robin identify response shape.')
 
     const data = parsed.data
-    // Mobile check: faceResult.status === 'ok'
-    if (data.status !== 'ok') {
-      throw AppError.attendanceBlocked(data.message || 'Face not recognized.')
+    return {
+      status: data.status,
+      confidence: data.confidence,
+      qualityScore: data.quality_score,
+      processTimeMs: data.process_time_ms ?? 0,
+      message:
+        data.message ||
+        (data.status === 'ok' ? 'Face verified successfully' : 'Face not recognized.'),
     }
-
-    return { processTimeMs: data.process_time_ms ?? 0 }
   }
 
-  // -------------------------------------------------------------------------
-  // Enrollment status — timeout: ENROLL_STATUS_TIMEOUT_MS (5000ms)
-  // 404 → not_enrolled (not an error)
-  // -------------------------------------------------------------------------
   async getEnrollmentStatus(token: string, requestId: string): Promise<RobinEnrollStatus> {
     let res: Response
     try {
@@ -137,12 +159,11 @@ export class RobinClient {
       if (err instanceof AppError && err.code === 'UPSTREAM_TIMEOUT') throw err
       throw AppError.dependencyUnavailable('Robin')
     }
+    assertRobinContract(res)
 
-    // 404 → not enrolled (per mobile behavior and plan.md §8.1)
     if (res.status === 404) {
       return { status: 'not_enrolled', embeddingCount: 0, message: 'Not enrolled.' }
     }
-
     if (!res.ok) throw AppError.dependencyUnavailable('Robin')
 
     const parsed = RobinEnrollStatusResponseSchema.safeParse(await res.json())
@@ -156,23 +177,24 @@ export class RobinClient {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Enrollment upload — timeout: env.robinEnrollTimeoutMs
-  // -------------------------------------------------------------------------
   async enroll(
     files: { buffer: Buffer; contentType: string; filename: string }[],
     token: string,
     requestId: string,
   ): Promise<RobinEnrollResult> {
+    const userId = userIdFromToken(token)
+    if (!userId) throw AppError.authInvalid('Astra user context is missing.')
+
     const formData = new FormData()
-    for (const f of files) {
-      const blob = new Blob([new Uint8Array(f.buffer)], { type: f.contentType })
-      formData.append('files', blob, f.filename)
+    for (const file of files) {
+      const blob = new Blob([new Uint8Array(file.buffer)], { type: file.contentType })
+      formData.append('files', blob, file.filename)
     }
 
     const headers: RobinUploadHeaders = {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${env.robinServiceToken}`,
       'X-Request-ID': requestId,
+      'X-Astra-User-Id': userId,
     }
 
     let res: Response
@@ -190,14 +212,12 @@ export class RobinClient {
         clearTimeout(timer)
       }
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        throw AppError.upstreamTimeout('Robin')
-      }
+      if (err instanceof Error && err.name === 'AbortError') throw AppError.upstreamTimeout('Robin')
       throw AppError.dependencyUnavailable('Robin')
     }
+    assertRobinContract(res)
 
     if (!res.ok) throw AppError.dependencyUnavailable('Robin')
-
     const parsed = RobinEnrollResponseSchema.safeParse(await res.json())
     if (!parsed.success) throw AppError.internal('Unexpected Robin enroll response.')
 
@@ -208,7 +228,27 @@ export class RobinClient {
       totalEmbeddings: data.total_embeddings ?? files.length,
     }
   }
+
+  async deleteEnrollment(token?: string, requestId?: string, userId?: string): Promise<void> {
+    try {
+      const headers = robinHeaders(token, requestId, userId)
+      const res = await fetchWithTimeout(
+        `${this.baseUrl}/v1/enroll`,
+        { method: 'DELETE', headers },
+        env.robinEnrollTimeoutMs,
+      )
+      if (res.ok || res.status === 404) assertRobinContract(res)
+      if (!res.ok && res.status !== 404) {
+        logger.warn({ status: res.status }, 'Robin delete enrollment returned non-ok status')
+      }
+    } catch (err) {
+      if (err instanceof AppError && err.code === 'UPSTREAM_TIMEOUT') {
+        logger.warn('Robin delete enrollment timed out')
+        return
+      }
+      logger.warn({ err }, 'Robin delete enrollment request failed')
+    }
+  }
 }
 
-// Singleton
 export const robinClient = new RobinClient(env.robinBaseUrl)

@@ -25,6 +25,9 @@ ENV NODE_ENV=production
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/bun.lock ./
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY db/ ./db/
 
 RUN --mount=type=cache,target=/root/.bun/install/cache \
   bun install --production --frozen-lockfile

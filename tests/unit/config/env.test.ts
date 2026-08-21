@@ -6,10 +6,9 @@ const baseEnv = {
   TENANT_KEY: 'test-school',
   TENANT_NAME: 'Test School',
   CORS_ALLOWED_ORIGINS: 'http://localhost:8081',
-  SUPABASE_URL: 'https://test.supabase.co',
-  SUPABASE_ANON_KEY: 'anon-key',
-  SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
-  SUPABASE_JWT_SECRET: 'jwt-secret',
+  DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/astra',
+  S3_ENDPOINT: 'http://localhost:9000',
+  OIDC_JWT_SECRET: 'jwt-secret',
   ROBIN_BASE_URL: 'http://localhost:8000',
 } satisfies Record<string, string>
 
@@ -19,17 +18,17 @@ describe('env config', () => {
     expect(env.robinIdentifyTimeoutMs).toBeDefined()
     expect(env.robinEnrollTimeoutMs).toBeDefined()
     expect(env.robinEnrollStatusTimeoutMs).toBeDefined()
-    expect(env.supabaseQueryTimeoutMs).toBeDefined()
-    expect(env.supabaseStorageUploadTimeoutMs).toBeDefined()
+    expect(env.dbQueryTimeoutMs).toBeDefined()
+    expect(env.storageUploadTimeoutMs).toBeDefined()
   })
 
-  it('has default timeout values matching plan.md §6.4', () => {
+  it('has default timeout values matching plan', () => {
     expect(env.robinReadyTimeoutMs).toBe(3000)
     expect(env.robinIdentifyTimeoutMs).toBe(30000)
     expect(env.robinEnrollTimeoutMs).toBe(60000)
     expect(env.robinEnrollStatusTimeoutMs).toBe(5000)
-    expect(env.supabaseQueryTimeoutMs).toBe(5000)
-    expect(env.supabaseStorageUploadTimeoutMs).toBe(15000)
+    expect(env.dbQueryTimeoutMs).toBe(5000)
+    expect(env.storageUploadTimeoutMs).toBe(15000)
   })
 
   it('has tenant config', () => {
@@ -53,6 +52,19 @@ describe('env config', () => {
     ).toContain('REDIS_URL')
   })
 
+  it('requires OIDC_ISSUER in production', () => {
+    const parsed = parseEnv({
+      ...baseEnv,
+      NODE_ENV: 'production',
+      REDIS_URL: 'redis://localhost:6379',
+    })
+
+    expect(parsed.success).toBe(false)
+    expect(
+      parsed.success ? [] : parsed.error.issues.map((issue) => issue.path.join('.')),
+    ).toContain('OIDC_ISSUER')
+  })
+
   it('allows non-production envs without REDIS_URL', () => {
     const parsed = parseEnv(baseEnv)
 
@@ -68,6 +80,20 @@ describe('env config', () => {
     expect(parsed.success).toBe(true)
     if (parsed.success) {
       expect(parsed.data.REDIS_KEY_PREFIX).toBe('astra:ratelimit')
+    }
+  })
+
+  it('parses optional auth helper env vars when provided', () => {
+    const parsed = parseEnv({
+      ...baseEnv,
+      AUTH_USER_ID: 'custom-student-id',
+      AUTH_EMAIL: 'custom@school.sch.id',
+    })
+
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      expect(parsed.data.AUTH_USER_ID).toBe('custom-student-id')
+      expect(parsed.data.AUTH_EMAIL).toBe('custom@school.sch.id')
     }
   })
 })

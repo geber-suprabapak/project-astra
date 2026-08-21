@@ -1,22 +1,24 @@
 # Project Astra
 
-Project Astra is the Backend-for-Frontend service for the Attendance App. It owns the mobile-facing application logic for dashboard data, attendance gates, face enrollment, permits, profile updates, health checks, and canonical server time.
+Project Astra is the primary backend and API gateway service for the Skanida Platform. It owns the mobile-facing and client application logic for dashboard data, attendance gates, face enrollment, permits, profile updates, health checks, and canonical server time.
 
-The service sits between the mobile app and the internal systems:
+The service sits between clients and internal platform systems:
 
 ```text
-Skanida Mobile App -> Project Astra (/v1/mobile/*) -> Supabase
-                                                   -> Robin Face API
+Skanida Mobile App -> Project Astra (/v1/mobile/*) -> PostgreSQL (Domain Store)
+                                                    -> S3-Compatible Object Storage
+                                                    -> OIDC / Logto Identity
+                                                    -> Robin Face API
 ```
 
 ## Runtime Stack
 
-- Node.js 22 LTS
+- Node.js 22 LTS / Bun 1.3
 - TypeScript
 - Hono
 - Zod
 - jose
-- Supabase JS client
+- Postgres.js (`postgres`)
 - Pino
 - Vitest
 - Oxlint and Oxfmt
@@ -27,12 +29,14 @@ Use Bun only for local commands. This repository uses `bun.lock` and declares Bu
 
 ## Application Boundary
 
-Project Astra exposes a stable mobile API under `/v1/mobile`. The mobile app should not need to know Supabase table names, Robin endpoint details, storage bucket names, or attendance decision internals.
+Project Astra exposes a stable public API under `/v1/mobile`. Clients (Mobile and Chronos) do not need direct access to database tables, Robin endpoint details, storage bucket internals, or attendance decision implementations.
 
-The BFF owns:
+Astra owns:
 
-- bearer-token verification and request user context
+- bearer-token verification and request user context via `IdentityProvider`
 - deployment-local tenant context
+- domain persistence via `DomainStore` (PostgreSQL)
+- file metadata and object storage operations via `ObjectStorage` (S3-compatible)
 - common response envelopes
 - stable error codes
 - request validation
@@ -46,17 +50,25 @@ The BFF owns:
 - mobile-safe health status
 - canonical business time
 
-Robin stays internal and handles face recognition only. Supabase stays the system of record for auth, data, and storage.
+Robin stays internal and handles technical face recognition only. Astra/PostgreSQL is the single system of record for domain state.
 
 ## Project Structure
 
 ```text
+db/
+  schema.sql                     Greenfield PostgreSQL schema definition
 src/
-  app.ts                         Hono app bootstrap, CORS, logging, routes
-  index.ts                       Node server entrypoint
+  app.ts                         Hono app bootstrap, CORS, logging, provider injection, routes
+  index.ts                       Server entrypoint
   clients/
+    redis.ts                     Redis rate limiting client
     robin/                       Robin HTTP client and schemas
-    supabase/                    Supabase admin/auth/storage access
+  providers/
+    types.ts                     DomainStore, ObjectStorage, IdentityProvider, AppProviders interfaces
+    postgres/                    PostgresDomainStore & migration runner
+    storage/                     S3ObjectStorage implementation (AWS SigV4)
+    identity/                    OidcIdentityProvider implementation
+    memory/                      In-memory provider test doubles
   config/                        env and tenant configuration
   lib/
     errors/                      AppError and stable error codes
@@ -72,14 +84,12 @@ src/
     profile/                     profile routes/services/schema
     time/                        canonical time route/service
   routes/
-    v1-mobile.ts                 /v1/mobile route composition
+    v1-mobile.ts                 /v1/mobile route composition with provider injection
+scripts/
+  migrate.ts                     PostgreSQL migration execution script
 tests/
   unit/                          unit tests
-  integration/                   integration test harness
-plan/
-  plan.md                        implementation contract
-  task-list.md                   completion task list
-  post-implementation.md         implementation summary
+  integration/                   integration & HTTP contract tests
 ```
 
 ## Response Envelope
@@ -91,7 +101,10 @@ Successful responses use:
   "success": true,
   "data": {},
   "message": "Optional message",
-  "request_id": "req_..."
+  "meta": {
+    "request_id": "req_...",
+    "timestamp": "2026-08-20T..."
+  }
 }
 ```
 
@@ -105,7 +118,10 @@ Error responses use:
     "message": "Human readable message",
     "details": {}
   },
-  "request_id": "req_..."
+  "meta": {
+    "request_id": "req_...",
+    "timestamp": "2026-08-20T..."
+  }
 }
 ```
 
@@ -127,295 +143,149 @@ Stable error codes:
 
 ## API Surface
 
-| Method  | Path                                | Auth | Purpose                                       |
-| ------- | ----------------------------------- | ---- | --------------------------------------------- |
-| `GET`   | `/live`                             | No   | Process liveness probe                        |
-| `GET`   | `/ready`                            | No   | Supabase and Robin readiness probe            |
-| `GET`   | `/v1/mobile/health`                 | No   | Mobile-safe service status                    |
-| `GET`   | `/v1/mobile/dashboard`              | Yes  | Dashboard aggregation and primary action gate |
-| `POST`  | `/v1/mobile/attendance/precheck`    | Yes  | Validate attendance eligibility before camera |
-| `POST`  | `/v1/mobile/attendance/submit`      | Yes  | Identify face and save attendance             |
-| `GET`   | `/v1/mobile/face/enrollment/status` | Yes  | Read face enrollment status                   |
-| `POST`  | `/v1/mobile/face/enrollment`        | Yes  | Upload enrollment images                      |
-| `GET`   | `/v1/mobile/permits`                | Yes  | List permit requests                          |
-| `POST`  | `/v1/mobile/permits`                | Yes  | Create permit request                         |
-| `GET`   | `/v1/mobile/profile`                | Yes  | Read profile                                  |
-| `PATCH` | `/v1/mobile/profile/avatar`         | Yes  | Upload or clear avatar                        |
-| `PATCH` | `/v1/mobile/profile/password`       | Yes  | Change password                               |
-| `GET`   | `/v1/mobile/time`                   | Yes  | Return canonical BFF time                     |
-
-### Dashboard
-
-`GET /v1/mobile/dashboard`
-
-Returns one normalized payload for the mobile dashboard:
-
-- `profile`: user identity, class, role, and avatar data
-- `attendance`: today's attendance state
-- `schedule`: active schedule window, or `null`
-- `face`: Robin readiness and enrollment status
-- `permit`: active permit state
-- `primary_action`: the next allowed check-in/check-out action or a blocking reason
-- `server_time`: BFF time and business timezone
-
-### Attendance Precheck
-
-`POST /v1/mobile/attendance/precheck`
-
-Request:
-
-```json
-{
-  "latitude": -7.123,
-  "longitude": 112.123
-}
-```
-
-The BFF evaluates schedule, permit, enrollment, Robin readiness, and location-related gates. It returns `allowed`, `action_type`, `reason_code`, `reason_message`, `schedule_window`, and a `checks` object containing per-gate pass/fail status.
-
-### Attendance Submit
-
-`POST /v1/mobile/attendance/submit`
-
-Request:
-
-```json
-{
-  "action_type": "check_in",
-  "image_base64": "...",
-  "latitude": -7.123,
-  "longitude": 112.123
-}
-```
-
-The BFF calls Robin identify, normalizes the recognition result, and saves the attendance record through Supabase.
-
-### Face Enrollment
-
-`GET /v1/mobile/face/enrollment/status`
-
-Returns normalized enrollment status. A Robin not-found result becomes `not_enrolled`, not an internal error.
-
-`POST /v1/mobile/face/enrollment`
-
-Accepts multipart form-data with exactly 10 JPEG image files in the `files` field. Each image is limited to 2 MB. The route forwards the enrollment package to Robin and returns the normalized result.
-
-### Permits
-
-`GET /v1/mobile/permits`
-
-Returns:
-
-```json
-{
-  "items": []
-}
-```
-
-Permit items include status timestamps, including `rejected_at` when available.
-
-`POST /v1/mobile/permits`
-
-Accepts multipart form-data:
-
-- `category`: `sakit` or `pergi`
-- `description`: 10 to 500 characters
-- `date`: `YYYY-MM-DD`
-- `attachment`: optional file, max 10 MB
-
-### Profile
-
-`GET /v1/mobile/profile`
-
-Returns the authenticated user's normalized profile.
-
-`PATCH /v1/mobile/profile/avatar`
-
-Supports multipart upload with `file`, or JSON clear mode:
-
-```json
-{
-  "clear": true
-}
-```
-
-`PATCH /v1/mobile/profile/password`
-
-Request:
-
-```json
-{
-  "current_password": "old-password",
-  "new_password": "new-password"
-}
-```
-
-The BFF verifies the current password before updating it.
-
-### Time
-
-`GET /v1/mobile/time`
-
-Returns the canonical BFF time:
-
-```json
-{
-  "now": "2026-05-15T06:30:00.000Z",
-  "timezone": "Asia/Jakarta",
-  "source": "bff"
-}
-```
-
-## Rate Limits
-
-| Route                                   | Limit                     |
-| --------------------------------------- | ------------------------- |
-| `GET /v1/mobile/dashboard`              | 60 requests per minute    |
-| `POST /v1/mobile/attendance/precheck`   | 12 requests per minute    |
-| `POST /v1/mobile/attendance/submit`     | 6 requests per minute     |
-| `GET /v1/mobile/face/enrollment/status` | 30 requests per minute    |
-| `POST /v1/mobile/face/enrollment`       | 2 requests per 10 minutes |
-| `GET /v1/mobile/permits`                | 30 requests per minute    |
-| `POST /v1/mobile/permits`               | 5 requests per hour       |
-| `PATCH /v1/mobile/profile/avatar`       | 10 requests per hour      |
-| `PATCH /v1/mobile/profile/password`     | 5 requests per hour       |
-| `GET /v1/mobile/time`                   | 30 requests per minute    |
-
-Rate limiting uses Redis when `REDIS_URL` is configured. Non-production environments without Redis fall back to the in-process store.
-
-## Environment
-
-Copy `.env.example` to `.env` and fill school-specific values:
-
-```text
-NODE_ENV=development
-PORT=3000
-LOG_LEVEL=info
-SERVICE_NAME=skanida-bff
-TENANT_KEY=school-slug
-TENANT_NAME=Nama Sekolah
-BUSINESS_TIMEZONE=Asia/Jakarta
-CORS_ALLOWED_ORIGINS=http://localhost:8081,exp://localhost:8081
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-SUPABASE_JWT_SECRET=your-jwt-secret
-# Optional. Set only if your Supabase JWT includes an "iss" claim.
-# SUPABASE_JWT_ISSUER=https://your-project.supabase.co/auth/v1
-SUPABASE_JWT_AUDIENCE=authenticated
-SUPABASE_STORAGE_BUCKET_AVATARS=avatars
-SUPABASE_STORAGE_BUCKET_PERMITS=perizinan
-ROBIN_BASE_URL=http://robin:8000
-ROBIN_READY_TIMEOUT_MS=3000
-ROBIN_IDENTIFY_TIMEOUT_MS=30000
-ROBIN_ENROLL_TIMEOUT_MS=60000
-ROBIN_ENROLL_STATUS_TIMEOUT_MS=5000
-SUPABASE_QUERY_TIMEOUT_MS=5000
-SUPABASE_STORAGE_UPLOAD_TIMEOUT_MS=15000
-REDIS_URL=redis://default:password@redis.example.internal:6379
-REDIS_KEY_PREFIX=astra:ratelimit
-```
-
-JWT verification can use either `SUPABASE_JWT_SECRET` or `SUPABASE_JWKS_URL`. Provide one valid method for the deployment. `SUPABASE_JWT_ISSUER` is optional because some self-hosted Supabase/GoTrue tokens do not include an `iss` claim. In production, `REDIS_URL` is required and startup will fail fast when Redis is unreachable.
-
-## Local Development
-
-Install dependencies:
-
-```bash
-bun install
-```
-
-Run the development server:
-
-```bash
-bun run dev
-```
-
-Open:
-
-```text
-http://localhost:3000/live
-http://localhost:3000/ready
-http://localhost:3000/v1/mobile/health
-```
-
-## Scripts
-
-| Command                    | Purpose                                                                       |
-| -------------------------- | ----------------------------------------------------------------------------- |
-| `bun run dev`              | Start the development server with watch mode                                  |
-| `bun run build`            | Compile TypeScript to `dist/`                                                 |
-| `bun run start`            | Start the compiled production server                                          |
-| `bun run typecheck`        | Run TypeScript without emit                                                   |
-| `bun run lint`             | Run Oxlint, including anti-slop rules                                         |
-| `bun run format`           | Format files with Oxfmt                                                       |
-| `bun run format:check`     | Check formatting with Oxfmt                                                   |
-| `bun run test`             | Run unit tests                                                                |
-| `bun run test:integration` | Run integration tests                                                         |
-| `bun run auth:token`       | Get a Supabase access token for manual or scripted smoke checks               |
-| `bun run smoke:staging`    | Run the staging smoke contract against `STAGING_BASE_URL` with `ACCESS_TOKEN` |
-
-On constrained Windows environments, run Vitest with a single fork:
-
-```bash
-bun run test -- --pool=forks --maxWorkers=1
-bun run test:integration -- --pool=forks --maxWorkers=1
-```
-
-## Docker
-
-Run the prebuilt GHCR image with Docker Compose:
-
-```bash
-docker compose pull
-docker compose up -d
-```
-
-The default image is `ghcr.io/geber-suprabapak/project-astra:latest`. Override it with `ASTRA_IMAGE` when deploying a pinned tag or SHA image.
-
-The container listens on port `3000` and exposes a Docker healthcheck through `/ready`.
+| Method  | Path                                    | Auth | Purpose                                                                       |
+| ------- | --------------------------------------- | ---- | ----------------------------------------------------------------------------- |
+| `GET`   | `/live`                                 | No   | Process liveness probe                                                        |
+| `GET`   | `/ready`                                | No   | Portable runtime readiness probe                                              |
+| `GET`   | `/v1/mobile/health`                     | No   | Mobile-safe service status                                                    |
+| `GET`   | `/v1/mobile/dashboard`                  | Yes  | Dashboard aggregation and primary action gate                                 |
+| `POST`  | `/v1/mobile/attendance/precheck`        | Yes  | Validate attendance eligibility before camera                                 |
+| `POST`  | `/v1/mobile/attendance/submit`          | Yes  | Identify face and save attendance                                             |
+| `GET`   | `/v1/mobile/face/enrollment/status`     | Yes  | Read face enrollment status                                                   |
+| `POST`  | `/v1/mobile/face/enrollment`            | Yes  | Upload enrollment images                                                      |
+| `GET`   | `/v1/mobile/permits`                    | Yes  | List permit requests                                                          |
+| `POST`  | `/v1/mobile/permits`                    | Yes  | Create permit request                                                         |
+| `GET`   | `/v1/mobile/profile`                    | Yes  | Read profile                                                                  |
+| `PATCH` | `/v1/mobile/profile/avatar`             | Yes  | Upload or clear avatar                                                        |
+| `PATCH` | `/v1/mobile/profile/password`           | Yes  | Change password                                                               |
+| `GET`   | `/v1/mobile/time`                       | Yes  | Return canonical BFF time                                                     |
+| `GET`   | `/v1/admin/session`                     | Yes  | Validate and return the active privileged identity context                    |
+| `GET`   | `/v1/admin/bootstrap/status`            | Yes  | Read single school configuration and bootstrap readiness state                |
+| `POST`  | `/v1/admin/bootstrap/school`            | Yes  | Bootstrap single School entity (platform_admin only)                          |
+| `POST`  | `/v1/admin/bootstrap/school-admin`      | Yes  | Create initial school_admin profile (platform_admin only)                     |
+| `POST`  | `/v1/admin/bootstrap/roster`            | Yes  | Stage and validate initial Student roster batch                               |
+| `GET`   | `/v1/admin/bootstrap/roster/:id`        | Yes  | Read staged roster validation report and review state                         |
+| `POST`  | `/v1/admin/bootstrap/roster/:id/accept` | Yes  | Accept valid report and commit canonical Student profiles (school_admin only) |
+| `POST`  | `/v1/admin/bootstrap/signup/open`       | Yes  | Open Student registration after roster acceptance (school_admin only)         |
+| `POST`  | `/v1/auth/student/signup`               | No   | Register new Student with valid roster NIS (creates pending profile)          |
+| `POST`  | `/v1/auth/student/reset-password`       | No   | Reset Student password using one-time administrator reset code                |
+| `GET`   | `/v1/admin/students`                    | Yes  | List Student profiles with optional lifecycle status filter                   |
+| `GET`   | `/v1/admin/students/:userId`            | Yes  | Read Student profile details                                                  |
+| `POST`  | `/v1/admin/students/:userId/approve`    | Yes  | Approve pending Student profile and activate Logto identity                   |
+| `POST`  | `/v1/admin/students/:userId/reject`     | Yes  | Reject Student profile, disable Logto identity, and revoke sessions           |
+| `POST`  | `/v1/admin/students/:userId/disable`    | Yes  | Disable Student profile, disable Logto identity, and revoke sessions          |
+| `POST`  | `/v1/admin/students/:userId/reset-code` | Yes  | Generate short-lived one-time recovery code (school_admin only)               |
+| `PATCH` | `/v1/admin/students/:userId/email`      | Yes  | Correct unverified Student email and sync to Logto                            |
+
+### Protected identity context & bootstrap boundary
+
+Astra verifies every bearer token with the configured OIDC issuer, JWKS/signature, and
+audience before loading the matching PostgreSQL profile.
+
+Tokens used for privileged administration must carry a matching `roles` claim, include
+the `openid profile admin:read` scopes, prove MFA through `mfa_verified` or an MFA
+`amr` value, and set `must_change_password` to `false`. Astra denies pending,
+rejected, disabled, or missing profiles before any protected route runs.
+
+Bootstrap and student account operations enforce strict role separation:
+
+- `platform_admin` boots the single School configuration, registers the initial `school_admin`, and stages the initial Student roster.
+- `school_admin` reviews the staged roster report, accepts clean batches with 0 rejected rows (committing canonical Student and Class Enrollment records), opens Student signup, approves/rejects/disables Student profiles, and issues one-time recovery codes.
+- Students sign up with NIS, email, and password. Only valid roster NIS creates a pending profile. Login remains disabled until school administrator approval. Password recovery uses administrator-issued one-time codes without exposing passwords to staff.
+- Every state mutation writes immutable audit evidence to `audit_logs`.
 
 ## Health Semantics
 
 - `/live`: process is running; no downstream checks.
-- `/ready`: checks Supabase, Robin, and Redis-backed rate limiting; returns `503` when a required dependency is unavailable.
-- `/v1/mobile/health`: mobile-safe health response with `status: "healthy"` or `status: "unhealthy"`.
+- `/ready`: checks PostgreSQL (`database`), S3 (`objectStorage`), OIDC/Logto (`identity`), Robin (`mlService`), and Redis (`redis`); returns `503` when any required dependency is unavailable.
+- `/v1/mobile/health`: mobile-safe health response with `status: "healthy"` or `status: "unhealthy"` without leaking provider internals.
 
-## Kubernetes Baseline
+## Environment Variables
 
-Baseline manifests live in [`k8s/`](./k8s):
+All configuration is parsed and validated at boot via `src/config/env.ts`.
 
-- `deployment.yaml`: 3-replica deployment with rolling update strategy, resources, and probes
-- `service.yaml`: cluster Service for HTTP traffic
-- `configmap.yaml`: non-secret runtime config
-- `secret.example.yaml`: secret template for Supabase and Redis
+### Core & Tenant
 
-Probe contract:
+| Variable               | Default / Required | Description                                                                                   |
+| ---------------------- | ------------------ | --------------------------------------------------------------------------------------------- |
+| `NODE_ENV`             | `development`      | Runtime environment (`development`, `production`, `test`).                                    |
+| `PORT`                 | `3000`             | HTTP server port.                                                                             |
+| `LOG_LEVEL`            | `info`             | Pino log level (`fatal`, `error`, `warn`, `info`, `debug`, `trace`).                          |
+| `SERVICE_NAME`         | `skanida-bff`      | Service identifier for structured logs.                                                       |
+| `TENANT_KEY`           | **Required**       | Deployment tenant slug identifier.                                                            |
+| `TENANT_NAME`          | **Required**       | Display name of the school tenant.                                                            |
+| `BUSINESS_TIMEZONE`    | `Asia/Jakarta`     | Timezone for canonical time and schedule calculations.                                        |
+| `CORS_ALLOWED_ORIGINS` | `""`               | Comma-separated allowed origins (required in production; wildcards disallowed in production). |
 
-- `startupProbe` -> `/live`
-- `livenessProbe` -> `/live`
-- `readinessProbe` -> `/ready`
+### PostgreSQL Database
 
-Use the manifest probes as the source of truth for K8s readiness. The image `HEALTHCHECK` is only a container-level fallback.
+| Variable                           | Default                                               | Description                                                  |
+| ---------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------ |
+| `DATABASE_URL`                     | `postgresql://postgres:postgres@localhost:5432/astra` | PostgreSQL connection string (supports direct or PgBouncer). |
+| `DATABASE_MAX_CONNECTIONS`         | `10`                                                  | Maximum connection pool size.                                |
+| `DATABASE_IDLE_TIMEOUT_SECONDS`    | `30`                                                  | Idle connection timeout in seconds.                          |
+| `DATABASE_CONNECT_TIMEOUT_SECONDS` | `5`                                                   | Connection establishment timeout in seconds.                 |
+| `DB_QUERY_TIMEOUT_MS`              | `5000`                                                | Database query timeout in milliseconds.                      |
 
-## Testing Status
+### S3-Compatible Object Storage
 
-Current automated coverage includes:
+| Variable                    | Default                 | Description                                                    |
+| --------------------------- | ----------------------- | -------------------------------------------------------------- |
+| `S3_ENDPOINT`               | `http://localhost:9000` | S3-compatible API endpoint (MinIO, Ceph, Garage, AWS S3).      |
+| `S3_REGION`                 | `us-east-1`             | S3 region.                                                     |
+| `S3_ACCESS_KEY_ID`          | `minioadmin`            | S3 access key ID.                                              |
+| `S3_SECRET_ACCESS_KEY`      | `minioadmin`            | S3 secret access key.                                          |
+| `S3_BUCKET_AVATARS`         | `avatars`               | Bucket name for profile avatars.                               |
+| `S3_BUCKET_PERMITS`         | `perizinan`             | Bucket name for permit attachment files.                       |
+| `S3_FORCE_PATH_STYLE`       | `true`                  | Use path-style bucket addressing.                              |
+| `S3_PUBLIC_URL`             | _(Optional)_            | Optional custom base URL for public or presigned asset access. |
+| `STORAGE_UPLOAD_TIMEOUT_MS` | `15000`                 | Storage upload timeout in milliseconds.                        |
 
-- error code taxonomy
-- AppError factories
-- auth middleware
-- rate limit store
-- env config
-- request validation schemas
-- attendance mapper
-- dashboard service and primary action gating
-- schema constants
-- time service
-- integration test harness
+### OIDC / Logto Authentication & Helper
 
-Run the full local gate:
+| Variable           | Default / Required                  | Description                                                          |
+| ------------------ | ----------------------------------- | -------------------------------------------------------------------- |
+| `OIDC_JWT_SECRET`  | _(Required if no JWKS)_             | Secret key for symmetric HS256 JWT verification.                     |
+| `OIDC_JWKS_URL`    | _(Required if no Secret)_           | JWKS URL for asymmetric JWT verification.                            |
+| `OIDC_ISSUER`      | **Required for token verification** | Expected token issuer claim; production boot rejects it when absent. |
+| `OIDC_AUDIENCE`    | `authenticated`                     | Expected token audience claim.                                       |
+| `LOGTO_ENDPOINT`   | _(Optional)_                        | Logto Management API endpoint URL.                                   |
+| `LOGTO_APP_ID`     | _(Optional)_                        | Logto Management API M2M App ID.                                     |
+| `LOGTO_APP_SECRET` | _(Optional)_                        | Logto Management API M2M App Secret.                                 |
+| `AUTH_USER_ID`     | _(Optional)_                        | Default user ID for the `bun run auth:token` helper.                 |
+| `AUTH_EMAIL`       | _(Optional)_                        | Default user email for the `bun run auth:token` helper.              |
+
+### Robin (Face Recognition API)
+
+| Variable                         | Default / Required | Description                                               |
+| -------------------------------- | ------------------ | --------------------------------------------------------- |
+| `ROBIN_BASE_URL`                 | **Required**       | Base URL for the internal Robin face recognition service. |
+| `ROBIN_READY_TIMEOUT_MS`         | `3000`             | Health probe timeout in milliseconds.                     |
+| `ROBIN_IDENTIFY_TIMEOUT_MS`      | `30000`            | Face identification timeout in milliseconds.              |
+| `ROBIN_ENROLL_TIMEOUT_MS`        | `60000`            | Face enrollment timeout in milliseconds.                  |
+| `ROBIN_ENROLL_STATUS_TIMEOUT_MS` | `5000`             | Face enrollment status query timeout in milliseconds.     |
+
+### Redis Rate Limiting
+
+| Variable           | Default / Required | Description                                                                                     |
+| ------------------ | ------------------ | ----------------------------------------------------------------------------------------------- |
+| `REDIS_URL`        | _(Optional)_       | Redis connection URL (required in production; falls back to in-memory store in non-production). |
+| `REDIS_KEY_PREFIX` | `astra:ratelimit`  | Key prefix for rate limiting counters.                                                          |
+
+### Downstream Timeouts
+
+| Variable                         | Default | Downstream Target                       |
+| -------------------------------- | ------- | --------------------------------------- |
+| `DB_QUERY_TIMEOUT_MS`            | `5000`  | PostgreSQL query execution              |
+| `STORAGE_UPLOAD_TIMEOUT_MS`      | `15000` | S3 object storage upload operations     |
+| `ROBIN_READY_TIMEOUT_MS`         | `3000`  | Robin `/ready` health probe             |
+| `ROBIN_IDENTIFY_TIMEOUT_MS`      | `30000` | Robin `/v1/face/identify` endpoint      |
+| `ROBIN_ENROLL_TIMEOUT_MS`        | `60000` | Robin `/v1/face/enroll` endpoint        |
+| `ROBIN_ENROLL_STATUS_TIMEOUT_MS` | `5000`  | Robin `/v1/face/enroll/status` endpoint |
+
+## Testing & Quality Gates
+
+Run the standard validation gates:
 
 ```bash
 bun run typecheck
@@ -423,152 +293,3 @@ bun run lint
 bun run test -- --pool=forks --maxWorkers=1
 bun run test:integration -- --pool=forks --maxWorkers=1
 ```
-
-## Staging Smoke Verification
-
-Manual smoke verification is available through `.github/workflows/staging-smoke.yml`.
-
-Required GitHub secrets:
-
-- `STAGING_BASE_URL`
-- `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
-- `AUTH_EMAIL`
-- `AUTH_PASSWORD`
-- `SMOKE_LATITUDE`
-- `SMOKE_LONGITUDE`
-
-The workflow:
-
-1. generates a staging access token with `bun run auth:token --json`
-2. verifies `/live`, `/ready`, and `/v1/mobile/health`
-3. verifies authenticated staging routes: `/v1/mobile/time`, `/v1/mobile/dashboard`, and `/v1/mobile/attendance/precheck`
-
-## Curl Test Guide
-
-Get a JWT with the interactive helper:
-
-```bash
-bun run auth:token
-```
-
-Store the token in your shell:
-
-```bash
-export JWT_TOKEN="<paste access token>"
-```
-
-Public endpoints:
-
-```bash
-curl "http://localhost:3000/live"
-```
-
-```bash
-curl "http://localhost:3000/ready"
-```
-
-```bash
-curl "http://localhost:3000/v1/mobile/health"
-```
-
-Auth-protected endpoints:
-
-```bash
-curl -H "Authorization: Bearer $JWT_TOKEN" "http://localhost:3000/v1/mobile/dashboard"
-```
-
-```bash
-curl -H "Authorization: Bearer $JWT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"latitude":-7.123,"longitude":112.123}' \
-  "http://localhost:3000/v1/mobile/attendance/precheck"
-```
-
-```bash
-curl -H "Authorization: Bearer $JWT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"action_type":"check_in","image_base64":"<base64>","latitude":-7.123,"longitude":112.123}' \
-  "http://localhost:3000/v1/mobile/attendance/submit"
-```
-
-```bash
-curl -H "Authorization: Bearer $JWT_TOKEN" \
-  "http://localhost:3000/v1/mobile/face/enrollment/status"
-```
-
-```bash
-curl -H "Authorization: Bearer $JWT_TOKEN" \
-  -F "files=@./photo-1.jpg" \
-  -F "files=@./photo-2.jpg" \
-  -F "files=@./photo-3.jpg" \
-  -F "files=@./photo-4.jpg" \
-  -F "files=@./photo-5.jpg" \
-  -F "files=@./photo-6.jpg" \
-  -F "files=@./photo-7.jpg" \
-  -F "files=@./photo-8.jpg" \
-  -F "files=@./photo-9.jpg" \
-  -F "files=@./photo-10.jpg" \
-  "http://localhost:3000/v1/mobile/face/enrollment"
-```
-
-```bash
-curl -H "Authorization: Bearer $JWT_TOKEN" \
-  "http://localhost:3000/v1/mobile/permits"
-```
-
-```bash
-curl -H "Authorization: Bearer $JWT_TOKEN" \
-  -F "category=sakit" \
-  -F "description=Demam dan perlu istirahat" \
-  -F "date=2026-05-15" \
-  -F "attachment=@./note.jpg" \
-  "http://localhost:3000/v1/mobile/permits"
-```
-
-```bash
-curl -H "Authorization: Bearer $JWT_TOKEN" \
-  "http://localhost:3000/v1/mobile/profile"
-```
-
-```bash
-curl -H "Authorization: Bearer $JWT_TOKEN" \
-  -X PATCH \
-  -F "file=@./avatar.jpg" \
-  "http://localhost:3000/v1/mobile/profile/avatar"
-```
-
-```bash
-curl -H "Authorization: Bearer $JWT_TOKEN" \
-  -X PATCH \
-  -H "Content-Type: application/json" \
-  -d '{"clear":true}' \
-  "http://localhost:3000/v1/mobile/profile/avatar"
-```
-
-```bash
-curl -H "Authorization: Bearer $JWT_TOKEN" \
-  -X PATCH \
-  -H "Content-Type: application/json" \
-  -d '{"current_password":"old-pass","new_password":"new-pass-123"}' \
-  "http://localhost:3000/v1/mobile/profile/password"
-```
-
-```bash
-curl -H "Authorization: Bearer $JWT_TOKEN" \
-  "http://localhost:3000/v1/mobile/time"
-```
-
-## Implementation Status
-
-The implementation covers the v1 plan surface:
-
-- all mobile endpoints from `plan/plan.md` section 7 exist
-- all stable error codes from section 6.3 exist
-- timeout configuration is present
-- route-level rate limits are configured
-- Docker and CI baseline are present
-- unit tests and integration harness are present
-- README documents the operational and API contract
-
-Deployment-specific end-to-end validation still depends on real school Supabase, Robin, and Redis credentials.

@@ -1,6 +1,6 @@
 import { env } from '../../config/env.js'
 
-/** Named timeout presets — plan.md §6.4 */
+/** Named timeout presets */
 export const timeouts = {
   /** Robin readiness check: 3000ms (configurable via env) */
   robinReadiness: env.robinReadyTimeoutMs,
@@ -10,8 +10,8 @@ export const timeouts = {
   robinEnrollStatus: env.robinEnrollStatusTimeoutMs,
   /** Robin enrollment upload: 60000ms (configurable via env) */
   robinEnroll: env.robinEnrollTimeoutMs,
-  /** Supabase query: 5000ms default */
-  supabaseQuery: env.supabaseQueryTimeoutMs,
+  /** Database query: 5000ms default */
+  dbQuery: env.dbQueryTimeoutMs,
   /** Storage upload: 15000ms default */
-  supabaseStorageUpload: env.supabaseStorageUploadTimeoutMs,
+  storageUpload: env.storageUploadTimeoutMs,
 } as const

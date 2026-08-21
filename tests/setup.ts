@@ -1,21 +1,17 @@
-import NodeWebSocket from 'ws'
-
 // Test environment setup — provide minimal valid env before any module imports
 process.env['NODE_ENV'] = 'test'
 process.env['TENANT_KEY'] = 'test-school'
 process.env['TENANT_NAME'] = 'Test School'
-process.env['SUPABASE_URL'] = 'https://test.supabase.co'
-process.env['SUPABASE_ANON_KEY'] = 'test-anon-key'
-process.env['SUPABASE_SERVICE_ROLE_KEY'] = 'test-service-role-key'
-process.env['SUPABASE_JWT_SECRET'] = 'test-jwt-secret-that-is-long-enough'
-process.env['SUPABASE_JWT_ISSUER'] = 'https://test.supabase.co/auth/v1'
+process.env['DATABASE_URL'] = 'postgresql://postgres:postgres@localhost:5432/astra_test'
+process.env['S3_ENDPOINT'] = 'http://localhost:9000'
+process.env['S3_ACCESS_KEY_ID'] = 'test-access-key'
+process.env['S3_SECRET_ACCESS_KEY'] = 'test-secret-key'
+process.env['S3_BUCKET_AVATARS'] = 'avatars'
+process.env['S3_BUCKET_PERMITS'] = 'perizinan'
+process.env['OIDC_JWT_SECRET'] = 'test-jwt-secret-that-is-long-enough-32-chars'
+process.env['OIDC_ISSUER'] = 'https://auth.school.test'
+process.env['OIDC_AUDIENCE'] = 'authenticated'
 process.env['ROBIN_BASE_URL'] = 'http://localhost:8000'
 process.env['ROBIN_ENROLL_STATUS_TIMEOUT_MS'] = '5000'
-process.env['SUPABASE_QUERY_TIMEOUT_MS'] = '5000'
-process.env['SUPABASE_STORAGE_UPLOAD_TIMEOUT_MS'] = '15000'
-
-// Supabase Realtime on Node <22 expects a WebSocket transport.
-if (!globalThis.WebSocket) {
-  // SAFETY: NodeWebSocket provides standard WebSocket implementation for test environment.
-  globalThis.WebSocket = NodeWebSocket as typeof globalThis.WebSocket
-}
+process.env['DB_QUERY_TIMEOUT_MS'] = '5000'
+process.env['STORAGE_UPLOAD_TIMEOUT_MS'] = '15000'

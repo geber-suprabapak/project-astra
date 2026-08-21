@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Project Astra is the Skanida Mobile BFF — a Hono service that sits between the mobile app and Supabase + Robin (face recognition). It owns auth, tenant context, response envelope, error taxonomy, and orchestration for `/v1/mobile/*`.
+Project Astra is the Skanida Platform Backend and Mobile BFF — a Hono service that coordinates domain workflows between clients (Mobile and Chronos) and platform components (PostgreSQL, S3, OIDC/Logto, Robin). It owns auth, tenant context, response envelope, error taxonomy, and orchestration for `/v1/mobile/*`.
 
 ## Toolchain
 
@@ -21,7 +21,7 @@ bun run format            # format files with oxfmt
 bun run format:check      # check formatting with oxfmt
 bun run test              # vitest run tests/unit
 bun run test:integration  # vitest run tests/integration
-bun run auth:token        # interactive helper, prints a Supabase JWT for curl tests
+bun run auth:token        # interactive helper, signs an OIDC access token for curl tests
 ```
 
 On Windows, vitest needs forks + a single worker:
@@ -39,33 +39,42 @@ The local pre-merge gate is `typecheck`, `lint`, `test`, `test:integration` — 
 
 ### Request flow
 
-`src/index.ts` (node-server entrypoint) → `src/app.ts` (Hono bootstrap) → `src/routes/v1-mobile.ts` (mounts each module router under `/v1/mobile`) → `src/modules/<feature>/routes.ts`.
+`src/index.ts` (node-server entrypoint) → `src/app.ts` (Hono bootstrap, provider DI) → `src/routes/v1-mobile.ts` (mounts each module router under `/v1/mobile`) → `src/modules/<feature>/routes.ts`.
 
-`src/app.ts` is the only place global middleware lives: `requestId` → `cors` → request-logging → routes → `errorHandler` (via `app.onError`). Public probes (`/live`, `/ready`) are mounted at the root from `modules/health`. `/v1/mobile/health` is the mobile-safe health route mounted as the _first_ sub-route under `/v1/mobile` so it stays public; everything else under `/v1/mobile` requires auth (applied per-module, not globally — this is intentional, do not move it to `routes/v1-mobile.ts`).
+`src/app.ts` is the place global middleware lives: `requestId` → provider attachment → `cors` → request-logging → routes → `errorHandler` (via `app.onError`). Public probes (`/live`, `/ready`) are mounted at the root from `modules/health`. `/v1/mobile/health` is the mobile-safe health route mounted as the _first_ sub-route under `/v1/mobile` so it stays public; everything else under `/v1/mobile` requires auth (applied per-module, not globally — this is intentional, do not move it to `routes/v1-mobile.ts`).
+
+### Provider Seams
+
+`src/providers/` houses provider interfaces and implementations:
+
+- `DomainStore` (`PostgresDomainStore`, `MemoryDomainStore`): PostgreSQL domain queries and mutations
+- `ObjectStorage` (`S3ObjectStorage`, `MemoryObjectStorage`): S3-compatible file storage (avatars, permits)
+- `IdentityProvider` (`OidcIdentityProvider`, `MemoryIdentityProvider`): OIDC/Logto JWT validation and password updates
+- `AppProviders`: aggregation interface injected into `createApp({ providers })` for testing
 
 ### Module pattern
 
 Every feature under `src/modules/<feature>/` uses the same shape:
 
 - `routes.ts` — Hono sub-router; applies `auth` and the matching `rateLimits.<preset>` as `use('*', …)` at the top, then defines handlers
-- `service.ts` — business logic, calls `clients/supabase` and `clients/robin`
+- `service.ts` — business logic, consumes `AppProviders`
 - `schema.ts` — Zod request/response schemas and shared shape constants
 
 Handlers should be thin: parse + validate input, call the service, return via `successResponse(c, data, message?)` from `src/lib/http/responses.ts`. Never hand-roll the envelope.
 
 ### Errors
 
-All thrown errors should be `AppError` (see `src/lib/errors/app-error.ts`) constructed via the static factories (`AppError.authRequired()`, `AppError.attendanceBlocked()`, …). The 13 stable codes live in `src/lib/errors/codes.ts` and are part of the mobile contract — adding a new code requires a plan/contract update, not just a code change. `errorHandler` middleware turns `AppError` into the standard error envelope; any other thrown error becomes `INTERNAL_ERROR` (500).
+All thrown errors should be `AppError` (see `src/lib/errors/app-error.ts`) constructed via the static factories (`AppError.authRequired()`, `AppError.attendanceBlocked()`, …). The 13 stable codes live in `src/lib/errors/codes.ts` and are part of the mobile contract — adding a new code requires a contract update. `errorHandler` middleware turns `AppError` into the standard error envelope; any other thrown error becomes `INTERNAL_ERROR` (500).
 
 ### Auth + tenant context
 
-`src/middleware/auth.ts` verifies the Supabase JWT using `jose`. It accepts either a shared secret (`SUPABASE_JWT_SECRET`) or a JWKS URL (`SUPABASE_JWKS_URL`) — env validation in `src/config/env.ts` enforces that exactly one is provided. The `iss` claim is **optional** (some self-hosted GoTrue tokens omit it); only set `SUPABASE_JWT_ISSUER` if your tokens actually carry one. On success the middleware sets `userId`, `rawToken`, and `tenantKey` on the Hono context (`AppEnv` in `src/types/context.ts`). Downstream handlers and services rely on these — read them via `c.get(...)`, do not re-decode the token.
+`src/middleware/auth.ts` verifies the OIDC JWT using `IdentityProvider`. It accepts either a shared secret (`OIDC_JWT_SECRET`) or a JWKS URL (`OIDC_JWKS_URL`). On success the middleware sets `userId`, `rawToken`, and `tenantKey` on the Hono context (`AppEnv` in `src/types/context.ts`). Downstream handlers and services rely on these — read them via `c.get(...)`, do not re-decode the token.
 
 `tenantKey` is process-local (one deployment = one school) and comes from env, not the JWT.
 
 ### Rate limiting
 
-`src/middleware/rate-limit.ts` exports a `RateLimitStore` interface and a `MemoryRateLimitStore` default. **In-memory means limits reset on restart and are per-replica** — before scaling beyond a single replica, swap in a shared store (Redis) by passing it to `rateLimit({ store })`. Limits are keyed by `${tenantKey}:${userId}:${routeKey}`, so anonymous routes are not limited (the middleware no-ops when `userId` is missing). Use the named presets in `rateLimits` rather than constructing limits inline; the numbers there are the contract from `plan/plan.md` §6.5.
+`src/middleware/rate-limit.ts` exports a `RateLimitStore` interface, `MemoryRateLimitStore` default, and Redis backend when `REDIS_URL` is set.
 
 ### Config
 
@@ -74,7 +83,7 @@ All thrown errors should be `AppError` (see `src/lib/errors/app-error.ts`) const
 ## Conventions
 
 - TypeScript ESM. 2-space indent. Lowercase filenames and route folders.
-- Imports between local files use the `.js` extension (NodeNext resolution requires it even when the source is `.ts`).
+- Imports between local files use the `.js` extension.
 - Oxlint runs anti-slop rules. Prefer parsing external values at their boundary, owner contracts over open dictionaries, and explicit `SAFETY:` invariants for unavoidable type assertions.
 - Keep request/response Zod schemas in each module's `schema.ts`. Don't scatter them.
 - The `.serena/` directory is committed working state for the Serena tooling — treat it like normal source, not scratch. AGENTS.md spells this out.
@@ -82,4 +91,4 @@ All thrown errors should be `AppError` (see `src/lib/errors/app-error.ts`) const
 
 ## Docker
 
-`Dockerfile` is a two-stage Bun 1.3.13 alpine build (`bun run build` → `bun dist/index.js`). The container exposes 3000 and healthchecks via `/live`. `docker-compose.yml` pulls `ghcr.io/geber-suprabapak/project-astra:latest` by default; override with `ASTRA_IMAGE` to pin a tag/SHA.
+`Dockerfile` is a two-stage Bun alpine build (`bun run build` → `bun dist/index.js`). The container exposes 3000 and healthchecks via `/ready`.
