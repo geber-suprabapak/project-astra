@@ -19,6 +19,7 @@ import type {
   ClassEnrollment,
   ClassEnrollmentStatus,
   ClassRoom,
+  ClaimPendingNotificationsParams,
   CreateAcademicPeriodParams,
   CreateCalendarExceptionParams,
   CreateClassParams,
@@ -32,6 +33,7 @@ import type {
   CreateSchoolParams,
   CreateStaffParams,
   DomainStore,
+  EnqueueNotificationParams,
   EnrollStudentParams,
   ExitStudentEnrollmentParams,
   FaceEnrollmentRecord,
@@ -42,7 +44,12 @@ import type {
   InsertPermitData,
   LeaveRequest,
   ListLeaveRequestsFilter,
+  ListNotificationsFilter,
   Location,
+  NotificationChannel,
+  NotificationPayload,
+  NotificationRecord,
+  NotificationStatus,
   PasswordResetCode,
   Permission,
   Permit,
@@ -66,6 +73,7 @@ import type {
   UpdateScheduleParams,
   UpdateStaffParams,
   UpdateLeaveRequestStatusParams,
+  UpdateNotificationStatusParams,
   UserProfile,
 } from '../types.js'
 
@@ -2608,6 +2616,233 @@ export class PostgresDomainStore implements DomainStore {
     }
   }
 
+
+  // ---------------------------------------------------------------------------
+  // Notification Outbox domain methods
+  // ---------------------------------------------------------------------------
+
+  async enqueueNotification(params: EnqueueNotificationParams): Promise<NotificationRecord> {
+    try {
+      const payloadJson = JSON.stringify(params.payload ?? {})
+      const nextRetryAtVal = params.nextRetryAt ? new Date(params.nextRetryAt).toISOString() : null
+      const rows = await this.sql`
+        INSERT INTO notification_outbox (
+          user_id,
+          channel,
+          payload,
+          status,
+          retry_count,
+          next_retry_at
+        )
+        VALUES (
+          ${params.userId},
+          ${params.channel},
+          ${payloadJson}::jsonb,
+          ${params.status ?? 'pending'},
+          0,
+          ${nextRetryAtVal ? this.sql`${nextRetryAtVal}::timestamptz` : null}
+        )
+        RETURNING
+          id,
+          user_id,
+          channel,
+          payload,
+          status,
+          retry_count,
+          next_retry_at::text,
+          error_message,
+          created_at::text,
+          updated_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.internal('Failed to enqueue notification.')
+      }
+      return this.mapNotificationRow(rows[0])
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to enqueue notification')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getNotificationById(id: string): Promise<NotificationRecord | null> {
+    try {
+      const rows = await this.sql`
+        SELECT
+          id,
+          user_id,
+          channel,
+          payload,
+          status,
+          retry_count,
+          next_retry_at::text,
+          error_message,
+          created_at::text,
+          updated_at::text
+        FROM notification_outbox
+        WHERE id = ${id}
+        LIMIT 1
+      `
+      if (!rows || rows.length === 0) return null
+      return this.mapNotificationRow(rows[0])
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to get notification by id')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async listNotifications(filter?: ListNotificationsFilter): Promise<NotificationRecord[]> {
+    try {
+      const conditions: any[] = []
+      if (filter?.userId) {
+        conditions.push(this.sql`user_id = ${filter.userId}`)
+      }
+      if (filter?.channel) {
+        conditions.push(this.sql`channel = ${filter.channel}`)
+      }
+      if (filter?.status) {
+        conditions.push(this.sql`status = ${filter.status}`)
+      }
+
+      const whereClause =
+        conditions.length > 0
+          ? this.sql`WHERE ${conditions.reduce((acc, curr) => this.sql`${acc} AND ${curr}`)}`
+          : this.sql``
+
+      const limit = filter?.limit ?? 50
+      const offset = filter?.offset ?? 0
+
+      const rows = await this.sql`
+        SELECT
+          id,
+          user_id,
+          channel,
+          payload,
+          status,
+          retry_count,
+          next_retry_at::text,
+          error_message,
+          created_at::text,
+          updated_at::text
+        FROM notification_outbox
+        ${whereClause}
+        ORDER BY created_at DESC
+        LIMIT ${limit}
+        OFFSET ${offset}
+      `
+      return rows.map((r) => this.mapNotificationRow(r))
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, filter }, 'Failed to list notifications')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async claimPendingNotifications(params?: ClaimPendingNotificationsParams): Promise<NotificationRecord[]> {
+    const limit = params?.limit ?? 10
+    const maxRetries = params?.maxRetries ?? 3
+    const nowIso = params?.now ? new Date(params.now).toISOString() : new Date().toISOString()
+
+    try {
+      const rows = await this.sql`
+        WITH claimable AS (
+          SELECT id
+          FROM notification_outbox
+          WHERE status = 'pending'
+            AND (next_retry_at IS NULL OR next_retry_at <= ${nowIso}::timestamptz)
+            AND retry_count < ${maxRetries}
+          ORDER BY created_at ASC
+          LIMIT ${limit}
+          FOR UPDATE SKIP LOCKED
+        )
+        UPDATE notification_outbox
+        SET status = 'processing', updated_at = NOW()
+        FROM claimable
+        WHERE notification_outbox.id = claimable.id
+        RETURNING
+          notification_outbox.id,
+          notification_outbox.user_id,
+          notification_outbox.channel,
+          notification_outbox.payload,
+          notification_outbox.status,
+          notification_outbox.retry_count,
+          notification_outbox.next_retry_at::text,
+          notification_outbox.error_message,
+          notification_outbox.created_at::text,
+          notification_outbox.updated_at::text
+      `
+      return rows.map((r) => this.mapNotificationRow(r))
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to claim pending notifications')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async updateNotificationStatus(params: UpdateNotificationStatusParams): Promise<NotificationRecord> {
+    try {
+      const nextRetryAtVal = params.nextRetryAt ? new Date(params.nextRetryAt).toISOString() : null
+      const rows = await this.sql`
+        UPDATE notification_outbox
+        SET
+          status = ${params.status},
+          error_message = ${params.errorMessage !== undefined ? params.errorMessage : null},
+          retry_count = ${params.retryCount !== undefined ? params.retryCount : this.sql`retry_count`},
+          next_retry_at = ${params.nextRetryAt !== undefined ? (nextRetryAtVal ? this.sql`${nextRetryAtVal}::timestamptz` : null) : this.sql`next_retry_at`},
+          updated_at = NOW()
+        WHERE id = ${params.id}
+        RETURNING
+          id,
+          user_id,
+          channel,
+          payload,
+          status,
+          retry_count,
+          next_retry_at::text,
+          error_message,
+          created_at::text,
+          updated_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.notFound('Notification')
+      }
+      return this.mapNotificationRow(rows[0])
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to update notification status')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async deleteNotification(id: string): Promise<void> {
+    try {
+      await this.sql`DELETE FROM notification_outbox WHERE id = ${id}`
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to delete notification')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  private mapNotificationRow(row: any): NotificationRecord {
+    // SAFETY: payload is stored as JSONB and returned as object
+    const payload = (row.payload ?? {}) as NotificationPayload
+    return {
+      id: row.id,
+      user_id: row.user_id,
+      // SAFETY: channel is validated by table check constraint
+      channel: row.channel as NotificationChannel,
+      payload,
+      // SAFETY: status is validated by table check constraint
+      status: row.status as NotificationStatus,
+      retry_count: Number(row.retry_count ?? 0),
+      next_retry_at: row.next_retry_at ? new Date(row.next_retry_at).toISOString() : null,
+      error_message: row.error_message ?? null,
+      created_at: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
+      updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString(),
+    }
+  }
 
   async checkHealth(): Promise<boolean> {
     try {

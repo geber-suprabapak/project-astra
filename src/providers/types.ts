@@ -768,6 +768,14 @@ export interface DomainStore {
   saveFaceEnrollment(params: SaveFaceEnrollmentParams): Promise<FaceEnrollmentRecord>
   deleteFaceEnrollment(userId: string): Promise<void>
 
+  // Notification Outbox domain methods
+  enqueueNotification(params: EnqueueNotificationParams): Promise<NotificationRecord>
+  getNotificationById(id: string): Promise<NotificationRecord | null>
+  listNotifications(filter?: ListNotificationsFilter): Promise<NotificationRecord[]>
+  claimPendingNotifications(params?: ClaimPendingNotificationsParams): Promise<NotificationRecord[]>
+  updateNotificationStatus(params: UpdateNotificationStatusParams): Promise<NotificationRecord>
+  deleteNotification(id: string): Promise<void>
+
   checkHealth(): Promise<boolean>
   close?(): Promise<void>
 }
@@ -858,5 +866,68 @@ export interface ObjectStorage {
 
 export type UserMetadataValue = string | number | boolean | null | undefined
 export type UserMetadata = Record<string, UserMetadataValue>
+
+export const notificationChannelSchema = z.enum(['push', 'email'])
+export type NotificationChannel = z.infer<typeof notificationChannelSchema>
+
+export const notificationStatusSchema = z.enum(['pending', 'processing', 'delivered', 'failed'])
+export type NotificationStatus = z.infer<typeof notificationStatusSchema>
+
+export const notificationPayloadValueSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.null(),
+  z.undefined(),
+  z.array(z.string()),
+  z.record(z.union([z.string(), z.number(), z.boolean(), z.null(), z.undefined()])),
+])
+export type NotificationPayloadValue = z.infer<typeof notificationPayloadValueSchema>
+
+export const notificationPayloadSchema = z.record(notificationPayloadValueSchema)
+export type NotificationPayload = z.infer<typeof notificationPayloadSchema>
+
+export interface NotificationRecord {
+  id: string
+  user_id: string
+  channel: NotificationChannel
+  payload: NotificationPayload
+  status: NotificationStatus
+  retry_count: number
+  next_retry_at?: string | null
+  error_message?: string | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface EnqueueNotificationParams {
+  userId: string
+  channel: NotificationChannel
+  payload: NotificationPayload
+  nextRetryAt?: string | null
+  status?: NotificationStatus
+}
+
+export interface ListNotificationsFilter {
+  userId?: string
+  channel?: NotificationChannel
+  status?: NotificationStatus
+  limit?: number
+  offset?: number
+}
+
+export interface UpdateNotificationStatusParams {
+  id: string
+  status: NotificationStatus
+  errorMessage?: string | null
+  retryCount?: number
+  nextRetryAt?: string | null
+}
+
+export interface ClaimPendingNotificationsParams {
+  limit?: number
+  maxRetries?: number
+  now?: Date | string
+}
 
 

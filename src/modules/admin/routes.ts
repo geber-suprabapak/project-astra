@@ -20,6 +20,7 @@ import {
   createScheduleSchema,
   createSchoolAdminSchema,
   createStaffSchema,
+  enqueueAdminNotificationSchema,
   enrollStudentSchema,
   exitStudentEnrollmentSchema,
   promoteStudentEnrollmentSchema,
@@ -54,14 +55,17 @@ import {
   createSchoolAdmin,
   createStaff,
   deleteAdminLeaveRequest,
+  deleteAdminNotification,
   deleteCalendarException,
   deleteLocation,
   deleteSchedule,
   disableStudent,
+  enqueueAdminNotification,
   enrollStudent,
   exitStudentEnrollment,
   generateStudentResetCode,
   getAdminLeaveRequest,
+  getAdminNotification,
   getAttendanceAttempt,
   getBootstrapStatus,
   getCalendarException,
@@ -75,6 +79,7 @@ import {
   getStudent,
   listAcademicPeriods,
   listAdminLeaveRequests,
+  listAdminNotifications,
   listAttendanceAttempts,
   listAttendances,
   listCalendarExceptions,
@@ -92,6 +97,7 @@ import {
   rejectStudent,
   requestStaffPasswordReset,
   resetStudentFaceEnrollment,
+  retryAdminNotification,
   setActiveAcademicPeriod,
   transferStudentEnrollment,
   updateAcademicPeriod,
@@ -108,6 +114,8 @@ import {
   attendanceAttemptStatusSchema,
   leaveRequestApprovalStatusSchema,
   leaveRequestCategorySchema,
+  notificationChannelSchema,
+  notificationStatusSchema,
   profileLifecycleStatusSchema,
 } from '../../providers/types.js'
 
@@ -1344,6 +1352,122 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
 
   router.delete('/leave-requests/:id', handleDeleteLeaveRequest)
   router.delete('/permits/:id', handleDeleteLeaveRequest)
+
+  // ---------------------------------------------------------------------------
+  // Notification Outbox Admin Routes
+  // ---------------------------------------------------------------------------
+
+  // GET /v1/admin/notifications & /v1/admin/notifications/outbox
+  const handleListNotifications = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const userId = c.req.query('userId') || c.req.query('user_id')
+    const channelParam = c.req.query('channel')
+    const statusParam = c.req.query('status')
+    const limitParam = c.req.query('limit')
+    const offsetParam = c.req.query('offset')
+
+    const channelParsed = channelParam ? notificationChannelSchema.safeParse(channelParam) : undefined
+    const statusParsed = statusParam ? notificationStatusSchema.safeParse(statusParam) : undefined
+
+    const limit = limitParam ? Number.parseInt(limitParam, 10) : undefined
+    const offset = offsetParam ? Number.parseInt(offsetParam, 10) : undefined
+
+    const notifications = await listAdminNotifications({
+      filter: {
+        userId: userId || undefined,
+        channel: channelParsed?.success ? channelParsed.data : undefined,
+        status: statusParsed?.success ? statusParsed.data : undefined,
+        limit,
+        offset,
+      },
+      actorRole: c.get('profileRole'),
+      actorId: c.get('userId'),
+      providers,
+    })
+
+    return successResponse(c, notifications, 'Notifications retrieved successfully.')
+  }
+
+  router.get('/notifications', handleListNotifications)
+  router.get('/notifications/outbox', handleListNotifications)
+
+  // GET /v1/admin/notifications/:id
+  const handleGetNotification = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const notification = await getAdminNotification({
+      id,
+      actorRole: c.get('profileRole'),
+      actorId: c.get('userId'),
+      providers,
+    })
+    return successResponse(c, notification, 'Notification retrieved successfully.')
+  }
+
+  router.get('/notifications/:id', handleGetNotification)
+
+  // POST /v1/admin/notifications & /v1/admin/notifications/enqueue
+  const handleEnqueueNotification = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json().catch(() => ({}))
+    const parsed = enqueueAdminNotificationSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+
+    const userId = parsed.data.user_id || parsed.data.userId || ''
+    const nextRetryAt = parsed.data.next_retry_at || parsed.data.nextRetryAt
+
+    const notification = await enqueueAdminNotification({
+      userId,
+      channel: parsed.data.channel,
+      payload: parsed.data.payload,
+      nextRetryAt: nextRetryAt ?? null,
+      actorRole: c.get('profileRole'),
+      actorId: c.get('userId'),
+      providers,
+    })
+
+    return successResponse(c, notification, 'Notification enqueued successfully.')
+  }
+
+  router.post('/notifications', handleEnqueueNotification)
+  router.post('/notifications/enqueue', handleEnqueueNotification)
+
+  // POST|PATCH /v1/admin/notifications/:id/retry
+  const handleRetryNotification = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const body = await c.req.json().catch(() => ({}))
+
+    const retried = await retryAdminNotification({
+      id,
+      resetCount: body.reset_count !== false && body.resetCount !== false,
+      actorRole: c.get('profileRole'),
+      actorId: c.get('userId'),
+      providers,
+    })
+
+    return successResponse(c, retried, 'Notification retry scheduled successfully.')
+  }
+
+  router.post('/notifications/:id/retry', handleRetryNotification)
+  router.patch('/notifications/:id/retry', handleRetryNotification)
+
+  // DELETE /v1/admin/notifications/:id
+  const handleDeleteNotification = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    await deleteAdminNotification({
+      id,
+      actorRole: c.get('profileRole'),
+      actorId: c.get('userId'),
+      providers,
+    })
+    return successResponse(c, { id }, 'Notification deleted successfully.')
+  }
+
+  router.delete('/notifications/:id', handleDeleteNotification)
 
   return router
 }

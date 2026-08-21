@@ -1257,6 +1257,125 @@ describe('PostgresDomainStore (Greenfield)', () => {
 
     await expect(store.deleteLeaveRequest('leave-123')).resolves.toBeUndefined()
   })
+
+  it('handles notification outbox operations: enqueue, get, list, claim, updateStatus, and delete', async () => {
+    const mockSql = createMockSql((strings: TemplateStringsArray) => {
+      const query = strings.join('?')
+      if (query.includes('INSERT INTO notification_outbox')) {
+        return [
+          {
+            id: 'notif-123',
+            user_id: 'user-1',
+            channel: 'push',
+            payload: { title: 'Test Title', body: 'Test Body' },
+            status: 'pending',
+            retry_count: 0,
+            next_retry_at: null,
+            error_message: null,
+            created_at: '2026-08-21T07:00:00Z',
+            updated_at: '2026-08-21T07:00:00Z',
+          },
+        ]
+      }
+      if (query.includes('FOR UPDATE SKIP LOCKED')) {
+        return [
+          {
+            id: 'notif-123',
+            user_id: 'user-1',
+            channel: 'push',
+            payload: { title: 'Test Title', body: 'Test Body' },
+            status: 'processing',
+            retry_count: 0,
+            next_retry_at: null,
+            error_message: null,
+            created_at: '2026-08-21T07:00:00Z',
+            updated_at: '2026-08-21T07:00:00Z',
+          },
+        ]
+      }
+      if (query.includes('SELECT') && query.includes('FROM notification_outbox') && query.includes('WHERE id =')) {
+        return [
+          {
+            id: 'notif-123',
+            user_id: 'user-1',
+            channel: 'push',
+            payload: { title: 'Test Title', body: 'Test Body' },
+            status: 'pending',
+            retry_count: 0,
+            next_retry_at: null,
+            error_message: null,
+            created_at: '2026-08-21T07:00:00Z',
+            updated_at: '2026-08-21T07:00:00Z',
+          },
+        ]
+      }
+      if (query.includes('SELECT') && query.includes('FROM notification_outbox')) {
+        return [
+          {
+            id: 'notif-123',
+            user_id: 'user-1',
+            channel: 'push',
+            payload: { title: 'Test Title', body: 'Test Body' },
+            status: 'pending',
+            retry_count: 0,
+            next_retry_at: null,
+            error_message: null,
+            created_at: '2026-08-21T07:00:00Z',
+            updated_at: '2026-08-21T07:00:00Z',
+          },
+        ]
+      }
+      if (query.includes('UPDATE notification_outbox')) {
+        return [
+          {
+            id: 'notif-123',
+            user_id: 'user-1',
+            channel: 'push',
+            payload: { title: 'Test Title', body: 'Test Body' },
+            status: 'delivered',
+            retry_count: 0,
+            next_retry_at: null,
+            error_message: null,
+            created_at: '2026-08-21T07:00:00Z',
+            updated_at: '2026-08-21T07:00:00Z',
+          },
+        ]
+      }
+      if (query.includes('DELETE FROM notification_outbox')) {
+        return []
+      }
+      return []
+    })
+
+    const store = new PostgresDomainStore({ sql: mockSql })
+
+    const enqueued = await store.enqueueNotification({
+      userId: 'user-1',
+      channel: 'push',
+      payload: { title: 'Test Title', body: 'Test Body' },
+    })
+    expect(enqueued.id).toBe('notif-123')
+    expect(enqueued.channel).toBe('push')
+    expect(enqueued.status).toBe('pending')
+
+    const fetched = await store.getNotificationById('notif-123')
+    expect(fetched?.id).toBe('notif-123')
+
+    const list = await store.listNotifications({ userId: 'user-1', channel: 'push' })
+    expect(list).toHaveLength(1)
+
+    const claimed = await store.claimPendingNotifications({ limit: 5, maxRetries: 3 })
+    expect(claimed).toHaveLength(1)
+    expect(claimed[0].status).toBe('processing')
+
+    const updated = await store.updateNotificationStatus({
+      id: 'notif-123',
+      status: 'delivered',
+    })
+    expect(updated.status).toBe('delivered')
+
+    await expect(store.deleteNotification('notif-123')).resolves.toBeUndefined()
+  })
 })
 
 

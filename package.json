@@ -15,7 +15,8 @@
     "test:integration": "vitest run tests/integration",
     "db:migrate": "bun scripts/migrate.ts",
     "auth:token": "bun scripts/get-jwt-token.ts",
-    "smoke:staging": "bun scripts/staging-smoke.ts"
+    "smoke:staging": "bun scripts/staging-smoke.ts",
+    "worker:notifications": "bun src/workers/notifications.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.14",

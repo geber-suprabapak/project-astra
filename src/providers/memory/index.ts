@@ -18,6 +18,7 @@ import {
   type ClassEnrollment,
   type ClassEnrollmentStatus,
   type ClassRoom,
+  type ClaimPendingNotificationsParams,
   type CreateAcademicPeriodParams,
   type CreateCalendarExceptionParams,
   type CreateClassParams,
@@ -32,6 +33,7 @@ import {
   type CreateSchoolParams,
   type CreateStaffParams,
   type DomainStore,
+  type EnqueueNotificationParams,
   type EnrollStudentParams,
   type ExitStudentEnrollmentParams,
   type FaceEnrollmentRecord,
@@ -45,7 +47,9 @@ import {
   type InsertPermitData,
   type LeaveRequest,
   type ListLeaveRequestsFilter,
+  type ListNotificationsFilter,
   type Location,
+  type NotificationRecord,
   type ObjectStorage,
   type PasswordResetCode,
   type Permission,
@@ -70,6 +74,7 @@ import {
   type UpdateScheduleParams,
   type UpdateStaffParams,
   type UpdateLeaveRequestStatusParams,
+  type UpdateNotificationStatusParams,
   type UserMetadata,
   type UserProfile,
 } from '../types.js'
@@ -281,6 +286,7 @@ export class MemoryDomainStore implements DomainStore {
   public resetCodes: PasswordResetCode[] = []
   public files = new Map<string, FileRecord>()
   public faceEnrollments = new Map<string, FaceEnrollmentRecord>()
+  public notifications = new Map<string, NotificationRecord>()
   public attendanceAttempts: AttendanceAttempt[] = []
   public attendancesList: AttendanceRecord[] = []
   public signupOpen = false
@@ -1943,6 +1949,99 @@ export class MemoryDomainStore implements DomainStore {
         updated_at: new Date().toISOString(),
       })
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Notification Outbox domain methods
+  // ---------------------------------------------------------------------------
+
+  async enqueueNotification(params: EnqueueNotificationParams): Promise<NotificationRecord> {
+    const now = new Date().toISOString()
+    const record: NotificationRecord = {
+      id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      user_id: params.userId,
+      channel: params.channel,
+      payload: { ...params.payload },
+      status: params.status ?? 'pending',
+      retry_count: 0,
+      next_retry_at: params.nextRetryAt ?? null,
+      error_message: null,
+      created_at: now,
+      updated_at: now,
+    }
+    this.notifications.set(record.id, record)
+    return { ...record }
+  }
+
+  async getNotificationById(id: string): Promise<NotificationRecord | null> {
+    const record = this.notifications.get(id)
+    return record ? { ...record } : null
+  }
+
+  async listNotifications(filter?: ListNotificationsFilter): Promise<NotificationRecord[]> {
+    let result = Array.from(this.notifications.values())
+    if (filter?.userId) {
+      result = result.filter((n) => n.user_id === filter.userId)
+    }
+    if (filter?.channel) {
+      result = result.filter((n) => n.channel === filter.channel)
+    }
+    if (filter?.status) {
+      result = result.filter((n) => n.status === filter.status)
+    }
+    result.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
+    if (filter?.offset) {
+      result = result.slice(filter.offset)
+    }
+    if (filter?.limit) {
+      result = result.slice(0, filter.limit)
+    }
+    return result.map((r) => ({ ...r }))
+  }
+
+  async claimPendingNotifications(params?: ClaimPendingNotificationsParams): Promise<NotificationRecord[]> {
+    const limit = params?.limit ?? 10
+    const maxRetries = params?.maxRetries ?? 3
+    const now = params?.now ? new Date(params.now).getTime() : Date.now()
+    const claimed: NotificationRecord[] = []
+
+    for (const record of this.notifications.values()) {
+      if (claimed.length >= limit) break
+      if (record.status !== 'pending') continue
+      if (record.retry_count >= maxRetries) continue
+      if (record.next_retry_at && new Date(record.next_retry_at).getTime() > now) continue
+
+      const updated: NotificationRecord = {
+        ...record,
+        status: 'processing',
+        updated_at: new Date().toISOString(),
+      }
+      this.notifications.set(record.id, updated)
+      claimed.push({ ...updated })
+    }
+
+    return claimed
+  }
+
+  async updateNotificationStatus(params: UpdateNotificationStatusParams): Promise<NotificationRecord> {
+    const record = this.notifications.get(params.id)
+    if (!record) {
+      throw AppError.notFound('Notification')
+    }
+    const updated: NotificationRecord = {
+      ...record,
+      status: params.status,
+      retry_count: params.retryCount !== undefined ? params.retryCount : record.retry_count,
+      next_retry_at: params.nextRetryAt !== undefined ? params.nextRetryAt : record.next_retry_at,
+      error_message: params.errorMessage !== undefined ? params.errorMessage : record.error_message,
+      updated_at: new Date().toISOString(),
+    }
+    this.notifications.set(params.id, updated)
+    return { ...updated }
+  }
+
+  async deleteNotification(id: string): Promise<void> {
+    this.notifications.delete(id)
   }
 
   async checkHealth(): Promise<boolean> {

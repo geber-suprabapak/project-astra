@@ -15,7 +15,11 @@ import type {
   IdentityUser,
   LeaveRequest,
   ListLeaveRequestsFilter,
+  ListNotificationsFilter,
   Location,
+  NotificationChannel,
+  NotificationPayload,
+  NotificationRecord,
   Permission,
   ProfileLifecycleStatus,
   RejectedRosterRow,
@@ -782,6 +786,16 @@ export async function approveStudent(params: {
     },
   })
 
+  await params.providers.domainStore.enqueueNotification({
+    userId: params.userId,
+    channel: 'push',
+    payload: {
+      title: 'Akun Disetujui',
+      body: 'Pendaftaran akun Anda telah disetujui oleh admin sekolah.',
+      type: 'student_approved',
+    },
+  })
+
   return updated
 }
 
@@ -823,6 +837,17 @@ export async function rejectStudent(params: {
       reason: params.reason ?? null,
       previous_status: profile.lifecycle_status,
       new_status: 'rejected',
+    },
+  })
+
+  await params.providers.domainStore.enqueueNotification({
+    userId: params.userId,
+    channel: 'email',
+    payload: {
+      title: 'Pendaftaran Akun Ditolak',
+      body: `Pendaftaran akun Anda ditolak.${params.reason ? ` Alasan: ${params.reason}` : ''}`,
+      rejection_reason: params.reason ?? null,
+      type: 'student_rejected',
     },
   })
 
@@ -915,6 +940,18 @@ export async function generateStudentResetCode(params: {
     details: {
       nis: profile.nis,
       expires_at: expiresAt,
+    },
+  })
+
+  await params.providers.domainStore.enqueueNotification({
+    userId: params.userId,
+    channel: 'email',
+    payload: {
+      title: 'Kode Reset Kata Sandi',
+      body: `Kode verifikasi reset kata sandi Anda: ${code}`,
+      code,
+      expires_at: expiresAt,
+      type: 'password_reset_code',
     },
   })
 
@@ -1778,6 +1815,19 @@ export async function createManualAttendance(params: {
     },
   })
 
+  await params.providers.domainStore.enqueueNotification({
+    userId: student.user_id,
+    channel: 'push',
+    payload: {
+      title: 'Presensi Manual Dicatat',
+      body: `Presensi manual (${params.actionType}) berhasil dicatat. Status: ${attendance.status}.`,
+      action_type: params.actionType,
+      status: attendance.status,
+      date: attendance.date,
+      type: 'manual_attendance',
+    },
+  })
+
   return attendance
 }
 
@@ -1928,6 +1978,19 @@ export async function approveLeaveRequest(params: {
     },
   })
 
+  await params.providers.domainStore.enqueueNotification({
+    userId: lr.user_id,
+    channel: 'push',
+    payload: {
+      title: 'Pengajuan Izin Disetujui',
+      body: `Pengajuan izin Anda untuk tanggal ${lr.date} telah disetujui.`,
+      category: lr.category,
+      date: lr.date,
+      leave_request_id: lr.id,
+      type: 'leave_approved',
+    },
+  })
+
   return mapLeaveRequestWithAttachment(updated, params.providers)
 }
 
@@ -1966,6 +2029,20 @@ export async function rejectLeaveRequest(params: {
       category: lr.category,
       date: lr.date,
       rejection_reason: params.reason ?? null,
+    },
+  })
+
+  await params.providers.domainStore.enqueueNotification({
+    userId: lr.user_id,
+    channel: 'push',
+    payload: {
+      title: 'Pengajuan Izin Ditolak',
+      body: `Pengajuan izin Anda untuk tanggal ${lr.date} ditolak.${params.reason ? ` Alasan: ${params.reason}` : ''}`,
+      category: lr.category,
+      date: lr.date,
+      leave_request_id: lr.id,
+      rejection_reason: params.reason ?? null,
+      type: 'leave_rejected',
     },
   })
 
@@ -2015,5 +2092,144 @@ export async function deleteAdminLeaveRequest(params: {
     },
   })
 }
+
+// ---------------------------------------------------------------------------
+// Notification Outbox Admin Service Functions
+// ---------------------------------------------------------------------------
+
+export async function listAdminNotifications(params: {
+  filter?: ListNotificationsFilter
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<NotificationRecord[]> {
+  if (!params.actorRole || !['platform_admin', 'school_admin', 'staff', 'teacher'].includes(params.actorRole)) {
+    throw AppError.forbidden()
+  }
+  return params.providers.domainStore.listNotifications(params.filter)
+}
+
+export async function getAdminNotification(params: {
+  id: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<NotificationRecord> {
+  if (!params.actorRole || !['platform_admin', 'school_admin', 'staff', 'teacher'].includes(params.actorRole)) {
+    throw AppError.forbidden()
+  }
+  const notif = await params.providers.domainStore.getNotificationById(params.id)
+  if (!notif) {
+    throw AppError.notFound('Notification')
+  }
+  return notif
+}
+
+export async function enqueueAdminNotification(params: {
+  userId: string
+  channel: NotificationChannel
+  payload: NotificationPayload
+  nextRetryAt?: string | null
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<NotificationRecord> {
+  if (!params.actorRole || !['platform_admin', 'school_admin', 'staff', 'teacher'].includes(params.actorRole)) {
+    throw AppError.forbidden()
+  }
+
+  const user = await params.providers.domainStore.getUserProfile(params.userId).catch(() => null)
+  if (!user) {
+    throw AppError.notFound('User profile')
+  }
+
+  const notification = await params.providers.domainStore.enqueueNotification({
+    userId: params.userId,
+    channel: params.channel,
+    payload: params.payload,
+    nextRetryAt: params.nextRetryAt ?? null,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'enqueue_notification',
+    entity_type: 'notification',
+    entity_id: notification.id,
+    details: {
+      user_id: params.userId,
+      channel: params.channel,
+    },
+  })
+
+  return notification
+}
+
+export async function retryAdminNotification(params: {
+  id: string
+  resetCount?: boolean
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<NotificationRecord> {
+  if (!params.actorRole || !['platform_admin', 'school_admin', 'staff', 'teacher'].includes(params.actorRole)) {
+    throw AppError.forbidden()
+  }
+
+  const existing = await params.providers.domainStore.getNotificationById(params.id)
+  if (!existing) {
+    throw AppError.notFound('Notification')
+  }
+
+  const updated = await params.providers.domainStore.updateNotificationStatus({
+    id: params.id,
+    status: 'pending',
+    retryCount: params.resetCount !== false ? 0 : existing.retry_count,
+    nextRetryAt: null,
+    errorMessage: null,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'retry_notification',
+    entity_type: 'notification',
+    entity_id: params.id,
+    details: {
+      previous_status: existing.status,
+      previous_retries: existing.retry_count,
+    },
+  })
+
+  return updated
+}
+
+export async function deleteAdminNotification(params: {
+  id: string
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<void> {
+  if (!params.actorRole || !['platform_admin', 'school_admin'].includes(params.actorRole)) {
+    throw AppError.forbidden()
+  }
+
+  const existing = await params.providers.domainStore.getNotificationById(params.id)
+  if (!existing) {
+    throw AppError.notFound('Notification')
+  }
+
+  await params.providers.domainStore.deleteNotification(params.id)
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'delete_notification',
+    entity_type: 'notification',
+    entity_id: params.id,
+    details: {
+      channel: existing.channel,
+      user_id: existing.user_id,
+    },
+  })
+}
+
 
 
