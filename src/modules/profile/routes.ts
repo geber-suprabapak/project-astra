@@ -6,12 +6,7 @@ import { AppError } from '../../lib/errors/app-error.js'
 import { defaultProviders } from '../../providers/index.js'
 import type { AppProviders } from '../../providers/types.js'
 import { ClearAvatarSchema, UpdatePasswordSchema } from './schema.js'
-import {
-  changePassword,
-  getProfile,
-  getStudentEnrollmentHistory,
-  updateAvatar,
-} from './service.js'
+import { changePassword, getProfile, getStudentEnrollmentHistory, updateAvatar } from './service.js'
 import type { AppEnv } from '../../types/context.js'
 
 export interface ProfileRouterDeps {
@@ -41,7 +36,6 @@ export function createProfileRouter(deps: ProfileRouterDeps = {}) {
 
   router.get('/enrollments', handleEnrollments)
   router.get('/enrollment-history', handleEnrollments)
-
 
   // PATCH /v1/mobile/profile/avatar
   router.patch('/avatar', rateLimits.profileAvatar, async (c) => {

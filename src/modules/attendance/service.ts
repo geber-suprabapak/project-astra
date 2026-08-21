@@ -1,11 +1,7 @@
 import { AppError } from '../../lib/errors/app-error.js'
 import { ErrorCode } from '../../lib/errors/codes.js'
 import { defaultProviders } from '../../providers/index.js'
-import type {
-  AppProviders,
-  AttendanceRecord,
-  Schedule,
-} from '../../providers/types.js'
+import type { AppProviders, AttendanceRecord, Schedule } from '../../providers/types.js'
 import {
   getDayKeyWIB,
   getTodayWIB,
@@ -142,7 +138,10 @@ export async function runGateChecks(
     }
   }
 
-  const activeEnrollment = await actualProviders.domainStore.getActiveClassEnrollment(params.userId, activePeriod.id)
+  const activeEnrollment = await actualProviders.domainStore.getActiveClassEnrollment(
+    params.userId,
+    activePeriod.id,
+  )
   if (!activeEnrollment) {
     checks.schedule = 'fail'
     return {
@@ -159,7 +158,10 @@ export async function runGateChecks(
     }
   }
 
-  const calendarException = await actualProviders.domainStore.getCalendarExceptionByDate(todayWIB, activePeriod.id)
+  const calendarException = await actualProviders.domainStore.getCalendarExceptionByDate(
+    todayWIB,
+    activePeriod.id,
+  )
   if (calendarException && calendarException.is_holiday) {
     checks.schedule = 'fail'
     return {
@@ -442,7 +444,7 @@ export async function submit(
     identifyResult.status === 'match' ||
     identifyResult.status === 'success'
 
-  const processTimeMs = identifyResult.processTimeMs ?? (Date.now() - startMs)
+  const processTimeMs = identifyResult.processTimeMs ?? Date.now() - startMs
 
   if (!isMatch) {
     const reason = identifyResult.message || 'Face does not match enrolled face.'
@@ -495,13 +497,14 @@ export async function submit(
     processed_ms: processTimeMs,
   }
 }
-async function requireApprovedStudent(
-  userId: string,
-  providers: AppProviders,
-): Promise<void> {
+async function requireApprovedStudent(userId: string, providers: AppProviders): Promise<void> {
   const profile = await providers.domainStore.getUserProfile(userId)
   if (profile.role !== 'student' || profile.lifecycle_status !== 'approved') {
-    throw new AppError(ErrorCode.FORBIDDEN, 403, 'Only approved students can access attendance history.')
+    throw new AppError(
+      ErrorCode.FORBIDDEN,
+      403,
+      'Only approved students can access attendance history.',
+    )
   }
 }
 
@@ -572,7 +575,9 @@ export async function getAttendanceCalendar(params: {
     params.providers.domainStore.getPermitHistory(params.userId),
     params.providers.domainStore.listCalendarExceptions({ startDate, endDate }),
   ])
-  const monthAttendance = attendance.filter((record) => record.date >= startDate && record.date <= endDate)
+  const monthAttendance = attendance.filter(
+    (record) => record.date >= startDate && record.date <= endDate,
+  )
   const approvedPermits = permits.filter(
     (permit) =>
       permit.approval_status === 'approved' &&
@@ -639,7 +644,8 @@ export async function getAttendanceCalendar(params: {
     end_date: endDate,
     stats: {
       hadir: monthAttendance.filter((record) => record.status === 'Hadir').length > 0 ? 1 : 0,
-      terlambat: monthAttendance.filter((record) => record.status === 'Terlambat').length > 0 ? 1 : 0,
+      terlambat:
+        monthAttendance.filter((record) => record.status === 'Terlambat').length > 0 ? 1 : 0,
       alpha: monthAttendance.filter((record) => record.status === 'Alpha').length > 0 ? 1 : 0,
       sakit: approvedPermits.filter((permit) => permit.kategori_izin === 'sakit').length,
       izin: approvedPermits.filter((permit) => permit.kategori_izin !== 'sakit').length,

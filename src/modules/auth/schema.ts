@@ -14,7 +14,7 @@ export const studentResetPasswordSchema = z.object({
   code: z.string().trim().min(1, 'Reset code is required'),
   new_password: z.string().min(8, 'New password must be at least 8 characters'),
 })
- 
+
 export const changePasswordSchema = z.object({
   new_password: z.string().min(8, 'New password must be at least 8 characters'),
 })

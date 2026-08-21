@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  getProfile,
-  getStudentEnrollmentHistory,
-} from '../../../src/modules/profile/service.js'
+import { getProfile, getStudentEnrollmentHistory } from '../../../src/modules/profile/service.js'
 import {
   getAttendanceCalendar,
   getAttendanceHistory,
@@ -22,7 +19,11 @@ function setupTestEnvironment() {
 
   const defaultRobinClient: RobinClient = {
     checkReadiness: async () => ({ healthy: true }),
-    getEnrollmentStatus: async () => ({ status: 'enrolled', embeddingCount: 10, message: 'Ready.' }),
+    getEnrollmentStatus: async () => ({
+      status: 'enrolled',
+      embeddingCount: 10,
+      message: 'Ready.',
+    }),
     enroll: async () => ({ imagesProcessed: 10, imagesFailed: 0, totalEmbeddings: 10 }),
     identify: async () => ({
       status: 'ok',

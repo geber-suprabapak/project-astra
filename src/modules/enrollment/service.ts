@@ -146,7 +146,10 @@ export async function deleteEnrollment(params: {
   const actorId = params.actorId ?? params.userId
 
   const profile = await providers.domainStore.getUserProfile(params.userId)
-  if (actorId === params.userId && (profile.lifecycle_status !== 'approved' || profile.role !== 'student')) {
+  if (
+    actorId === params.userId &&
+    (profile.lifecycle_status !== 'approved' || profile.role !== 'student')
+  ) {
     throw AppError.forbidden('Only approved students can manage face enrollment.')
   }
 
@@ -165,4 +168,3 @@ export async function deleteEnrollment(params: {
     },
   })
 }
-

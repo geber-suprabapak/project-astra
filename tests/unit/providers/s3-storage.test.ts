@@ -42,7 +42,9 @@ describe('S3ObjectStorage', () => {
     })
 
     it('returns false when S3 returns 404 Not Found (missing bucket)', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(new Response('Bucket Not Found', { status: 404 }))
+      globalThis.fetch = vi
+        .fn()
+        .mockResolvedValue(new Response('Bucket Not Found', { status: 404 }))
       const storage = new S3ObjectStorage(storageOptions)
 
       const isHealthy = await storage.checkHealth()
@@ -69,9 +71,12 @@ describe('S3ObjectStorage', () => {
   describe('uploadAvatar and uploadPermitAttachment error sanitization', () => {
     it('sanitizes S3 upload error details without leaking raw XML to caller', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response('<Error><Code>AccessDenied</Code><Message>Secret Key invalid</Message></Error>', {
-          status: 403,
-        }),
+        new Response(
+          '<Error><Code>AccessDenied</Code><Message>Secret Key invalid</Message></Error>',
+          {
+            status: 403,
+          },
+        ),
       )
       const storage = new S3ObjectStorage(storageOptions)
 

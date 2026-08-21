@@ -19,9 +19,26 @@ function createGatedEnvironment(): GatedEnvironment {
   const objectStorage = new MemoryObjectStorage()
   const robinClient: RobinClient = {
     checkReadiness: async () => ({ healthy: true, modelReady: true, qdrantConnected: true }),
-    getEnrollmentStatus: async () => ({ status: 'enrolled', embeddingCount: 1, message: 'Enrolled' }),
-    enroll: async () => ({ status: 'ok', userId: 'u1', samplesReceived: 1, embeddingsCreated: 1, message: 'Done' }),
-    identify: async () => ({ status: 'match', candidateId: 'u1', confidence: 0.9, threshold: 0.7, qualityScore: 0.9, processTimeMs: 1 }),
+    getEnrollmentStatus: async () => ({
+      status: 'enrolled',
+      embeddingCount: 1,
+      message: 'Enrolled',
+    }),
+    enroll: async () => ({
+      status: 'ok',
+      userId: 'u1',
+      samplesReceived: 1,
+      embeddingsCreated: 1,
+      message: 'Done',
+    }),
+    identify: async () => ({
+      status: 'match',
+      candidateId: 'u1',
+      confidence: 0.9,
+      threshold: 0.7,
+      qualityScore: 0.9,
+      processTimeMs: 1,
+    }),
     deleteEnrollment: async () => {},
   }
   const providers: AppProviders = {

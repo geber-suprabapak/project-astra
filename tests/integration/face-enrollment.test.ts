@@ -60,7 +60,10 @@ function createTestEnvironment() {
   }
 
   // Pre-seed helper
-  const seedStudent = (id: string, lifecycleStatus: 'approved' | 'pending' | 'rejected' | 'disabled') => {
+  const seedStudent = (
+    id: string,
+    lifecycleStatus: 'approved' | 'pending' | 'rejected' | 'disabled',
+  ) => {
     domainStore.profiles.set(id, {
       user_id: id,
       full_name: `Student ${id}`,

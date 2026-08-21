@@ -25,7 +25,11 @@ function createIntegrationEnvironment() {
 
   const robinClient: RobinClient = {
     checkReadiness: async () => ({ healthy: true, modelReady: true, qdrantConnected: true }),
-    getEnrollmentStatus: async () => ({ status: 'enrolled', embeddingCount: 10, message: 'Ready.' }),
+    getEnrollmentStatus: async () => ({
+      status: 'enrolled',
+      embeddingCount: 10,
+      message: 'Ready.',
+    }),
     enroll: async () => ({ imagesProcessed: 10, imagesFailed: 0, totalEmbeddings: 10 }),
     identify: async () => ({
       status: 'ok',
@@ -299,9 +303,12 @@ describe('Show Student Profile and Attendance History Integration (Ticket 12)', 
     expect(jsonAll.data.items.every((i: any) => i.user_id === 'student-1')).toBe(true)
 
     // 2. Filtered by date
-    const resFiltered = await app.request('/v1/mobile/attendance?startDate=2026-08-11&endDate=2026-08-11', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    const resFiltered = await app.request(
+      '/v1/mobile/attendance?startDate=2026-08-11&endDate=2026-08-11',
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    )
     expect(resFiltered.status).toBe(200)
     const jsonFiltered = await resFiltered.json()
     expect(jsonFiltered.data.items.length).toBe(1)

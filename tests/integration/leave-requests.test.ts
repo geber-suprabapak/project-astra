@@ -24,7 +24,11 @@ function createIntegrationEnvironment() {
 
   const robinClient: RobinClient = {
     checkReadiness: async () => ({ healthy: true, modelReady: true, qdrantConnected: true }),
-    getEnrollmentStatus: async () => ({ status: 'enrolled', embeddingCount: 10, message: 'Ready.' }),
+    getEnrollmentStatus: async () => ({
+      status: 'enrolled',
+      embeddingCount: 10,
+      message: 'Ready.',
+    }),
     enroll: async () => ({ imagesProcessed: 10, imagesFailed: 0, totalEmbeddings: 10 }),
     identify: async () => ({
       status: 'ok',
@@ -48,7 +52,10 @@ function createIntegrationEnvironment() {
   return { domainStore, identityProvider, objectStorage, robinClient, providers, app }
 }
 
-async function setupTestUsers(domainStore: MemoryDomainStore, identityProvider: MemoryIdentityProvider) {
+async function setupTestUsers(
+  domainStore: MemoryDomainStore,
+  identityProvider: MemoryIdentityProvider,
+) {
   // 1. School
   await domainStore.createSchool({
     name: 'SMK Negeri 2 Banjarmasin',
@@ -218,7 +225,11 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     formData.append('category', 'sakit')
     formData.append('description', 'Demam tinggi dan batuk berdahak')
     formData.append('date', '2026-08-22')
-    formData.append('attachment', new Blob(['fake-image-bytes'], { type: 'image/jpeg' }), 'doctor_note.jpg')
+    formData.append(
+      'attachment',
+      new Blob(['fake-image-bytes'], { type: 'image/jpeg' }),
+      'doctor_note.jpg',
+    )
 
     const res = await app.request('/v1/mobile/permits', {
       method: 'POST',
@@ -281,8 +292,16 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     const { domainStore, identityProvider, app } = createIntegrationEnvironment()
     await setupTestUsers(domainStore, identityProvider)
 
-    const student1Token = tokenFor({ sub: 'student-1', roles: ['student'], scope: 'openid profile' })
-    const student2Token = tokenFor({ sub: 'student-2', roles: ['student'], scope: 'openid profile' })
+    const student1Token = tokenFor({
+      sub: 'student-1',
+      roles: ['student'],
+      scope: 'openid profile',
+    })
+    const student2Token = tokenFor({
+      sub: 'student-2',
+      roles: ['student'],
+      scope: 'openid profile',
+    })
 
     // Create leave request for student 1
     const s1Res = await app.request('/v1/mobile/permits', {
@@ -425,7 +444,9 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     expect(rejectRes.status).toBe(200)
     const rejectBody = await rejectRes.json()
     expect(rejectBody.data.approval_status).toBe('rejected')
-    expect(rejectBody.data.rejection_reason).toBe('Liburan pribadi tidak diizinkan pada hari efektif sekolah.')
+    expect(rejectBody.data.rejection_reason).toBe(
+      'Liburan pribadi tidak diizinkan pada hari efektif sekolah.',
+    )
     expect(rejectBody.data.rejected_at).toBeDefined()
 
     // Student cancels pending or admin deletes leave request

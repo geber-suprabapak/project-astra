@@ -209,19 +209,16 @@ export class OidcIdentityProvider implements IdentityProvider {
     }
 
     try {
-      const response = await fetch(
-        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            primaryEmail: params.email,
-            name: params.fullName,
-            password: params.password,
-            customData: { role: params.role },
-          }),
-        },
-      )
+      const response = await fetch(`${this.logtoEndpoint.replace(/\/$/, '')}/api/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          primaryEmail: params.email,
+          name: params.fullName,
+          password: params.password,
+          customData: { role: params.role },
+        }),
+      })
       if (!response.ok) {
         logger.error({ status: response.status, email: params.email }, 'Logto create user failed')
         if (response.status === 409 || response.status === 422) {

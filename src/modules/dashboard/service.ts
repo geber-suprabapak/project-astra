@@ -364,18 +364,19 @@ export async function getDashboard(
   const { startISO, endISO } = getWIBDayBounds(todayWIB)
 
   // All parallel fetches
-  const [profile, absences, activePermits, robinReady, enrollStatus, activePeriod] = await Promise.all([
-    providers.domainStore.getUserProfile(userId),
-    providers.domainStore.getTodayAbsences(userId, todayWIB),
-    providers.domainStore.getActivePermitsToday(userId, startISO, endISO),
-    providers.robinClient.checkReadiness(),
-    providers.robinClient.getEnrollmentStatus(token, requestId).catch(() => ({
-      status: 'not_enrolled' as const,
-      embeddingCount: 0,
-      message: 'Unavailable.',
-    })),
-    providers.domainStore.getActiveAcademicPeriod(),
-  ])
+  const [profile, absences, activePermits, robinReady, enrollStatus, activePeriod] =
+    await Promise.all([
+      providers.domainStore.getUserProfile(userId),
+      providers.domainStore.getTodayAbsences(userId, todayWIB),
+      providers.domainStore.getActivePermitsToday(userId, startISO, endISO),
+      providers.robinClient.checkReadiness(),
+      providers.robinClient.getEnrollmentStatus(token, requestId).catch(() => ({
+        status: 'not_enrolled' as const,
+        embeddingCount: 0,
+        message: 'Unavailable.',
+      })),
+      providers.domainStore.getActiveAcademicPeriod(),
+    ])
 
   const activeEnrollment = activePeriod
     ? await providers.domainStore.getActiveClassEnrollment(userId, activePeriod.id)

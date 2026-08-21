@@ -27,7 +27,11 @@ function createIntegrationEnvironment() {
 
   const robinClient: RobinClient = {
     checkReadiness: async () => ({ healthy: true, modelReady: true, qdrantConnected: true }),
-    getEnrollmentStatus: async () => ({ status: 'enrolled', embeddingCount: 10, message: 'Ready.' }),
+    getEnrollmentStatus: async () => ({
+      status: 'enrolled',
+      embeddingCount: 10,
+      message: 'Ready.',
+    }),
     enroll: async () => ({ imagesProcessed: 10, imagesFailed: 0, totalEmbeddings: 10 }),
     identify: async () => ({
       status: 'ok',
@@ -57,10 +61,22 @@ function createIntegrationEnvironment() {
     backoffBaseMs: 1000,
   })
 
-  return { domainStore, identityProvider, objectStorage, robinClient, transport, providers, app, worker }
+  return {
+    domainStore,
+    identityProvider,
+    objectStorage,
+    robinClient,
+    transport,
+    providers,
+    app,
+    worker,
+  }
 }
 
-async function setupTestUsers(domainStore: MemoryDomainStore, identityProvider: MemoryIdentityProvider) {
+async function setupTestUsers(
+  domainStore: MemoryDomainStore,
+  identityProvider: MemoryIdentityProvider,
+) {
   // 1. School
   await domainStore.createSchool({
     name: 'SMK Negeri 2 Banjarmasin',
@@ -193,7 +209,10 @@ describe('Ticket 11 — Notification Outbox & Worker Integration Tests', () => {
     expect(resetBody.success).toBe(true)
 
     // Verify outbox has reset code email notification
-    const notifications = await domainStore.listNotifications({ userId: 'student-1', channel: 'email' })
+    const notifications = await domainStore.listNotifications({
+      userId: 'student-1',
+      channel: 'email',
+    })
     expect(notifications).toHaveLength(1)
     expect(notifications[0].payload.type).toBe('password_reset_code')
     expect(notifications[0].payload.code).toBe(resetBody.data.code)
@@ -272,10 +291,18 @@ describe('Ticket 11 — Notification Outbox & Worker Integration Tests', () => {
     expect(current?.retry_count).toBe(1)
 
     // Clear next_retry_at for fast test execution
-    await domainStore.updateNotificationStatus({ id: notificationId, status: 'pending', nextRetryAt: null })
+    await domainStore.updateNotificationStatus({
+      id: notificationId,
+      status: 'pending',
+      nextRetryAt: null,
+    })
     await worker.processBatch()
 
-    await domainStore.updateNotificationStatus({ id: notificationId, status: 'pending', nextRetryAt: null })
+    await domainStore.updateNotificationStatus({
+      id: notificationId,
+      status: 'pending',
+      nextRetryAt: null,
+    })
     await worker.processBatch()
 
     current = await domainStore.getNotificationById(notificationId)

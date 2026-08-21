@@ -245,11 +245,7 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
       providers,
     })
 
-    return successResponse(
-      c,
-      report,
-      'Roster report accepted and canonical records committed.',
-    )
+    return successResponse(c, report, 'Roster report accepted and canonical records committed.')
   })
 
   // POST /v1/admin/bootstrap/signup/open
@@ -822,7 +818,8 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
     }
     const result = await promoteStudentEnrollment({
       userId: parsed.data.user_id ?? parsed.data.userId!,
-      fromAcademicPeriodId: parsed.data.from_academic_period_id ?? parsed.data.fromAcademicPeriodId!,
+      fromAcademicPeriodId:
+        parsed.data.from_academic_period_id ?? parsed.data.fromAcademicPeriodId!,
       toAcademicPeriodId: parsed.data.to_academic_period_id ?? parsed.data.toAcademicPeriodId!,
       toClassId: parsed.data.to_class_id ?? parsed.data.toClassId!,
       actorId: c.get('userId'),
@@ -1158,7 +1155,9 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
     const limitQuery = c.req.query('limit')
 
     const statusParsed = statusQuery ? attendanceAttemptStatusSchema.safeParse(statusQuery) : null
-    const actionTypeParsed = actionTypeQuery ? attendanceActionTypeSchema.safeParse(actionTypeQuery) : null
+    const actionTypeParsed = actionTypeQuery
+      ? attendanceActionTypeSchema.safeParse(actionTypeQuery)
+      : null
 
     if (statusQuery && (!statusParsed || !statusParsed.success)) {
       throw AppError.validationError('Invalid status query parameter.')
@@ -1230,16 +1229,25 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
   // GET /v1/admin/leave-requests & /v1/admin/permits
   const handleListLeaveRequests = async (c: any) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
-    const userId = c.req.query('user_id') ?? c.req.query('userId') ?? c.req.query('student_id') ?? c.req.query('studentId')
-    const statusQuery = c.req.query('status') ?? c.req.query('approval_status') ?? c.req.query('approvalStatus')
+    const userId =
+      c.req.query('user_id') ??
+      c.req.query('userId') ??
+      c.req.query('student_id') ??
+      c.req.query('studentId')
+    const statusQuery =
+      c.req.query('status') ?? c.req.query('approval_status') ?? c.req.query('approvalStatus')
     const categoryQuery = c.req.query('category')
     const startDate = c.req.query('start_date') ?? c.req.query('startDate')
     const endDate = c.req.query('end_date') ?? c.req.query('endDate')
     const limitQuery = c.req.query('limit')
     const offsetQuery = c.req.query('offset')
 
-    const statusParsed = statusQuery ? leaveRequestApprovalStatusSchema.safeParse(statusQuery) : null
-    const categoryParsed = categoryQuery ? leaveRequestCategorySchema.safeParse(categoryQuery) : null
+    const statusParsed = statusQuery
+      ? leaveRequestApprovalStatusSchema.safeParse(statusQuery)
+      : null
+    const categoryParsed = categoryQuery
+      ? leaveRequestCategorySchema.safeParse(categoryQuery)
+      : null
 
     if (statusQuery && (!statusParsed || !statusParsed.success)) {
       throw AppError.validationError('Invalid status query parameter.')
@@ -1366,7 +1374,9 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
     const limitParam = c.req.query('limit')
     const offsetParam = c.req.query('offset')
 
-    const channelParsed = channelParam ? notificationChannelSchema.safeParse(channelParam) : undefined
+    const channelParsed = channelParam
+      ? notificationChannelSchema.safeParse(channelParam)
+      : undefined
     const statusParsed = statusParam ? notificationStatusSchema.safeParse(statusParam) : undefined
 
     const limit = limitParam ? Number.parseInt(limitParam, 10) : undefined
@@ -1473,4 +1483,3 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
 }
 
 export const adminRouter = createAdminRouter()
-

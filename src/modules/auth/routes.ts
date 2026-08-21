@@ -50,7 +50,7 @@ export function createStudentAuthRouter(deps: StudentAuthRouterDeps = {}) {
 }
 
 export const studentAuthRouter = createStudentAuthRouter()
- 
+
 export function createPasswordRouter(deps: StudentAuthRouterDeps = {}) {
   const router = new Hono<AppEnv>()
   router.use('*', auth)
@@ -68,5 +68,5 @@ export function createPasswordRouter(deps: StudentAuthRouterDeps = {}) {
   })
   return router
 }
- 
+
 export const passwordRouter = createPasswordRouter()

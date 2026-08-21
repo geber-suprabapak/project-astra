@@ -20,7 +20,11 @@ export function createNotificationRouter(deps: NotificationRouterDeps = {}) {
   router.get('/token', async (c) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const profile = await providers.domainStore.getUserProfile(c.get('userId'))
-    return successResponse(c, { notification_token: profile.notification_token ?? null }, 'Notification token retrieved.')
+    return successResponse(
+      c,
+      { notification_token: profile.notification_token ?? null },
+      'Notification token retrieved.',
+    )
   })
 
   router.patch('/token', async (c) => {
@@ -30,7 +34,11 @@ export function createNotificationRouter(deps: NotificationRouterDeps = {}) {
     await providers.domainStore.updateUserProfile(c.get('userId'), {
       notification_token: parsed.data.token,
     })
-    return successResponse(c, { notification_token: parsed.data.token }, 'Notification token updated.')
+    return successResponse(
+      c,
+      { notification_token: parsed.data.token },
+      'Notification token updated.',
+    )
   })
 
   return router

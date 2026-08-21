@@ -81,20 +81,76 @@ import {
 import { isMfaVerified } from '../identity/claims.js'
 
 const DEFAULT_PERMISSIONS: Permission[] = [
-  { id: 'd0000000-0000-0000-0000-000000000001', name: 'admin:read', description: 'Read administrative state and session' },
-  { id: 'd0000000-0000-0000-0000-000000000002', name: 'admin:write', description: 'Write administrative configuration' },
-  { id: 'd0000000-0000-0000-0000-000000000003', name: 'roles:manage', description: 'Create and modify roles and permissions' },
-  { id: 'd0000000-0000-0000-0000-000000000004', name: 'staff:manage', description: 'Create and manage staff members and assign roles' },
-  { id: 'd0000000-0000-0000-0000-000000000005', name: 'student:manage', description: 'Manage student profiles and approvals' },
-  { id: 'd0000000-0000-0000-0000-000000000006', name: 'roster:manage', description: 'Stage and review student roster imports' },
-  { id: 'd0000000-0000-0000-0000-000000000007', name: 'attendance:read', description: 'View attendance records' },
-  { id: 'd0000000-0000-0000-0000-000000000008', name: 'attendance:write', description: 'Submit attendance check-in/out' },
-  { id: 'd0000000-0000-0000-0000-000000000009', name: 'attendance:manual', description: 'Record manual attendance exceptions' },
-  { id: 'd0000000-0000-0000-0000-000000000010', name: 'leave:read', description: 'View leave requests' },
-  { id: 'd0000000-0000-0000-0000-000000000011', name: 'leave:submit', description: 'Submit leave requests' },
-  { id: 'd0000000-0000-0000-0000-000000000012', name: 'leave:approve', description: 'Approve or reject leave requests' },
-  { id: 'd0000000-0000-0000-0000-000000000013', name: 'profile:read', description: 'View profile information' },
-  { id: 'd0000000-0000-0000-0000-000000000014', name: 'profile:write', description: 'Update profile information' },
+  {
+    id: 'd0000000-0000-0000-0000-000000000001',
+    name: 'admin:read',
+    description: 'Read administrative state and session',
+  },
+  {
+    id: 'd0000000-0000-0000-0000-000000000002',
+    name: 'admin:write',
+    description: 'Write administrative configuration',
+  },
+  {
+    id: 'd0000000-0000-0000-0000-000000000003',
+    name: 'roles:manage',
+    description: 'Create and modify roles and permissions',
+  },
+  {
+    id: 'd0000000-0000-0000-0000-000000000004',
+    name: 'staff:manage',
+    description: 'Create and manage staff members and assign roles',
+  },
+  {
+    id: 'd0000000-0000-0000-0000-000000000005',
+    name: 'student:manage',
+    description: 'Manage student profiles and approvals',
+  },
+  {
+    id: 'd0000000-0000-0000-0000-000000000006',
+    name: 'roster:manage',
+    description: 'Stage and review student roster imports',
+  },
+  {
+    id: 'd0000000-0000-0000-0000-000000000007',
+    name: 'attendance:read',
+    description: 'View attendance records',
+  },
+  {
+    id: 'd0000000-0000-0000-0000-000000000008',
+    name: 'attendance:write',
+    description: 'Submit attendance check-in/out',
+  },
+  {
+    id: 'd0000000-0000-0000-0000-000000000009',
+    name: 'attendance:manual',
+    description: 'Record manual attendance exceptions',
+  },
+  {
+    id: 'd0000000-0000-0000-0000-000000000010',
+    name: 'leave:read',
+    description: 'View leave requests',
+  },
+  {
+    id: 'd0000000-0000-0000-0000-000000000011',
+    name: 'leave:submit',
+    description: 'Submit leave requests',
+  },
+  {
+    id: 'd0000000-0000-0000-0000-000000000012',
+    name: 'leave:approve',
+    description: 'Approve or reject leave requests',
+  },
+  {
+    id: 'd0000000-0000-0000-0000-000000000013',
+    name: 'profile:read',
+    description: 'View profile information',
+  },
+  {
+    id: 'd0000000-0000-0000-0000-000000000014',
+    name: 'profile:write',
+    description: 'Update profile information',
+  },
 ]
 
 const DEFAULT_ROLES: Role[] = [
@@ -103,14 +159,30 @@ const DEFAULT_ROLES: Role[] = [
     name: 'platform_admin',
     description: 'Platform Administrator with full access',
     is_active: true,
-    permissions: ['admin:read', 'admin:write', 'roles:manage', 'staff:manage', 'student:manage', 'roster:manage'],
+    permissions: [
+      'admin:read',
+      'admin:write',
+      'roles:manage',
+      'staff:manage',
+      'student:manage',
+      'roster:manage',
+    ],
   },
   {
     id: 'c0000000-0000-0000-0000-000000000002',
     name: 'school_admin',
     description: 'School Administrator for school-level operations',
     is_active: true,
-    permissions: ['admin:read', 'staff:manage', 'student:manage', 'roster:manage', 'attendance:read', 'attendance:manual', 'leave:read', 'leave:approve'],
+    permissions: [
+      'admin:read',
+      'staff:manage',
+      'student:manage',
+      'roster:manage',
+      'attendance:read',
+      'attendance:manual',
+      'leave:read',
+      'leave:approve',
+    ],
   },
   {
     id: 'c0000000-0000-0000-0000-000000000003',
@@ -151,7 +223,7 @@ const DEFAULT_LOCATIONS: Location[] = [
   {
     id: 'a0000000-0000-0000-0000-000000000001',
     name: 'School Campus',
-    latitude: -6.200000,
+    latitude: -6.2,
     longitude: 106.816666,
     radius_meters: 5000.0,
     is_active: true,
@@ -341,9 +413,7 @@ export class MemoryDomainStore implements DomainStore {
 
   async getTodayAbsences(userId: string, dateWIB: string): Promise<Absence[]> {
     return this.absences.filter(
-      (a) =>
-        a.user_id === userId &&
-        (a.date === dateWIB || a.created_at.startsWith(dateWIB)),
+      (a) => a.user_id === userId && (a.date === dateWIB || a.created_at.startsWith(dateWIB)),
     )
   }
 
@@ -413,7 +483,9 @@ export class MemoryDomainStore implements DomainStore {
     }
     if (filter?.dayOfWeek !== undefined) {
       const day = filter.dayOfWeek.toLowerCase()
-      list = list.filter((s) => s.day_of_week?.toLowerCase() === day || s.hari?.toLowerCase() === day)
+      list = list.filter(
+        (s) => s.day_of_week?.toLowerCase() === day || s.hari?.toLowerCase() === day,
+      )
     }
     if (filter?.isActive !== undefined) {
       list = list.filter((s) => s.is_active === filter.isActive)
@@ -422,7 +494,8 @@ export class MemoryDomainStore implements DomainStore {
   }
 
   async getScheduleById(id: string): Promise<Schedule | null> {
-    const s = this.schedules.get(id) ?? Array.from(this.schedules.values()).find((item) => item.id === id)
+    const s =
+      this.schedules.get(id) ?? Array.from(this.schedules.values()).find((item) => item.id === id)
     return s ? { ...s } : null
   }
 
@@ -451,7 +524,8 @@ export class MemoryDomainStore implements DomainStore {
   }
 
   async updateSchedule(id: string, params: UpdateScheduleParams): Promise<Schedule> {
-    const schedule = this.schedules.get(id) ?? Array.from(this.schedules.values()).find((item) => item.id === id)
+    const schedule =
+      this.schedules.get(id) ?? Array.from(this.schedules.values()).find((item) => item.id === id)
     if (!schedule) throw AppError.notFound('Schedule')
 
     if (params.dayOfWeek !== undefined) {
@@ -462,7 +536,8 @@ export class MemoryDomainStore implements DomainStore {
     if (params.endTime !== undefined) schedule.selesai_masuk = params.endTime
     if (params.startCheckout !== undefined) schedule.mulai_pulang = params.startCheckout
     if (params.endCheckout !== undefined) schedule.selesai_pulang = params.endCheckout
-    if (params.gracePeriodMinutes !== undefined) schedule.kompensasi_waktu = params.gracePeriodMinutes
+    if (params.gracePeriodMinutes !== undefined)
+      schedule.kompensasi_waktu = params.gracePeriodMinutes
     if (params.isActive !== undefined) schedule.is_active = params.isActive
     if (params.classId !== undefined) schedule.class_id = params.classId
     if (params.academicPeriodId !== undefined) schedule.academic_period_id = params.academicPeriodId
@@ -474,7 +549,8 @@ export class MemoryDomainStore implements DomainStore {
   }
 
   async deleteSchedule(id: string): Promise<void> {
-    const schedule = this.schedules.get(id) ?? Array.from(this.schedules.values()).find((item) => item.id === id)
+    const schedule =
+      this.schedules.get(id) ?? Array.from(this.schedules.values()).find((item) => item.id === id)
     if (!schedule) throw AppError.notFound('Schedule')
     this.schedules.delete(schedule.id ?? id)
   }
@@ -551,11 +627,18 @@ export class MemoryDomainStore implements DomainStore {
     return e ? { ...e } : null
   }
 
-  async getCalendarExceptionByDate(date: string, academicPeriodId?: string): Promise<CalendarException | null> {
+  async getCalendarExceptionByDate(
+    date: string,
+    academicPeriodId?: string,
+  ): Promise<CalendarException | null> {
     const formattedDate = date.slice(0, 10)
     for (const e of this.calendarExceptions.values()) {
       if (e.date === formattedDate) {
-        if (!academicPeriodId || !e.academic_period_id || e.academic_period_id === academicPeriodId) {
+        if (
+          !academicPeriodId ||
+          !e.academic_period_id ||
+          e.academic_period_id === academicPeriodId
+        ) {
           return { ...e }
         }
       }
@@ -580,7 +663,10 @@ export class MemoryDomainStore implements DomainStore {
     return { ...exc }
   }
 
-  async updateCalendarException(id: string, params: UpdateCalendarExceptionParams): Promise<CalendarException> {
+  async updateCalendarException(
+    id: string,
+    params: UpdateCalendarExceptionParams,
+  ): Promise<CalendarException> {
     const exc = this.calendarExceptions.get(id)
     if (!exc) throw AppError.notFound('Calendar exception')
     if (params.date !== undefined) exc.date = params.date.slice(0, 10)
@@ -639,7 +725,10 @@ export class MemoryDomainStore implements DomainStore {
     return { ...period }
   }
 
-  async updateAcademicPeriod(id: string, params: UpdateAcademicPeriodParams): Promise<AcademicPeriod> {
+  async updateAcademicPeriod(
+    id: string,
+    params: UpdateAcademicPeriodParams,
+  ): Promise<AcademicPeriod> {
     const period = this.academicPeriods.find((p) => p.id === id)
     if (!period) throw AppError.notFound('Academic period')
     if (params.isActive === true) {
@@ -713,7 +802,8 @@ export class MemoryDomainStore implements DomainStore {
     let list = [...this.classEnrollments]
     if (filter?.userId) list = list.filter((e) => e.user_id === filter.userId)
     if (filter?.classId) list = list.filter((e) => e.class_id === filter.classId)
-    if (filter?.academicPeriodId) list = list.filter((e) => e.academic_period_id === filter.academicPeriodId)
+    if (filter?.academicPeriodId)
+      list = list.filter((e) => e.academic_period_id === filter.academicPeriodId)
     if (filter?.status) list = list.filter((e) => e.status === filter.status)
 
     return list.map((e) => {
@@ -730,7 +820,10 @@ export class MemoryDomainStore implements DomainStore {
     })
   }
 
-  async getActiveClassEnrollment(userId: string, academicPeriodId?: string): Promise<ClassEnrollment | null> {
+  async getActiveClassEnrollment(
+    userId: string,
+    academicPeriodId?: string,
+  ): Promise<ClassEnrollment | null> {
     const periodId = academicPeriodId ?? this.academicPeriods.find((p) => p.is_active)?.id
     if (!periodId) return null
     const enrollment = this.classEnrollments.find(
@@ -757,7 +850,9 @@ export class MemoryDomainStore implements DomainStore {
         e.status === 'active',
     )
     if (existingActive) {
-      throw AppError.conflict('Student already has an active class enrollment in this academic period.')
+      throw AppError.conflict(
+        'Student already has an active class enrollment in this academic period.',
+      )
     }
     const cls = this.classes.find((c) => c.id === params.classId)
     if (!cls) throw AppError.notFound('Class')
@@ -856,7 +951,9 @@ export class MemoryDomainStore implements DomainStore {
         e.status === 'active',
     )
     if (existingTarget) {
-      throw AppError.conflict('Student already has an active class enrollment in target academic period.')
+      throw AppError.conflict(
+        'Student already has an active class enrollment in target academic period.',
+      )
     }
     const targetClass = this.classes.find((c) => c.id === params.toClassId)
     if (!targetClass) throw AppError.notFound('Target class')
@@ -1090,7 +1187,12 @@ export class MemoryDomainStore implements DomainStore {
     // Check if user within radius of any active location
     let matchedLocation: Location | null = null
     for (const loc of activeLocations) {
-      const dist = calculateDistanceMeters(params.latitude, params.longitude, loc.latitude, loc.longitude)
+      const dist = calculateDistanceMeters(
+        params.latitude,
+        params.longitude,
+        loc.latitude,
+        loc.longitude,
+      )
       if (dist <= loc.radius_meters) {
         matchedLocation = loc
         break
@@ -1113,7 +1215,8 @@ export class MemoryDomainStore implements DomainStore {
     const now = new Date()
     const todayWIB = new Date(now.getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
     const attendances = this.absences.filter(
-      (a) => a.user_id === params.userId && (a.date === todayWIB || a.created_at.startsWith(todayWIB)),
+      (a) =>
+        a.user_id === params.userId && (a.date === todayWIB || a.created_at.startsWith(todayWIB)),
     )
 
     const hasCheckedIn = attendances.some((r) => r.status === 'Hadir' || r.status === 'Terlambat')
@@ -1217,7 +1320,8 @@ export class MemoryDomainStore implements DomainStore {
   }
 
   async createManualAttendance(params: CreateManualAttendanceParams): Promise<AttendanceRecord> {
-    const todayWIB = params.date ?? new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    const todayWIB =
+      params.date ?? new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
     const status: AttendanceStatus =
       params.status ?? (params.actionType === 'check_in' ? 'Hadir' : 'Pulang')
 
@@ -1786,9 +1890,7 @@ export class MemoryDomainStore implements DomainStore {
     return { ...profile }
   }
 
-  async createPasswordResetCode(
-    params: CreatePasswordResetCodeParams,
-  ): Promise<PasswordResetCode> {
+  async createPasswordResetCode(params: CreatePasswordResetCodeParams): Promise<PasswordResetCode> {
     const resetCode: PasswordResetCode = {
       id: `rc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       user_id: params.userId,
@@ -1999,7 +2101,9 @@ export class MemoryDomainStore implements DomainStore {
     return result.map((r) => ({ ...r }))
   }
 
-  async claimPendingNotifications(params?: ClaimPendingNotificationsParams): Promise<NotificationRecord[]> {
+  async claimPendingNotifications(
+    params?: ClaimPendingNotificationsParams,
+  ): Promise<NotificationRecord[]> {
     const limit = params?.limit ?? 10
     const maxRetries = params?.maxRetries ?? 3
     const now = params?.now ? new Date(params.now).getTime() : Date.now()
@@ -2023,7 +2127,9 @@ export class MemoryDomainStore implements DomainStore {
     return claimed
   }
 
-  async updateNotificationStatus(params: UpdateNotificationStatusParams): Promise<NotificationRecord> {
+  async updateNotificationStatus(
+    params: UpdateNotificationStatusParams,
+  ): Promise<NotificationRecord> {
     const record = this.notifications.get(params.id)
     if (!record) {
       throw AppError.notFound('Notification')
@@ -2073,11 +2179,7 @@ export class MemoryObjectStorage implements ObjectStorage {
     return `https://storage.local/signed/${encodeURIComponent(path)}?expires=86400`
   }
 
-  async uploadPermitAttachment(
-    userId: string,
-    file: Buffer,
-    contentType: string,
-  ): Promise<string> {
+  async uploadPermitAttachment(userId: string, file: Buffer, contentType: string): Promise<string> {
     const ext = contentType === 'image/png' ? 'png' : 'jpg'
     const path = `${userId}/${Date.now()}.${ext}`
     this.objects.set(path, { buffer: file, contentType })
@@ -2138,9 +2240,7 @@ export class MemoryIdentityProvider implements IdentityProvider {
   public revokedUsers = new Set<string>()
   public suspendedUsers = new Set<string>()
   public revokedSessions = new Set<string>()
-  async createStudentIdentity(
-    params: CreateStudentIdentityParams,
-  ): Promise<{ userId: string }> {
+  async createStudentIdentity(params: CreateStudentIdentityParams): Promise<{ userId: string }> {
     const userId = `student-identity-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     this.users.set(userId, {
       userId,

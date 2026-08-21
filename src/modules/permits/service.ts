@@ -18,7 +18,10 @@ export interface PermitResponse {
 
 export type LeaveRequestResponse = PermitResponse
 
-function toPermitResponse(permit: Permit | LeaveRequest, attachmentUrl: string | null): PermitResponse {
+function toPermitResponse(
+  permit: Permit | LeaveRequest,
+  attachmentUrl: string | null,
+): PermitResponse {
   const category = 'kategori_izin' in permit ? permit.kategori_izin : permit.category
   const description = 'deskripsi' in permit ? permit.deskripsi : permit.description
   const date = 'tanggal' in permit ? permit.tanggal : permit.date
@@ -55,9 +58,7 @@ export async function listPermits(
 
   return Promise.all(
     permits.map(async (p) => {
-      const url = p.link_foto
-        ? await providers.objectStorage.getSignedPermitUrl(p.link_foto)
-        : null
+      const url = p.link_foto ? await providers.objectStorage.getSignedPermitUrl(p.link_foto) : null
       return toPermitResponse(p, url)
     }),
   )

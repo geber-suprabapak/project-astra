@@ -26,7 +26,12 @@ function hmacSha256(key: Buffer | string, data: string): Buffer {
   return createHmac('sha256', key).update(data).digest()
 }
 
-function getSigningKey(secretKey: string, dateStamp: string, region: string, service: string): Buffer {
+function getSigningKey(
+  secretKey: string,
+  dateStamp: string,
+  region: string,
+  service: string,
+): Buffer {
   const kDate = hmacSha256(`AWS4${secretKey}`, dateStamp)
   const kRegion = hmacSha256(kDate, region)
   const kService = hmacSha256(kRegion, service)
@@ -235,11 +240,7 @@ export class S3ObjectStorage implements ObjectStorage {
     }
   }
 
-  async uploadPermitAttachment(
-    userId: string,
-    file: Buffer,
-    contentType: string,
-  ): Promise<string> {
+  async uploadPermitAttachment(userId: string, file: Buffer, contentType: string): Promise<string> {
     const ext = extFromContentType(contentType)
     const path = `${userId}/${Date.now()}.${ext}`
 
@@ -347,11 +348,17 @@ export class S3ObjectStorage implements ObjectStorage {
 
   async checkHealth(): Promise<boolean> {
     try {
-      const res = await this.executeS3Request('HEAD', this.bucketAvatars, '', undefined, undefined, 3000)
+      const res = await this.executeS3Request(
+        'HEAD',
+        this.bucketAvatars,
+        '',
+        undefined,
+        undefined,
+        3000,
+      )
       return res.ok
     } catch {
       return false
     }
   }
 }
-

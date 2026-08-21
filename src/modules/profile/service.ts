@@ -1,5 +1,9 @@
 import { defaultProviders } from '../../providers/index.js'
-import type { AppProviders, ClassEnrollment, ProfileLifecycleStatus } from '../../providers/types.js'
+import type {
+  AppProviders,
+  ClassEnrollment,
+  ProfileLifecycleStatus,
+} from '../../providers/types.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { ALLOWED_AVATAR_TYPES, MAX_AVATAR_SIZE_BYTES } from './schema.js'
 
@@ -28,7 +32,9 @@ export async function getProfile(
 
   const activePeriod = await providers.domainStore.getActiveAcademicPeriod().catch(() => null)
   const activeEnrollment = activePeriod
-    ? await providers.domainStore.getActiveClassEnrollment(userId, activePeriod.id).catch(() => null)
+    ? await providers.domainStore
+        .getActiveClassEnrollment(userId, activePeriod.id)
+        .catch(() => null)
     : null
 
   return {

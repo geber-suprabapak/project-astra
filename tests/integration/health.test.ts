@@ -62,7 +62,13 @@ describe('integration: runtime health & readiness probes', () => {
     // SAFETY: /ready endpoint returns ReadinessResult shape
     const body = (await res.json()) as {
       healthy: boolean
-      checks: { database: string; objectStorage: string; identity: string; mlService: string; redis: string }
+      checks: {
+        database: string
+        objectStorage: string
+        identity: string
+        mlService: string
+        redis: string
+      }
     }
 
     expect(res.status).toBe(200)
@@ -91,7 +97,13 @@ describe('integration: runtime health & readiness probes', () => {
     // SAFETY: /ready endpoint returns ReadinessResult shape
     const body = (await res.json()) as {
       healthy: boolean
-      checks: { database: string; objectStorage: string; identity: string; mlService: string; redis: string }
+      checks: {
+        database: string
+        objectStorage: string
+        identity: string
+        mlService: string
+        redis: string
+      }
     }
 
     expect(res.status).toBe(503)
@@ -114,7 +126,13 @@ describe('integration: runtime health & readiness probes', () => {
     // SAFETY: /ready endpoint returns ReadinessResult shape
     const body = (await res.json()) as {
       healthy: boolean
-      checks: { database: string; objectStorage: string; identity: string; mlService: string; redis: string }
+      checks: {
+        database: string
+        objectStorage: string
+        identity: string
+        mlService: string
+        redis: string
+      }
     }
 
     expect(res.status).toBe(503)
@@ -137,7 +155,13 @@ describe('integration: runtime health & readiness probes', () => {
     // SAFETY: /ready endpoint returns ReadinessResult shape
     const body = (await res.json()) as {
       healthy: boolean
-      checks: { database: string; objectStorage: string; identity: string; mlService: string; redis: string }
+      checks: {
+        database: string
+        objectStorage: string
+        identity: string
+        mlService: string
+        redis: string
+      }
     }
 
     expect(res.status).toBe(503)
@@ -159,7 +183,13 @@ describe('integration: runtime health & readiness probes', () => {
     // SAFETY: /ready endpoint returns ReadinessResult shape
     const body = (await res.json()) as {
       healthy: boolean
-      checks: { database: string; objectStorage: string; identity: string; mlService: string; redis: string }
+      checks: {
+        database: string
+        objectStorage: string
+        identity: string
+        mlService: string
+        redis: string
+      }
     }
 
     expect(res.status).toBe(503)

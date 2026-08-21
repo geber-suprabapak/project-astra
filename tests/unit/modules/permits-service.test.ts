@@ -19,7 +19,11 @@ function setupTestEnvironment() {
 
   const defaultRobinClient: RobinClient = {
     checkReadiness: async () => ({ healthy: true }),
-    getEnrollmentStatus: async () => ({ status: 'enrolled', embeddingCount: 10, message: 'Ready.' }),
+    getEnrollmentStatus: async () => ({
+      status: 'enrolled',
+      embeddingCount: 10,
+      message: 'Ready.',
+    }),
     enroll: async () => ({ imagesProcessed: 10, imagesFailed: 0, totalEmbeddings: 10 }),
     identify: async () => ({
       status: 'ok',
@@ -261,7 +265,10 @@ describe('Permits / Leave Requests Service - Student Flows', () => {
       providers,
     })
 
-    const filesBefore = await domainStore.listFiles({ userId: 'student-1', purpose: 'permit_attachment' })
+    const filesBefore = await domainStore.listFiles({
+      userId: 'student-1',
+      purpose: 'permit_attachment',
+    })
     expect(filesBefore).toHaveLength(1)
     expect(filesBefore[0].lifecycle).toBe('available')
 
@@ -272,7 +279,10 @@ describe('Permits / Leave Requests Service - Student Flows', () => {
     expect(history).toHaveLength(0)
 
     // Verify file lifecycle updated to deleted
-    const filesAfter = await domainStore.listFiles({ userId: 'student-1', purpose: 'permit_attachment' })
+    const filesAfter = await domainStore.listFiles({
+      userId: 'student-1',
+      purpose: 'permit_attachment',
+    })
     expect(filesAfter[0].lifecycle).toBe('deleted')
   })
 

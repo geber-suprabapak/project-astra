@@ -295,7 +295,9 @@ export async function openStudentSignup(params: {
 
   const status = await params.providers.domainStore.getBootstrapStatus()
   if (!status.roster_accepted) {
-    throw AppError.validationError('Student signup cannot be opened before an accepted roster report exists.')
+    throw AppError.validationError(
+      'Student signup cannot be opened before an accepted roster report exists.',
+    )
   }
 
   await params.providers.domainStore.openSignup()
@@ -1032,7 +1034,6 @@ export async function resetStudentFaceEnrollment(params: {
   })
 }
 
-
 // ---------------------------------------------------------------------------
 // Academic Attendance Policy Service Operations
 // ---------------------------------------------------------------------------
@@ -1750,7 +1751,10 @@ export async function createManualAttendance(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<AttendanceRecord> {
-  if (!params.actorRole || !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)) {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)
+  ) {
     throw AppError.forbidden()
   }
 
@@ -1779,7 +1783,9 @@ export async function createManualAttendance(params: {
       throw AppError.notFound('Referenced attendance attempt')
     }
     if (relatedAttempt.user_id !== params.userId) {
-      throw AppError.validationError('Referenced attendance attempt does not belong to this student.')
+      throw AppError.validationError(
+        'Referenced attendance attempt does not belong to this student.',
+      )
     }
   }
 
@@ -1841,7 +1847,10 @@ export async function listAttendanceAttempts(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<AttendanceAttempt[]> {
-  if (!params.actorRole || !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)) {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
+  ) {
     throw AppError.forbidden()
   }
   return params.providers.domainStore.listAttendanceAttempts(params.filter)
@@ -1852,7 +1861,10 @@ export async function getAttendanceAttempt(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<AttendanceAttempt> {
-  if (!params.actorRole || !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)) {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
+  ) {
     throw AppError.forbidden()
   }
   const attempt = await params.providers.domainStore.getAttendanceAttempt(params.id)
@@ -1873,7 +1885,10 @@ export async function listAttendances(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<AttendanceRecord[]> {
-  if (!params.actorRole || !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)) {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
+  ) {
     throw AppError.forbidden()
   }
   return params.providers.domainStore.listAttendances(params.filter)
@@ -1918,7 +1933,10 @@ export async function listAdminLeaveRequests(params: {
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse[]> {
-  if (!params.actorRole || !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)) {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
+  ) {
     throw AppError.forbidden()
   }
 
@@ -1932,7 +1950,10 @@ export async function getAdminLeaveRequest(params: {
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse> {
-  if (!params.actorRole || !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)) {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
+  ) {
     throw AppError.forbidden()
   }
 
@@ -1950,7 +1971,10 @@ export async function approveLeaveRequest(params: {
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse> {
-  if (!params.actorRole || !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)) {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)
+  ) {
     throw AppError.forbidden()
   }
 
@@ -2001,7 +2025,10 @@ export async function rejectLeaveRequest(params: {
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse> {
-  if (!params.actorRole || !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)) {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)
+  ) {
     throw AppError.forbidden()
   }
 
@@ -2103,7 +2130,10 @@ export async function listAdminNotifications(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<NotificationRecord[]> {
-  if (!params.actorRole || !['platform_admin', 'school_admin', 'staff', 'teacher'].includes(params.actorRole)) {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'staff', 'teacher'].includes(params.actorRole)
+  ) {
     throw AppError.forbidden()
   }
   return params.providers.domainStore.listNotifications(params.filter)
@@ -2115,7 +2145,10 @@ export async function getAdminNotification(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<NotificationRecord> {
-  if (!params.actorRole || !['platform_admin', 'school_admin', 'staff', 'teacher'].includes(params.actorRole)) {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'staff', 'teacher'].includes(params.actorRole)
+  ) {
     throw AppError.forbidden()
   }
   const notif = await params.providers.domainStore.getNotificationById(params.id)
@@ -2134,7 +2167,10 @@ export async function enqueueAdminNotification(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<NotificationRecord> {
-  if (!params.actorRole || !['platform_admin', 'school_admin', 'staff', 'teacher'].includes(params.actorRole)) {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'staff', 'teacher'].includes(params.actorRole)
+  ) {
     throw AppError.forbidden()
   }
 
@@ -2171,7 +2207,10 @@ export async function retryAdminNotification(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<NotificationRecord> {
-  if (!params.actorRole || !['platform_admin', 'school_admin', 'staff', 'teacher'].includes(params.actorRole)) {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'staff', 'teacher'].includes(params.actorRole)
+  ) {
     throw AppError.forbidden()
   }
 
@@ -2230,6 +2269,3 @@ export async function deleteAdminNotification(params: {
     },
   })
 }
-
-
-

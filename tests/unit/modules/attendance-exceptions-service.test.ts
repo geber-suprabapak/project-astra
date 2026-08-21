@@ -21,7 +21,11 @@ function createTestEnvironment(customRobinClient?: Partial<RobinClient>) {
 
   const defaultRobinClient: RobinClient = {
     checkReadiness: async () => ({ healthy: true }),
-    getEnrollmentStatus: async () => ({ status: 'enrolled', embeddingCount: 10, message: 'Ready.' }),
+    getEnrollmentStatus: async () => ({
+      status: 'enrolled',
+      embeddingCount: 10,
+      message: 'Ready.',
+    }),
     enroll: async () => ({ imagesProcessed: 10, imagesFailed: 0, totalEmbeddings: 10 }),
     identify: async () => ({
       status: 'ok',
@@ -357,7 +361,9 @@ describe('Manual Attendance & Attempt Audit Trail (Ticket 09)', () => {
     const log = logs[0]
     expect(log.action).toBe('create_manual_attendance')
     expect(log.actor_id).toBe('staff-admin-1')
-    expect(log.details?.reason).toBe('Student verified in person by teacher after camera glare defect')
+    expect(log.details?.reason).toBe(
+      'Student verified in person by teacher after camera glare defect',
+    )
     expect(log.details?.attempt_id).toBe(failedAttempt.id)
     expect(log.details?.attempt_status).toBe('failed')
     expect(log.details?.attempt_reason).toBe('Camera glare prevented face recognition')

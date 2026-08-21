@@ -5,6 +5,7 @@
 Astra (Skanida Mobile BFF) is implemented against greenfield platform components with zero Supabase runtime dependency.
 
 **Architecture highlights:**
+
 - Hono app bootstrap with CORS, request ID, structured logging, error envelope, rate limiting, and dependency injection
 - Auth middleware with standard OIDC JWT verification via `IdentityProvider`
 - Robin client for facial biometrics (readiness, identify, enrollment status, enrollment upload)
@@ -76,13 +77,13 @@ src/
 
 ## Key Dependencies
 
-| Package               | Version | Purpose                                |
-| --------------------- | ------- | -------------------------------------- |
-| hono                  | ^4.12   | Web framework                          |
-| @hono/node-server     | ^1.19   | Node.js adapter                        |
-| zod                   | ^3.25   | Request/response validation            |
-| jose                  | ^5.10   | JWT verification & signing             |
-| postgres              | ^3.4    | PostgreSQL client (Postgres.js)        |
-| redis                 | ^5.12   | Redis client                           |
-| pino                  | ^9.14   | Structured logging                     |
-| vitest                | ^3.2    | Test runner                            |
+| Package           | Version | Purpose                         |
+| ----------------- | ------- | ------------------------------- |
+| hono              | ^4.12   | Web framework                   |
+| @hono/node-server | ^1.19   | Node.js adapter                 |
+| zod               | ^3.25   | Request/response validation     |
+| jose              | ^5.10   | JWT verification & signing      |
+| postgres          | ^3.4    | PostgreSQL client (Postgres.js) |
+| redis             | ^5.12   | Redis client                    |
+| pino              | ^9.14   | Structured logging              |
+| vitest            | ^3.2    | Test runner                     |

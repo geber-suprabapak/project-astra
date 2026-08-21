@@ -4,7 +4,10 @@ import { runMigrations } from '../src/providers/postgres/migrate.js'
 import { logger } from '../src/lib/logging/logger.js'
 
 async function main() {
-  logger.info({ databaseUrl: env.databaseUrl.replace(/:[^:@]+@/, ':***@') }, 'Running database migration')
+  logger.info(
+    { databaseUrl: env.databaseUrl.replace(/:[^:@]+@/, ':***@') },
+    'Running database migration',
+  )
 
   const sql = postgres(env.databaseUrl, {
     max: 1,

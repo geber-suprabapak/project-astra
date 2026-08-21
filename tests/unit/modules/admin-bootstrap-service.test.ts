@@ -191,7 +191,9 @@ describe('admin bootstrap service unit tests', () => {
     expect(report.rejected_items[0].reason).toContain('NIS cannot be empty')
     expect(report.rejected_items[1].reason).toContain('Duplicate NIS "1001" in roster batch')
     expect(report.rejected_items[2].reason).toContain('Duplicate NIS "1001" in roster batch')
-    expect(report.rejected_items[3].reason).toContain('NIS "9999" already exists in student profiles')
+    expect(report.rejected_items[3].reason).toContain(
+      'NIS "9999" already exists in student profiles',
+    )
     expect(report.rejected_items[4].reason).toContain('Full name cannot be empty')
     expect(report.rejected_items[5].reason).toContain('Class name cannot be empty')
   })
@@ -322,9 +324,7 @@ describe('admin bootstrap service unit tests', () => {
     })
 
     const staged = await validateAndStageRoster({
-      rows: [
-        { nis: '', full_name: 'Ahmad Fauzi', class_name: 'XII RPL 1' },
-      ],
+      rows: [{ nis: '', full_name: 'Ahmad Fauzi', class_name: 'XII RPL 1' }],
       actorId: 'platform-admin-1',
       actorRole: 'platform_admin',
       providers,
@@ -371,7 +371,9 @@ describe('admin bootstrap service unit tests', () => {
       // SAFETY: Error verified as AppError
       const appErr = err as AppError
       expect(appErr.httpStatus).toBe(422)
-      expect(appErr.details).toContain('Student signup cannot be opened before an accepted roster report exists')
+      expect(appErr.details).toContain(
+        'Student signup cannot be opened before an accepted roster report exists',
+      )
     }
 
     // Stage and accept roster

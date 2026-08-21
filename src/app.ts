@@ -10,7 +10,12 @@ import {
 import { type ReadinessResult } from './modules/health/service.js'
 import { createV1Mobile, v1Mobile } from './routes/v1-mobile.js'
 import { createAdminRouter, adminRouter } from './modules/admin/routes.js'
-import { createPasswordRouter, createStudentAuthRouter, passwordRouter, studentAuthRouter } from './modules/auth/routes.js'
+import {
+  createPasswordRouter,
+  createStudentAuthRouter,
+  passwordRouter,
+  studentAuthRouter,
+} from './modules/auth/routes.js'
 import { defaultProviders } from './providers/index.js'
 import type { AppProviders } from './providers/types.js'
 import { env } from './config/env.js'
@@ -60,7 +65,10 @@ export function createApp(deps: AppDeps = {}) {
 
   // Reject unsupported API contracts before any domain route executes.
   app.use('/v1/*', async (c, next) => {
-    if (env.nodeEnv !== 'test' && c.req.header('X-Astra-Contract-Version') !== API_CONTRACT_VERSION) {
+    if (
+      env.nodeEnv !== 'test' &&
+      c.req.header('X-Astra-Contract-Version') !== API_CONTRACT_VERSION
+    ) {
       return c.json(
         {
           success: false,
@@ -137,7 +145,7 @@ export function createApp(deps: AppDeps = {}) {
     deps.studentAuthRouter ??
     (deps.providers ? createStudentAuthRouter({ providers: resolvedProviders }) : studentAuthRouter)
   app.route('/v1/auth/student', resolvedStudentAuthRouter)
- 
+
   const resolvedPasswordRouter =
     deps.passwordRouter ??
     (deps.providers ? createPasswordRouter({ providers: resolvedProviders }) : passwordRouter)

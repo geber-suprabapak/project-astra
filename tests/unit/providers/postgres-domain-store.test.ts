@@ -628,7 +628,10 @@ describe('PostgresDomainStore (Greenfield)', () => {
     })
 
     const store = new PostgresDomainStore({ sql: mockSql })
-    const perm = await store.createPermission({ name: 'reports:export', description: 'Export reports' })
+    const perm = await store.createPermission({
+      name: 'reports:export',
+      description: 'Export reports',
+    })
     expect(perm.name).toBe('reports:export')
 
     const list = await store.getPermissions()
@@ -1194,7 +1197,11 @@ describe('PostgresDomainStore (Greenfield)', () => {
           },
         ]
       }
-      if (query.includes('SELECT') && query.includes('FROM profiles') && query.includes('user_id = ?')) {
+      if (
+        query.includes('SELECT') &&
+        query.includes('FROM profiles') &&
+        query.includes('user_id = ?')
+      ) {
         return [
           {
             user_id: 'student-1',
@@ -1293,7 +1300,11 @@ describe('PostgresDomainStore (Greenfield)', () => {
           },
         ]
       }
-      if (query.includes('SELECT') && query.includes('FROM notification_outbox') && query.includes('WHERE id =')) {
+      if (
+        query.includes('SELECT') &&
+        query.includes('FROM notification_outbox') &&
+        query.includes('WHERE id =')
+      ) {
         return [
           {
             id: 'notif-123',
@@ -1377,6 +1388,3 @@ describe('PostgresDomainStore (Greenfield)', () => {
     await expect(store.deleteNotification('notif-123')).resolves.toBeUndefined()
   })
 })
-
-
-

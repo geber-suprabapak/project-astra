@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { AppError } from '../../../src/lib/errors/app-error.js'
-import {
-  registerStudent,
-  resetStudentPassword,
-} from '../../../src/modules/auth/service.js'
+import { registerStudent, resetStudentPassword } from '../../../src/modules/auth/service.js'
 import {
   MemoryDomainStore,
   MemoryIdentityProvider,

@@ -21,21 +21,27 @@ export interface UploadIntentResult {
 function validateFileConstraints(purpose: FilePurpose, contentType: string, sizeBytes?: number) {
   if (purpose === 'avatar') {
     if (!ALLOWED_AVATAR_MIME.includes(contentType)) {
-      throw AppError.validationError(`Invalid avatar content type. Allowed: ${ALLOWED_AVATAR_MIME.join(', ')}.`)
+      throw AppError.validationError(
+        `Invalid avatar content type. Allowed: ${ALLOWED_AVATAR_MIME.join(', ')}.`,
+      )
     }
     if (sizeBytes && sizeBytes > MAX_AVATAR_UPLOAD_SIZE) {
       throw AppError.validationError('Avatar exceeds 5MB size limit.')
     }
   } else if (purpose === 'permit_attachment') {
     if (!ALLOWED_PERMIT_MIME.includes(contentType)) {
-      throw AppError.validationError(`Invalid permit attachment content type. Allowed: ${ALLOWED_PERMIT_MIME.join(', ')}.`)
+      throw AppError.validationError(
+        `Invalid permit attachment content type. Allowed: ${ALLOWED_PERMIT_MIME.join(', ')}.`,
+      )
     }
     if (sizeBytes && sizeBytes > MAX_PERMIT_UPLOAD_SIZE) {
       throw AppError.validationError('Permit attachment exceeds 5MB size limit.')
     }
   } else if (purpose === 'face_enrollment') {
     if (!ALLOWED_FACE_MIME.includes(contentType)) {
-      throw AppError.validationError(`Invalid face enrollment content type. Allowed: ${ALLOWED_FACE_MIME.join(', ')}.`)
+      throw AppError.validationError(
+        `Invalid face enrollment content type. Allowed: ${ALLOWED_FACE_MIME.join(', ')}.`,
+      )
     }
     if (sizeBytes && sizeBytes > MAX_FACE_UPLOAD_SIZE) {
       throw AppError.validationError('Face enrollment file exceeds 2MB size limit.')
@@ -172,9 +178,7 @@ export async function deleteFile(params: {
   }
 
   const isOwner = fileRecord.user_id === params.userId
-  const isPrivileged = params.userRoles?.some((r) =>
-    ['platform_admin', 'school_admin'].includes(r),
-  )
+  const isPrivileged = params.userRoles?.some((r) => ['platform_admin', 'school_admin'].includes(r))
   if (!isOwner && !isPrivileged) {
     throw AppError.forbidden('You do not have permission to delete this file.')
   }

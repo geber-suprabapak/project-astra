@@ -20,7 +20,11 @@ function setupTestEnvironment() {
 
   const defaultRobinClient: RobinClient = {
     checkReadiness: async () => ({ healthy: true }),
-    getEnrollmentStatus: async () => ({ status: 'enrolled', embeddingCount: 10, message: 'Ready.' }),
+    getEnrollmentStatus: async () => ({
+      status: 'enrolled',
+      embeddingCount: 10,
+      message: 'Ready.',
+    }),
     enroll: async () => ({ imagesProcessed: 10, imagesFailed: 0, totalEmbeddings: 10 }),
     identify: async () => ({
       status: 'ok',
@@ -236,7 +240,9 @@ describe('Admin Leave Requests Service', () => {
     expect(rejected.id).toBe(permit.id)
     expect(rejected.approval_status).toBe('rejected')
     expect(rejected.status).toBe(false)
-    expect(rejected.rejection_reason).toBe('Izin liburan pribadi tidak dapat disetujui saat hari efektif KBM')
+    expect(rejected.rejection_reason).toBe(
+      'Izin liburan pribadi tidak dapat disetujui saat hari efektif KBM',
+    )
     expect(rejected.rejected_at).toBeDefined()
 
     // Verify audit log created

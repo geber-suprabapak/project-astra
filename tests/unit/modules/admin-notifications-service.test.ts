@@ -26,9 +26,18 @@ describe('Admin Notifications Service Unit Tests', () => {
 
     const mockRobinClient = {
       checkReadiness: async () => ({ healthy: true }),
-      getEnrollmentStatus: async () => ({ status: 'enrolled' as const, embeddingCount: 10, message: 'Ready.' }),
+      getEnrollmentStatus: async () => ({
+        status: 'enrolled' as const,
+        embeddingCount: 10,
+        message: 'Ready.',
+      }),
       enroll: async () => ({ imagesProcessed: 10, imagesFailed: 0, totalEmbeddings: 10 }),
-      identify: async () => ({ status: 'ok' as const, confidence: 0.95, qualityScore: 0.9, processTimeMs: 40 }),
+      identify: async () => ({
+        status: 'ok' as const,
+        confidence: 0.95,
+        qualityScore: 0.9,
+        processTimeMs: 40,
+      }),
       deleteEnrollment: async () => {},
     }
 

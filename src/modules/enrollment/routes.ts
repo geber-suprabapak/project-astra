@@ -5,7 +5,12 @@ import { successResponse } from '../../lib/http/responses.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { defaultProviders } from '../../providers/index.js'
 import type { AppProviders } from '../../providers/types.js'
-import { enrollFace, getEnrollmentStatus, deleteEnrollment, type EnrollmentFile } from './service.js'
+import {
+  enrollFace,
+  getEnrollmentStatus,
+  deleteEnrollment,
+  type EnrollmentFile,
+} from './service.js'
 import type { AppEnv } from '../../types/context.js'
 
 export interface EnrollmentRouterDeps {
@@ -73,4 +78,3 @@ export function createEnrollmentRouter(deps: EnrollmentRouterDeps = {}) {
 }
 
 export const enrollmentRouter = createEnrollmentRouter()
-

@@ -33,7 +33,11 @@ function createIntegrationEnvironment(customRobinClient?: Partial<RobinClient>) 
 
   const defaultRobinClient: RobinClient = {
     checkReadiness: async () => ({ healthy: true }),
-    getEnrollmentStatus: async () => ({ status: 'enrolled', embeddingCount: 10, message: 'Ready.' }),
+    getEnrollmentStatus: async () => ({
+      status: 'enrolled',
+      embeddingCount: 10,
+      message: 'Ready.',
+    }),
     enroll: async () => ({ imagesProcessed: 10, imagesFailed: 0, totalEmbeddings: 10 }),
     identify: async () => ({
       status: 'ok',
@@ -60,7 +64,11 @@ function createIntegrationEnvironment(customRobinClient?: Partial<RobinClient>) 
   return { domainStore, identityProvider, objectStorage, robinClient, providers, app }
 }
 
-async function setupSchoolAndStudent(domainStore: MemoryDomainStore, identityProvider: MemoryIdentityProvider, studentId = 'student-1') {
+async function setupSchoolAndStudent(
+  domainStore: MemoryDomainStore,
+  identityProvider: MemoryIdentityProvider,
+  studentId = 'student-1',
+) {
   // 1. School
   await domainStore.createSchool({
     name: 'SMK Negeri 2 Banjarmasin',
@@ -297,7 +305,7 @@ describe('Record Face Attendance & Manual Exceptions Integration Tests (Ticket 0
       actionType: 'check_in',
       status: 'failed',
       reason: 'Low lighting conditions in classroom',
-      confidence: 0.40,
+      confidence: 0.4,
       latitude: -6.2,
       longitude: 106.816666,
       processTimeMs: 110,
@@ -312,12 +320,15 @@ describe('Record Face Attendance & Manual Exceptions Integration Tests (Ticket 0
     })
 
     // 2. School Admin lists attendance attempts
-    const listRes = await app.request('/v1/admin/attendance/attempts?status=failed&userId=student-1', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${adminToken}`,
+    const listRes = await app.request(
+      '/v1/admin/attendance/attempts?status=failed&userId=student-1',
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
       },
-    })
+    )
     expect(listRes.status).toBe(200)
     const listBody = await listRes.json()
     expect(listBody.success).toBe(true)
@@ -367,7 +378,9 @@ describe('Record Face Attendance & Manual Exceptions Integration Tests (Ticket 0
     expect(auditLogs[0].actor_id).toBe('school-admin-1')
     expect(auditLogs[0].action).toBe('create_manual_attendance')
     expect(auditLogs[0].details?.attempt_id).toBe(failedAttempt.id)
-    expect(auditLogs[0].details?.reason).toBe('Manually verified by homeroom teacher after lighting defect')
+    expect(auditLogs[0].details?.reason).toBe(
+      'Manually verified by homeroom teacher after lighting defect',
+    )
   })
 
   it('RBAC: Student cannot access /v1/admin/attendance/manual (403)', async () => {

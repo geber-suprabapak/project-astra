@@ -394,13 +394,14 @@ export class PostgresDomainStore implements DomainStore {
 
   async updateLeaveRequestStatus(params: UpdateLeaveRequestStatusParams): Promise<LeaveRequest> {
     try {
-      const statusValue = params.status !== undefined ? params.status : (params.approvalStatus === 'approved')
+      const statusValue =
+        params.status !== undefined ? params.status : params.approvalStatus === 'approved'
       const rows = await this.sql<LeaveRequest[]>`
         UPDATE leave_requests
         SET approval_status = ${params.approvalStatus},
             status = ${statusValue},
             rejection_reason = ${params.rejectionReason ?? null},
-            rejected_at = ${params.rejectedAt ? params.rejectedAt : (params.approvalStatus === 'rejected' ? this.sql`NOW()` : null)},
+            rejected_at = ${params.rejectedAt ? params.rejectedAt : params.approvalStatus === 'rejected' ? this.sql`NOW()` : null},
             updated_at = NOW()
         WHERE id = ${params.id}
         RETURNING id, user_id, category, description, status,
@@ -446,7 +447,9 @@ export class PostgresDomainStore implements DomainStore {
   }): Promise<AttendanceActionRpcResponse> {
     try {
       // 1. Check geofence location
-      const locations = await this.sql<{ id: string; name: string; latitude: number; longitude: number; radius_meters: number }[]>`
+      const locations = await this.sql<
+        { id: string; name: string; latitude: number; longitude: number; radius_meters: number }[]
+      >`
         SELECT id, name, latitude, longitude, radius_meters
         FROM locations
         WHERE is_active = true
@@ -461,9 +464,20 @@ export class PostgresDomainStore implements DomainStore {
         }
       }
 
-      let matchedLocation: { id: string; name: string; latitude: number; longitude: number; radius_meters: number } | null = null
+      let matchedLocation: {
+        id: string
+        name: string
+        latitude: number
+        longitude: number
+        radius_meters: number
+      } | null = null
       for (const loc of locations) {
-        const dist = calculateDistanceMeters(params.latitude, params.longitude, loc.latitude, loc.longitude)
+        const dist = calculateDistanceMeters(
+          params.latitude,
+          params.longitude,
+          loc.latitude,
+          loc.longitude,
+        )
         if (dist <= loc.radius_meters) {
           matchedLocation = loc
           break
@@ -496,8 +510,12 @@ export class PostgresDomainStore implements DomainStore {
         ORDER BY created_at ASC
       `
 
-      const hasCheckedIn = attendances.some((r) => r.status === 'Hadir' || r.status === 'Terlambat' || r.action_type === 'check_in')
-      const hasCheckedOut = attendances.some((r) => r.status === 'Pulang' || r.action_type === 'check_out')
+      const hasCheckedIn = attendances.some(
+        (r) => r.status === 'Hadir' || r.status === 'Terlambat' || r.action_type === 'check_in',
+      )
+      const hasCheckedOut = attendances.some(
+        (r) => r.status === 'Pulang' || r.action_type === 'check_out',
+      )
       const hasAbsent = attendances.some((r) => r.status === 'Alpha')
 
       if (hasAbsent || (hasCheckedIn && hasCheckedOut)) {
@@ -554,7 +572,8 @@ export class PostgresDomainStore implements DomainStore {
       const todayWIB = getTodayWIB(now)
       const dayKey = getDayKeyWIB(now)
 
-      let status: 'Hadir' | 'Terlambat' | 'Pulang' = params.actionType === 'check_in' ? 'Hadir' : 'Pulang'
+      let status: 'Hadir' | 'Terlambat' | 'Pulang' =
+        params.actionType === 'check_in' ? 'Hadir' : 'Pulang'
 
       if (params.actionType === 'check_in') {
         const schedule = await this.getActiveSchedule(dayKey)
@@ -867,7 +886,9 @@ export class PostgresDomainStore implements DomainStore {
       }
       const isActive = params.isActive ?? true
 
-      const beginFn = this.sql.begin ? this.sql.begin.bind(this.sql) : async (cb: (sql: Sql) => Promise<AcademicPeriod>) => cb(this.sql)
+      const beginFn = this.sql.begin
+        ? this.sql.begin.bind(this.sql)
+        : async (cb: (sql: Sql) => Promise<AcademicPeriod>) => cb(this.sql)
       return await beginFn(async (sql) => {
         if (isActive) {
           await sql`UPDATE academic_periods SET is_active = false, updated_at = NOW() WHERE school_id = ${schoolId}`
@@ -889,11 +910,18 @@ export class PostgresDomainStore implements DomainStore {
     }
   }
 
-  async updateAcademicPeriod(id: string, params: UpdateAcademicPeriodParams): Promise<AcademicPeriod> {
+  async updateAcademicPeriod(
+    id: string,
+    params: UpdateAcademicPeriodParams,
+  ): Promise<AcademicPeriod> {
     try {
-      const beginFn = this.sql.begin ? this.sql.begin.bind(this.sql) : async (cb: (sql: Sql) => Promise<AcademicPeriod>) => cb(this.sql)
+      const beginFn = this.sql.begin
+        ? this.sql.begin.bind(this.sql)
+        : async (cb: (sql: Sql) => Promise<AcademicPeriod>) => cb(this.sql)
       return await beginFn(async (sql) => {
-        const existing = await sql<{ id: string; school_id: string }[]>`SELECT id, school_id FROM academic_periods WHERE id = ${id} LIMIT 1`
+        const existing = await sql<
+          { id: string; school_id: string }[]
+        >`SELECT id, school_id FROM academic_periods WHERE id = ${id} LIMIT 1`
         if (!existing || existing.length === 0) {
           throw AppError.notFound('Academic period')
         }
@@ -922,9 +950,13 @@ export class PostgresDomainStore implements DomainStore {
 
   async setActiveAcademicPeriod(id: string): Promise<AcademicPeriod> {
     try {
-      const beginFn = this.sql.begin ? this.sql.begin.bind(this.sql) : async (cb: (sql: Sql) => Promise<AcademicPeriod>) => cb(this.sql)
+      const beginFn = this.sql.begin
+        ? this.sql.begin.bind(this.sql)
+        : async (cb: (sql: Sql) => Promise<AcademicPeriod>) => cb(this.sql)
       return await beginFn(async (sql) => {
-        const existing = await sql<{ id: string; school_id: string }[]>`SELECT id, school_id FROM academic_periods WHERE id = ${id} LIMIT 1`
+        const existing = await sql<
+          { id: string; school_id: string }[]
+        >`SELECT id, school_id FROM academic_periods WHERE id = ${id} LIMIT 1`
         if (!existing || existing.length === 0) {
           throw AppError.notFound('Academic period')
         }
@@ -1055,7 +1087,10 @@ export class PostgresDomainStore implements DomainStore {
     }
   }
 
-  async getActiveClassEnrollment(userId: string, academicPeriodId?: string): Promise<ClassEnrollment | null> {
+  async getActiveClassEnrollment(
+    userId: string,
+    academicPeriodId?: string,
+  ): Promise<ClassEnrollment | null> {
     try {
       let targetPeriodId = academicPeriodId
       if (!targetPeriodId) {
@@ -1093,7 +1128,9 @@ export class PostgresDomainStore implements DomainStore {
       const period = await this.getAcademicPeriod(params.academicPeriodId)
       if (!period) throw AppError.notFound('Academic period')
 
-      const beginFn = this.sql.begin ? this.sql.begin.bind(this.sql) : async (cb: (sql: Sql) => Promise<ClassEnrollment>) => cb(this.sql)
+      const beginFn = this.sql.begin
+        ? this.sql.begin.bind(this.sql)
+        : async (cb: (sql: Sql) => Promise<ClassEnrollment>) => cb(this.sql)
       return await beginFn(async (sql) => {
         const existing = await sql<ClassEnrollment[]>`
           SELECT id FROM class_enrollments
@@ -1101,7 +1138,9 @@ export class PostgresDomainStore implements DomainStore {
           LIMIT 1
         `
         if (existing && existing.length > 0) {
-          throw AppError.conflict('Student already has an active class enrollment in this academic period.')
+          throw AppError.conflict(
+            'Student already has an active class enrollment in this academic period.',
+          )
         }
 
         const rows = await sql<ClassEnrollment[]>`
@@ -1134,7 +1173,11 @@ export class PostgresDomainStore implements DomainStore {
       const targetClass = await this.getClassById(params.toClassId)
       if (!targetClass) throw AppError.notFound('Target class')
 
-      const beginFn = this.sql.begin ? this.sql.begin.bind(this.sql) : async (cb: (sql: Sql) => Promise<{ previous: ClassEnrollment; current: ClassEnrollment }>) => cb(this.sql)
+      const beginFn = this.sql.begin
+        ? this.sql.begin.bind(this.sql)
+        : async (
+            cb: (sql: Sql) => Promise<{ previous: ClassEnrollment; current: ClassEnrollment }>,
+          ) => cb(this.sql)
       return await beginFn(async (sql) => {
         const activeRows = await sql<ClassEnrollment[]>`
           SELECT id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
@@ -1191,7 +1234,11 @@ export class PostgresDomainStore implements DomainStore {
       const targetPeriod = await this.getAcademicPeriod(params.toAcademicPeriodId)
       if (!targetPeriod) throw AppError.notFound('Target academic period')
 
-      const beginFn = this.sql.begin ? this.sql.begin.bind(this.sql) : async (cb: (sql: Sql) => Promise<{ previous: ClassEnrollment; current: ClassEnrollment }>) => cb(this.sql)
+      const beginFn = this.sql.begin
+        ? this.sql.begin.bind(this.sql)
+        : async (
+            cb: (sql: Sql) => Promise<{ previous: ClassEnrollment; current: ClassEnrollment }>,
+          ) => cb(this.sql)
       return await beginFn(async (sql) => {
         const sourceRows = await sql<ClassEnrollment[]>`
           SELECT id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
@@ -1209,7 +1256,9 @@ export class PostgresDomainStore implements DomainStore {
           LIMIT 1
         `
         if (existingTarget && existingTarget.length > 0) {
-          throw AppError.conflict('Student already has an active class enrollment in target academic period.')
+          throw AppError.conflict(
+            'Student already has an active class enrollment in target academic period.',
+          )
         }
 
         const updatedSourceRows = await sql<ClassEnrollment[]>`
@@ -1510,7 +1559,10 @@ export class PostgresDomainStore implements DomainStore {
     }
   }
 
-  async getCalendarExceptionByDate(date: string, academicPeriodId?: string): Promise<CalendarException | null> {
+  async getCalendarExceptionByDate(
+    date: string,
+    academicPeriodId?: string,
+  ): Promise<CalendarException | null> {
     try {
       const formattedDate = date.slice(0, 10)
       const rows = await this.sql<CalendarException[]>`
@@ -1552,7 +1604,10 @@ export class PostgresDomainStore implements DomainStore {
     }
   }
 
-  async updateCalendarException(id: string, params: UpdateCalendarExceptionParams): Promise<CalendarException> {
+  async updateCalendarException(
+    id: string,
+    params: UpdateCalendarExceptionParams,
+  ): Promise<CalendarException> {
     try {
       const existing = await this.getCalendarExceptionById(id)
       if (!existing) throw AppError.notFound('Calendar exception')
@@ -2175,10 +2230,8 @@ export class PostgresDomainStore implements DomainStore {
       await this.sql.begin(async (sql) => {
         const fullName =
           (updates.fullName !== undefined ? updates.fullName : existing.full_name) ?? null
-        const gender =
-          (updates.gender !== undefined ? updates.gender : existing.gender) ?? null
-        const role =
-          (updates.role !== undefined ? updates.role : existing.role) ?? 'student'
+        const gender = (updates.gender !== undefined ? updates.gender : existing.gender) ?? null
+        const role = (updates.role !== undefined ? updates.role : existing.role) ?? 'student'
         const lifecycleStatus =
           (updates.lifecycleStatus !== undefined
             ? updates.lifecycleStatus
@@ -2391,9 +2444,7 @@ export class PostgresDomainStore implements DomainStore {
     }
   }
 
-  async createPasswordResetCode(
-    params: CreatePasswordResetCodeParams,
-  ): Promise<PasswordResetCode> {
+  async createPasswordResetCode(params: CreatePasswordResetCodeParams): Promise<PasswordResetCode> {
     try {
       const rows = await this.sql<PasswordResetCode[]>`
         INSERT INTO password_reset_codes (user_id, code, expires_at, created_by)
@@ -2616,7 +2667,6 @@ export class PostgresDomainStore implements DomainStore {
     }
   }
 
-
   // ---------------------------------------------------------------------------
   // Notification Outbox domain methods
   // ---------------------------------------------------------------------------
@@ -2739,7 +2789,9 @@ export class PostgresDomainStore implements DomainStore {
     }
   }
 
-  async claimPendingNotifications(params?: ClaimPendingNotificationsParams): Promise<NotificationRecord[]> {
+  async claimPendingNotifications(
+    params?: ClaimPendingNotificationsParams,
+  ): Promise<NotificationRecord[]> {
     const limit = params?.limit ?? 10
     const maxRetries = params?.maxRetries ?? 3
     const nowIso = params?.now ? new Date(params.now).toISOString() : new Date().toISOString()
@@ -2780,7 +2832,9 @@ export class PostgresDomainStore implements DomainStore {
     }
   }
 
-  async updateNotificationStatus(params: UpdateNotificationStatusParams): Promise<NotificationRecord> {
+  async updateNotificationStatus(
+    params: UpdateNotificationStatusParams,
+  ): Promise<NotificationRecord> {
     try {
       const nextRetryAtVal = params.nextRetryAt ? new Date(params.nextRetryAt).toISOString() : null
       const rows = await this.sql`
@@ -2839,8 +2893,12 @@ export class PostgresDomainStore implements DomainStore {
       retry_count: Number(row.retry_count ?? 0),
       next_retry_at: row.next_retry_at ? new Date(row.next_retry_at).toISOString() : null,
       error_message: row.error_message ?? null,
-      created_at: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
-      updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString(),
+      created_at: row.created_at
+        ? new Date(row.created_at).toISOString()
+        : new Date().toISOString(),
+      updated_at: row.updated_at
+        ? new Date(row.updated_at).toISOString()
+        : new Date().toISOString(),
     }
   }
 

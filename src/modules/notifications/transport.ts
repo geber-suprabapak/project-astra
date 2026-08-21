@@ -96,8 +96,14 @@ export class LoggingNotificationTransport implements NotificationTransport {
 }
 
 export class MockNotificationTransport implements NotificationTransport {
-  public deliveredPushes: Array<{ notification: NotificationRecord; recipient?: UserProfile | null }> = []
-  public deliveredEmails: Array<{ notification: NotificationRecord; recipient?: UserProfile | null }> = []
+  public deliveredPushes: Array<{
+    notification: NotificationRecord
+    recipient?: UserProfile | null
+  }> = []
+  public deliveredEmails: Array<{
+    notification: NotificationRecord
+    recipient?: UserProfile | null
+  }> = []
   public failureChannel?: 'push' | 'email' | 'all'
   public failureError = 'Simulated transport failure'
 

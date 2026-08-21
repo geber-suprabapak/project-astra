@@ -4,7 +4,13 @@ import type { RobinClient } from '../clients/robin/client.js'
 export const profileLifecycleStatusSchema = z.enum(['pending', 'approved', 'rejected', 'disabled'])
 export type ProfileLifecycleStatus = z.infer<typeof profileLifecycleStatusSchema>
 
-export const identityRoleSchema = z.enum(['platform_admin', 'school_admin', 'teacher', 'student', 'staff'])
+export const identityRoleSchema = z.enum([
+  'platform_admin',
+  'school_admin',
+  'teacher',
+  'student',
+  'staff',
+])
 export type IdentityRole = z.infer<typeof identityRoleSchema>
 
 export interface UserProfile {
@@ -661,10 +667,17 @@ export interface DomainStore {
     academicPeriodId?: string
     status?: ClassEnrollmentStatus
   }): Promise<ClassEnrollment[]>
-  getActiveClassEnrollment(userId: string, academicPeriodId?: string): Promise<ClassEnrollment | null>
+  getActiveClassEnrollment(
+    userId: string,
+    academicPeriodId?: string,
+  ): Promise<ClassEnrollment | null>
   enrollStudentInClass(params: EnrollStudentParams): Promise<ClassEnrollment>
-  transferStudentEnrollment(params: TransferStudentEnrollmentParams): Promise<{ previous: ClassEnrollment; current: ClassEnrollment }>
-  promoteStudentEnrollment(params: PromoteStudentEnrollmentParams): Promise<{ previous: ClassEnrollment; current: ClassEnrollment }>
+  transferStudentEnrollment(
+    params: TransferStudentEnrollmentParams,
+  ): Promise<{ previous: ClassEnrollment; current: ClassEnrollment }>
+  promoteStudentEnrollment(
+    params: PromoteStudentEnrollmentParams,
+  ): Promise<{ previous: ClassEnrollment; current: ClassEnrollment }>
   exitStudentEnrollment(params: ExitStudentEnrollmentParams): Promise<ClassEnrollment>
   getStudentEnrollmentHistory(userId: string): Promise<ClassEnrollment[]>
 
@@ -676,7 +689,10 @@ export interface DomainStore {
     isActive?: boolean
   }): Promise<Schedule[]>
   getScheduleById(id: string): Promise<Schedule | null>
-  getActiveSchedule(dayKey: string, params?: { classId?: string; academicPeriodId?: string }): Promise<Schedule | null>
+  getActiveSchedule(
+    dayKey: string,
+    params?: { classId?: string; academicPeriodId?: string },
+  ): Promise<Schedule | null>
   createSchedule(params: CreateScheduleParams): Promise<Schedule>
   updateSchedule(id: string, params: UpdateScheduleParams): Promise<Schedule>
   deleteSchedule(id: string): Promise<void>
@@ -688,9 +704,15 @@ export interface DomainStore {
     endDate?: string
   }): Promise<CalendarException[]>
   getCalendarExceptionById(id: string): Promise<CalendarException | null>
-  getCalendarExceptionByDate(date: string, academicPeriodId?: string): Promise<CalendarException | null>
+  getCalendarExceptionByDate(
+    date: string,
+    academicPeriodId?: string,
+  ): Promise<CalendarException | null>
   createCalendarException(params: CreateCalendarExceptionParams): Promise<CalendarException>
-  updateCalendarException(id: string, params: UpdateCalendarExceptionParams): Promise<CalendarException>
+  updateCalendarException(
+    id: string,
+    params: UpdateCalendarExceptionParams,
+  ): Promise<CalendarException>
   deleteCalendarException(id: string): Promise<void>
 
   // Location / Geofence domain methods
@@ -742,7 +764,9 @@ export interface DomainStore {
 
   // Student Onboarding & Account Recovery methods
   getRosterStudentByNis(nis: string): Promise<RosterStudent | null>
-  listStudentProfiles(filter?: { lifecycle_status?: ProfileLifecycleStatus }): Promise<UserProfile[]>
+  listStudentProfiles(filter?: {
+    lifecycle_status?: ProfileLifecycleStatus
+  }): Promise<UserProfile[]>
   createPendingStudentProfile(params: {
     userId: string
     nis: string
@@ -759,7 +783,11 @@ export interface DomainStore {
   // File metadata and lifecycle methods
   createFileRecord(params: CreateFileRecordParams): Promise<FileRecord>
   getFileRecord(id: string): Promise<FileRecord | null>
-  listFiles(filter?: { userId?: string; purpose?: FilePurpose; lifecycle?: FileLifecycle }): Promise<FileRecord[]>
+  listFiles(filter?: {
+    userId?: string
+    purpose?: FilePurpose
+    lifecycle?: FileLifecycle
+  }): Promise<FileRecord[]>
   updateFileLifecycle(id: string, lifecycle: FileLifecycle): Promise<FileRecord>
   deleteFileRecord(id: string): Promise<void>
   deleteFaceEnrollmentFiles(userId: string): Promise<number>
@@ -858,10 +886,20 @@ export interface ObjectStorage {
   uploadPermitAttachment(userId: string, file: Buffer, contentType: string): Promise<string>
   getSignedPermitUrl(path: string): Promise<string | null>
   deletePermitAttachment?(path: string): Promise<void>
-  uploadFaceEnrollmentImage(userId: string, imageIndex: number, file: Buffer, contentType: string): Promise<string>
+  uploadFaceEnrollmentImage(
+    userId: string,
+    imageIndex: number,
+    file: Buffer,
+    contentType: string,
+  ): Promise<string>
   deleteFaceEnrollmentImages(userId: string): Promise<void>
   getSignedFaceEnrollmentUrl(path: string): Promise<string | null>
-  getPresignedUploadUrl?(params: { bucket?: string; key: string; contentType: string; expiresInSeconds?: number }): Promise<string>
+  getPresignedUploadUrl?(params: {
+    bucket?: string
+    key: string
+    contentType: string
+    expiresInSeconds?: number
+  }): Promise<string>
   checkHealth(): Promise<boolean>
 }
 
@@ -930,5 +968,3 @@ export interface ClaimPendingNotificationsParams {
   maxRetries?: number
   now?: Date | string
 }
-
-

@@ -447,7 +447,7 @@ describe('integration: /v1/mobile contract boundary', () => {
         body: JSON.stringify({ token: 'ExponentPushToken[test]' }),
       })
       expect(update.status).toBe(200)
- 
+
       const read = await app.request('/v1/mobile/notifications/token', {
         headers: { Authorization: authHeader },
       })

@@ -30,9 +30,7 @@ export function createV1Mobile(deps: V1MobileDeps = {}) {
 
   const health =
     deps.mobileHealthRouter ??
-    (deps.providers
-      ? createMobileHealthRouter({ providers: deps.providers })
-      : mobileHealthRouter)
+    (deps.providers ? createMobileHealthRouter({ providers: deps.providers }) : mobileHealthRouter)
   const dashboard =
     deps.dashboardRouter ??
     (deps.providers ? createDashboardRouter({ providers: deps.providers }) : dashboardRouter)
@@ -74,4 +72,3 @@ export function createV1Mobile(deps: V1MobileDeps = {}) {
 }
 
 export const v1Mobile = createV1Mobile()
-

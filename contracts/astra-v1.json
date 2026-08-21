@@ -3,11 +3,7 @@
   "version": "v1",
   "published_at": "2026-08-21",
   "request": {
-    "required_headers": [
-      "Authorization",
-      "X-Request-ID",
-      "X-Astra-Contract-Version"
-    ],
+    "required_headers": ["Authorization", "X-Request-ID", "X-Astra-Contract-Version"],
     "contract_header": { "name": "X-Astra-Contract-Version", "value": "v1" },
     "authorization": "Logto OIDC access token"
   },

@@ -15,14 +15,17 @@ export async function registerStudent(
   // 2. Validate that NIS is present in the accepted student roster
   const rosterStudent = await providers.domainStore.getRosterStudentByNis(input.nis)
   if (!rosterStudent) {
-    throw AppError.validationError(`NIS "${input.nis}" is not found in the accepted student roster.`)
+    throw AppError.validationError(
+      `NIS "${input.nis}" is not found in the accepted student roster.`,
+    )
   }
 
   // 3. Check if an active/pending profile already exists for this NIS
   const existingProfile = await providers.domainStore.getProfileByNis(input.nis)
   if (
     existingProfile &&
-    (existingProfile.lifecycle_status === 'pending' || existingProfile.lifecycle_status === 'approved') &&
+    (existingProfile.lifecycle_status === 'pending' ||
+      existingProfile.lifecycle_status === 'approved') &&
     existingProfile.email
   ) {
     throw AppError.conflict(

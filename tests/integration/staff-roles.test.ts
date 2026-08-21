@@ -378,17 +378,14 @@ describe('integration: manage staff, roles, and permissions (Ticket 05)', () => 
       // SAFETY: response JSON follows standard envelope
       const staff = (await createRes.json()) as { data: UserProfile }
 
-      const resetRes = await app.request(
-        `/v1/admin/staff/${staff.data.user_id}/reset-password`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${schoolAdminToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({}),
+      const resetRes = await app.request(`/v1/admin/staff/${staff.data.user_id}/reset-password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${schoolAdminToken}`,
+          'Content-Type': 'application/json',
         },
-      )
+        body: JSON.stringify({}),
+      })
       expect(resetRes.status).toBe(200)
 
       const auditLogs = await domainStore.getAuditLogs('profile', staff.data.user_id)

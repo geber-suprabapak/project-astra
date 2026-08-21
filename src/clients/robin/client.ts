@@ -50,7 +50,9 @@ function userIdFromToken(token?: string): string | undefined {
     const payload = token.split('.')[1]
     if (!payload) return undefined
     // SAFETY: Astra has already validated the bearer token; only its subject is copied as context.
-    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { sub?: string }
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+      sub?: string
+    }
     return claims.sub
   } catch {
     return undefined
@@ -119,10 +121,13 @@ export class RobinClient {
 
     if (!res.ok) {
       const errorJson = await res.json().catch(() => null)
-      const errorSchema = z.object({ message: z.string().optional(), detail: z.string().optional() })
+      const errorSchema = z.object({
+        message: z.string().optional(),
+        detail: z.string().optional(),
+      })
       const parsedError = errorSchema.safeParse(errorJson)
       const msg = parsedError.success
-        ? (parsedError.data.message || parsedError.data.detail || 'Face not recognized.')
+        ? parsedError.data.message || parsedError.data.detail || 'Face not recognized.'
         : 'Face not recognized.'
       throw AppError.attendanceBlocked(msg)
     }
@@ -136,7 +141,9 @@ export class RobinClient {
       confidence: data.confidence,
       qualityScore: data.quality_score,
       processTimeMs: data.process_time_ms ?? 0,
-      message: data.message || (data.status === 'ok' ? 'Face verified successfully' : 'Face not recognized.'),
+      message:
+        data.message ||
+        (data.status === 'ok' ? 'Face verified successfully' : 'Face not recognized.'),
     }
   }
 

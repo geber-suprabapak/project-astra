@@ -10,16 +10,16 @@ export type { CheckStatus, HealthChecks, ReadinessResult } from './schema.js'
 export async function getReadiness(
   providers: AppProviders = defaultProviders,
 ): Promise<ReadinessResult> {
-  const [dbResult, storageResult, identityResult, robinResult, redisResult] = await Promise.allSettled([
-    providers.domainStore.checkHealth(),
-    providers.objectStorage.checkHealth(),
-    providers.identityProvider.checkHealth(),
-    providers.robinClient.checkReadiness(),
-    checkRedisReady(),
-  ])
+  const [dbResult, storageResult, identityResult, robinResult, redisResult] =
+    await Promise.allSettled([
+      providers.domainStore.checkHealth(),
+      providers.objectStorage.checkHealth(),
+      providers.identityProvider.checkHealth(),
+      providers.robinClient.checkReadiness(),
+      checkRedisReady(),
+    ])
 
-  const database: CheckStatus =
-    dbResult.status === 'fulfilled' && dbResult.value ? 'ok' : 'fail'
+  const database: CheckStatus = dbResult.status === 'fulfilled' && dbResult.value ? 'ok' : 'fail'
   const objectStorage: CheckStatus =
     storageResult.status === 'fulfilled' && storageResult.value ? 'ok' : 'fail'
   const identity: CheckStatus =

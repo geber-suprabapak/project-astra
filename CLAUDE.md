@@ -46,6 +46,7 @@ The local pre-merge gate is `typecheck`, `lint`, `test`, `test:integration` — 
 ### Provider Seams
 
 `src/providers/` houses provider interfaces and implementations:
+
 - `DomainStore` (`PostgresDomainStore`, `MemoryDomainStore`): PostgreSQL domain queries and mutations
 - `ObjectStorage` (`S3ObjectStorage`, `MemoryObjectStorage`): S3-compatible file storage (avatars, permits)
 - `IdentityProvider` (`OidcIdentityProvider`, `MemoryIdentityProvider`): OIDC/Logto JWT validation and password updates
