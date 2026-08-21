@@ -121,11 +121,62 @@ export interface InsertPermitData {
   tanggal: string
 }
 
-export interface InsertAttendanceData {
+export const attendanceStatusSchema = z.enum(['Hadir', 'Terlambat', 'Pulang', 'Alpha'])
+export type AttendanceStatus = z.infer<typeof attendanceStatusSchema>
+
+export const attendanceActionTypeSchema = z.enum(['check_in', 'check_out'])
+export type AttendanceActionType = z.infer<typeof attendanceActionTypeSchema>
+
+export const attendanceAttemptStatusSchema = z.enum(['success', 'failed', 'error'])
+export type AttendanceAttemptStatus = z.infer<typeof attendanceAttemptStatusSchema>
+
+export interface AttendanceRecord {
+  id: string
   user_id: string
   date: string
-  status: 'Hadir' | 'Terlambat' | 'Pulang'
-  created_at?: string
+  status: AttendanceStatus
+  action_type: AttendanceActionType | null
+  latitude?: number | null
+  longitude?: number | null
+  created_at: string
+}
+
+export interface AttendanceAttempt {
+  id: string
+  user_id: string
+  action_type: AttendanceActionType
+  status: AttendanceAttemptStatus
+  reason?: string | null
+  quality_score?: number | null
+  confidence?: number | null
+  latitude?: number | null
+  longitude?: number | null
+  process_time_ms?: number | null
+  created_at: string
+}
+
+export interface RecordAttendanceAttemptParams {
+  userId: string
+  actionType: AttendanceActionType
+  status: AttendanceAttemptStatus
+  reason?: string | null
+  qualityScore?: number | null
+  confidence?: number | null
+  latitude?: number | null
+  longitude?: number | null
+  processTimeMs?: number | null
+}
+
+export interface CreateManualAttendanceParams {
+  userId: string
+  actionType: AttendanceActionType
+  status?: AttendanceStatus
+  reason: string
+  date?: string
+  latitude?: number | null
+  longitude?: number | null
+  attemptId?: string | null
+  actorId: string
 }
 
 export interface AttendanceActionValidationResult {
@@ -484,6 +535,16 @@ export interface UserEffectivePermissions {
   permissions: string[]
 }
 
+export interface InsertAttendanceData {
+  user_id: string
+  date: string
+  status: AttendanceStatus
+  action_type?: AttendanceActionType | null
+  latitude?: number | null
+  longitude?: number | null
+  created_at?: string
+}
+
 export interface DomainStore {
   getUserProfile(userId: string): Promise<UserProfile>
   updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<void>
@@ -509,6 +570,24 @@ export interface DomainStore {
     latitude: number
     longitude: number
   }): Promise<SaveAttendanceRecordRpcResponse>
+
+  // Attendance & Attempts domain methods
+  recordAttendanceAttempt(params: RecordAttendanceAttemptParams): Promise<AttendanceAttempt>
+  listAttendanceAttempts(filter?: {
+    userId?: string
+    status?: AttendanceAttemptStatus
+    actionType?: AttendanceActionType
+    limit?: number
+  }): Promise<AttendanceAttempt[]>
+  getAttendanceAttempt(id: string): Promise<AttendanceAttempt | null>
+  createManualAttendance(params: CreateManualAttendanceParams): Promise<AttendanceRecord>
+  listAttendances(filter?: {
+    userId?: string
+    date?: string
+    status?: string
+    actionType?: string
+    limit?: number
+  }): Promise<AttendanceRecord[]>
 
   // Academic Periods domain methods
   listAcademicPeriods(filter?: { isActive?: boolean }): Promise<AcademicPeriod[]>

@@ -14,6 +14,7 @@ import {
   createCalendarExceptionSchema,
   createClassSchema,
   createLocationSchema,
+  createManualAttendanceSchema,
   createPermissionSchema,
   createRoleSchema,
   createScheduleSchema,
@@ -44,6 +45,7 @@ import {
   createCalendarException,
   createClass,
   createLocation,
+  createManualAttendance,
   createPermission,
   createRole,
   createSchedule,
@@ -56,6 +58,7 @@ import {
   enrollStudent,
   exitStudentEnrollment,
   generateStudentResetCode,
+  getAttendanceAttempt,
   getBootstrapStatus,
   getCalendarException,
   getLocation,
@@ -67,6 +70,8 @@ import {
   getStaffEffectivePermissions,
   getStudent,
   listAcademicPeriods,
+  listAttendanceAttempts,
+  listAttendances,
   listCalendarExceptions,
   listClasses,
   listClassEnrollments,
@@ -92,7 +97,11 @@ import {
   updateStaff,
   validateAndStageRoster,
 } from './service.js'
-import { profileLifecycleStatusSchema } from '../../providers/types.js'
+import {
+  attendanceActionTypeSchema,
+  attendanceAttemptStatusSchema,
+  profileLifecycleStatusSchema,
+} from '../../providers/types.js'
 
 export interface AdminRouterDeps {
   providers?: AppProviders
@@ -1086,6 +1095,117 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
     })
     return successResponse(c, { id }, 'Calendar exception deleted successfully.')
   })
+
+  // -------------------------------------------------------------------------
+  // Manual Attendance & Attendance Attempts Routes
+  // -------------------------------------------------------------------------
+
+  // POST /v1/admin/attendance/manual & /v1/admin/attendances/manual
+  const handleCreateManualAttendance = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json()
+    const parsed = createManualAttendanceSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+
+    const targetUserId = (parsed.data.user_id ?? parsed.data.userId)!
+    const actionType = (parsed.data.action_type ?? parsed.data.actionType)!
+    const attemptId = parsed.data.attempt_id ?? parsed.data.attemptId ?? null
+
+    const attendance = await createManualAttendance({
+      userId: targetUserId,
+      actionType,
+      status: parsed.data.status,
+      reason: parsed.data.reason,
+      date: parsed.data.date,
+      attemptId,
+      latitude: parsed.data.latitude,
+      longitude: parsed.data.longitude,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, attendance, 'Manual attendance recorded successfully.', 201)
+  }
+
+  router.post('/attendance/manual', handleCreateManualAttendance)
+  router.post('/attendances/manual', handleCreateManualAttendance)
+
+  // GET /v1/admin/attendance/attempts & /v1/admin/attendances/attempts
+  const handleListAttendanceAttempts = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const userId = c.req.query('user_id') ?? c.req.query('userId')
+    const statusQuery = c.req.query('status')
+    const actionTypeQuery = c.req.query('action_type') ?? c.req.query('actionType')
+    const limitQuery = c.req.query('limit')
+
+    const statusParsed = statusQuery ? attendanceAttemptStatusSchema.safeParse(statusQuery) : null
+    const actionTypeParsed = actionTypeQuery ? attendanceActionTypeSchema.safeParse(actionTypeQuery) : null
+
+    if (statusQuery && (!statusParsed || !statusParsed.success)) {
+      throw AppError.validationError('Invalid status query parameter.')
+    }
+    if (actionTypeQuery && (!actionTypeParsed || !actionTypeParsed.success)) {
+      throw AppError.validationError('Invalid action_type query parameter.')
+    }
+
+    const limit = limitQuery ? Number(limitQuery) : undefined
+
+    const attempts = await listAttendanceAttempts({
+      filter: {
+        userId,
+        status: statusParsed ? statusParsed.data : undefined,
+        actionType: actionTypeParsed ? actionTypeParsed.data : undefined,
+        limit,
+      },
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, attempts, 'Attendance attempts retrieved successfully.')
+  }
+
+  router.get('/attendance/attempts', handleListAttendanceAttempts)
+  router.get('/attendances/attempts', handleListAttendanceAttempts)
+
+  // GET /v1/admin/attendance/attempts/:id & /v1/admin/attendances/attempts/:id
+  const handleGetAttendanceAttempt = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const attempt = await getAttendanceAttempt({
+      id,
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, attempt, 'Attendance attempt retrieved successfully.')
+  }
+
+  router.get('/attendance/attempts/:id', handleGetAttendanceAttempt)
+  router.get('/attendances/attempts/:id', handleGetAttendanceAttempt)
+
+  // GET /v1/admin/attendance & /v1/admin/attendances
+  const handleListAttendances = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const userId = c.req.query('user_id') ?? c.req.query('userId')
+    const date = c.req.query('date')
+    const status = c.req.query('status')
+    const actionType = c.req.query('action_type') ?? c.req.query('actionType')
+    const limitQuery = c.req.query('limit')
+    const limit = limitQuery ? Number(limitQuery) : undefined
+
+    const attendances = await listAttendances({
+      filter: { userId, date, status, actionType, limit },
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, attendances, 'Attendances retrieved successfully.')
+  }
+
+  router.get('/attendance', handleListAttendances)
+  router.get('/attendances', handleListAttendances)
 
   return router
 }

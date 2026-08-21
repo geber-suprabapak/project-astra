@@ -1055,6 +1055,124 @@ describe('PostgresDomainStore (Greenfield)', () => {
 
     await expect(store.deleteFaceEnrollment('student-1')).resolves.toBeUndefined()
   })
+
+  it('recordAttendanceAttempt, listAttendanceAttempts, and getAttendanceAttempt operate on attendance_attempts table', async () => {
+    const mockSql = createMockSql((strings: TemplateStringsArray) => {
+      const query = strings.join('?')
+      if (query.includes('INSERT INTO attendance_attempts')) {
+        return [
+          {
+            id: 'attempt-123',
+            user_id: 'student-1',
+            action_type: 'check_in',
+            status: 'failed',
+            reason: 'Face does not match enrolled face',
+            quality_score: 0.45,
+            confidence: 0.52,
+            latitude: -6.2,
+            longitude: 106.81,
+            process_time_ms: 120,
+            created_at: '2026-08-21T07:05:00Z',
+          },
+        ]
+      }
+      if (query.includes('SELECT') && query.includes('FROM attendance_attempts')) {
+        return [
+          {
+            id: 'attempt-123',
+            user_id: 'student-1',
+            action_type: 'check_in',
+            status: 'failed',
+            reason: 'Face does not match enrolled face',
+            quality_score: 0.45,
+            confidence: 0.52,
+            latitude: -6.2,
+            longitude: 106.81,
+            process_time_ms: 120,
+            created_at: '2026-08-21T07:05:00Z',
+          },
+        ]
+      }
+      return []
+    })
+
+    const store = new PostgresDomainStore({ sql: mockSql })
+    const recorded = await store.recordAttendanceAttempt({
+      userId: 'student-1',
+      actionType: 'check_in',
+      status: 'failed',
+      reason: 'Face does not match enrolled face',
+      qualityScore: 0.45,
+      confidence: 0.52,
+      latitude: -6.2,
+      longitude: 106.81,
+      processTimeMs: 120,
+    })
+
+    expect(recorded.id).toBe('attempt-123')
+    expect(recorded.status).toBe('failed')
+    expect(recorded.confidence).toBe(0.52)
+
+    const list = await store.listAttendanceAttempts({ userId: 'student-1', status: 'failed' })
+    expect(list).toHaveLength(1)
+    expect(list[0].id).toBe('attempt-123')
+
+    const single = await store.getAttendanceAttempt('attempt-123')
+    expect(single?.id).toBe('attempt-123')
+  })
+
+  it('createManualAttendance and listAttendances operate on attendances table', async () => {
+    const mockSql = createMockSql((strings: TemplateStringsArray) => {
+      const query = strings.join('?')
+      if (query.includes('INSERT INTO attendances')) {
+        return [
+          {
+            id: 'att-manual-1',
+            user_id: 'student-1',
+            date: '2026-08-21',
+            status: 'Hadir',
+            action_type: 'check_in',
+            latitude: -6.2,
+            longitude: 106.81,
+            created_at: '2026-08-21T07:10:00Z',
+          },
+        ]
+      }
+      if (query.includes('SELECT') && query.includes('FROM attendances')) {
+        return [
+          {
+            id: 'att-manual-1',
+            user_id: 'student-1',
+            date: '2026-08-21',
+            status: 'Hadir',
+            action_type: 'check_in',
+            latitude: -6.2,
+            longitude: 106.81,
+            created_at: '2026-08-21T07:10:00Z',
+          },
+        ]
+      }
+      return []
+    })
+
+    const store = new PostgresDomainStore({ sql: mockSql })
+    const manual = await store.createManualAttendance({
+      userId: 'student-1',
+      actionType: 'check_in',
+      status: 'Hadir',
+      reason: 'Face camera broken',
+      actorId: 'admin-1',
+    })
+
+    expect(manual.id).toBe('att-manual-1')
+    expect(manual.status).toBe('Hadir')
+    expect(manual.action_type).toBe('check_in')
+
+    const list = await store.listAttendances({ userId: 'student-1' })
+    expect(list).toHaveLength(1)
+    expect(list[0].id).toBe('att-manual-1')
+  })
 })
+
 
 

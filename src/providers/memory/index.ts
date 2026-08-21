@@ -6,6 +6,11 @@ import {
   type AcademicPeriod,
   type ActivePermitSummary,
   type AttendanceActionRpcResponse,
+  type AttendanceActionType,
+  type AttendanceAttempt,
+  type AttendanceAttemptStatus,
+  type AttendanceRecord,
+  type AttendanceStatus,
   type AuditLog,
   type AuditLogEntry,
   type BootstrapStatus,
@@ -18,6 +23,7 @@ import {
   type CreateClassParams,
   type CreateFileRecordParams,
   type CreateLocationParams,
+  type CreateManualAttendanceParams,
   type CreatePasswordResetCodeParams,
   type CreateStudentIdentityParams,
   type CreatePermissionParams,
@@ -44,6 +50,7 @@ import {
   type Permit,
   type ProfileLifecycleStatus,
   type PromoteStudentEnrollmentParams,
+  type RecordAttendanceAttemptParams,
   type Role,
   type RosterReport,
   type RosterStudent,
@@ -271,6 +278,8 @@ export class MemoryDomainStore implements DomainStore {
   public resetCodes: PasswordResetCode[] = []
   public files = new Map<string, FileRecord>()
   public faceEnrollments = new Map<string, FaceEnrollmentRecord>()
+  public attendanceAttempts: AttendanceAttempt[] = []
+  public attendancesList: AttendanceRecord[] = []
   public signupOpen = false
   public isHealthy = true
 
@@ -1020,13 +1029,119 @@ export class MemoryDomainStore implements DomainStore {
   }): Promise<SaveAttendanceRecordRpcResponse> {
     const todayWIB = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
     const status = params.actionType === 'check_in' ? 'Hadir' : 'Pulang'
+    const record: AttendanceRecord = {
+      id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      user_id: params.userId,
+      date: todayWIB,
+      status,
+      action_type: params.actionType,
+      latitude: params.latitude,
+      longitude: params.longitude,
+      created_at: new Date().toISOString(),
+    }
     this.absences.push({
       status,
       date: todayWIB,
       user_id: params.userId,
-      created_at: new Date().toISOString(),
+      created_at: record.created_at,
     })
+    this.attendancesList.unshift(record)
     return { success: true }
+  }
+
+  async recordAttendanceAttempt(params: RecordAttendanceAttemptParams): Promise<AttendanceAttempt> {
+    const attempt: AttendanceAttempt = {
+      id: `attempt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      user_id: params.userId,
+      action_type: params.actionType,
+      status: params.status,
+      reason: params.reason ?? null,
+      quality_score: params.qualityScore ?? null,
+      confidence: params.confidence ?? null,
+      latitude: params.latitude ?? null,
+      longitude: params.longitude ?? null,
+      process_time_ms: params.processTimeMs ?? null,
+      created_at: new Date().toISOString(),
+    }
+    this.attendanceAttempts.unshift(attempt)
+    return { ...attempt }
+  }
+
+  async listAttendanceAttempts(filter?: {
+    userId?: string
+    status?: AttendanceAttemptStatus
+    actionType?: AttendanceActionType
+    limit?: number
+  }): Promise<AttendanceAttempt[]> {
+    let items = [...this.attendanceAttempts]
+    if (filter?.userId) {
+      items = items.filter((a) => a.user_id === filter.userId)
+    }
+    if (filter?.status) {
+      items = items.filter((a) => a.status === filter.status)
+    }
+    if (filter?.actionType) {
+      items = items.filter((a) => a.action_type === filter.actionType)
+    }
+    const limit = Math.min(Math.max(filter?.limit ?? 50, 1), 100)
+    return items.slice(0, limit).map((a) => ({ ...a }))
+  }
+
+  async getAttendanceAttempt(id: string): Promise<AttendanceAttempt | null> {
+    const attempt = this.attendanceAttempts.find((a) => a.id === id)
+    if (!attempt) return null
+    return { ...attempt }
+  }
+
+  async createManualAttendance(params: CreateManualAttendanceParams): Promise<AttendanceRecord> {
+    const todayWIB = params.date ?? new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    const status: AttendanceStatus =
+      params.status ?? (params.actionType === 'check_in' ? 'Hadir' : 'Pulang')
+
+    const record: AttendanceRecord = {
+      id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      user_id: params.userId,
+      date: todayWIB,
+      status,
+      action_type: params.actionType,
+      latitude: params.latitude ?? null,
+      longitude: params.longitude ?? null,
+      created_at: new Date().toISOString(),
+    }
+
+    this.absences.push({
+      status: record.status,
+      date: record.date,
+      user_id: record.user_id,
+      created_at: record.created_at,
+    })
+    this.attendancesList.unshift(record)
+
+    return { ...record }
+  }
+
+  async listAttendances(filter?: {
+    userId?: string
+    date?: string
+    status?: string
+    actionType?: string
+    limit?: number
+  }): Promise<AttendanceRecord[]> {
+    let items = [...this.attendancesList]
+    if (filter?.userId) {
+      items = items.filter((a) => a.user_id === filter.userId)
+    }
+    if (filter?.date) {
+      items = items.filter((a) => a.date === filter.date)
+    }
+    if (filter?.status) {
+      items = items.filter((a) => a.status === filter.status)
+    }
+    if (filter?.actionType) {
+      items = items.filter((a) => a.action_type === filter.actionType)
+    }
+    const limit = Math.min(Math.max(filter?.limit ?? 50, 1), 100)
+    return items.slice(0, limit).map((a) => ({ ...a }))
   }
 
   async getSchool(): Promise<School | null> {

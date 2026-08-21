@@ -7,6 +7,11 @@ import type {
   AcademicPeriod,
   ActivePermitSummary,
   AttendanceActionRpcResponse,
+  AttendanceActionType,
+  AttendanceAttempt,
+  AttendanceAttemptStatus,
+  AttendanceRecord,
+  AttendanceStatus,
   AuditLog,
   AuditLogEntry,
   BootstrapStatus,
@@ -19,6 +24,7 @@ import type {
   CreateClassParams,
   CreateFileRecordParams,
   CreateLocationParams,
+  CreateManualAttendanceParams,
   CreatePasswordResetCodeParams,
   CreatePermissionParams,
   CreateRoleParams,
@@ -40,6 +46,7 @@ import type {
   Permit,
   ProfileLifecycleStatus,
   PromoteStudentEnrollmentParams,
+  RecordAttendanceAttemptParams,
   Role,
   RosterReport,
   RosterStudent,
@@ -463,6 +470,140 @@ export class PostgresDomainStore implements DomainStore {
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, params }, 'Failed to save attendance record')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async recordAttendanceAttempt(params: RecordAttendanceAttemptParams): Promise<AttendanceAttempt> {
+    try {
+      const rows = await this.sql<AttendanceAttempt[]>`
+        INSERT INTO attendance_attempts (
+          user_id, action_type, status, reason, quality_score, confidence, latitude, longitude, process_time_ms
+        )
+        VALUES (
+          ${params.userId}, ${params.actionType}, ${params.status},
+          ${params.reason ?? null}, ${params.qualityScore ?? null}, ${params.confidence ?? null},
+          ${params.latitude ?? null}, ${params.longitude ?? null}, ${params.processTimeMs ?? null}
+        )
+        RETURNING id, user_id, action_type, status, reason, quality_score, confidence,
+                  latitude, longitude, process_time_ms, created_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.internal('Failed to record attendance attempt.')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to record attendance attempt')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async listAttendanceAttempts(filter?: {
+    userId?: string
+    status?: AttendanceAttemptStatus
+    actionType?: AttendanceActionType
+    limit?: number
+  }): Promise<AttendanceAttempt[]> {
+    try {
+      const limit = Math.min(Math.max(filter?.limit ?? 50, 1), 100)
+      const rows = await this.sql<AttendanceAttempt[]>`
+        SELECT id, user_id, action_type, status, reason, quality_score, confidence,
+               latitude, longitude, process_time_ms, created_at::text
+        FROM attendance_attempts
+        WHERE 1 = 1
+          ${filter?.userId ? this.sql`AND user_id = ${filter.userId}` : this.sql``}
+          ${filter?.status ? this.sql`AND status = ${filter.status}` : this.sql``}
+          ${filter?.actionType ? this.sql`AND action_type = ${filter.actionType}` : this.sql``}
+        ORDER BY created_at DESC
+        LIMIT ${limit}
+      `
+      return rows
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, filter }, 'Failed to list attendance attempts')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getAttendanceAttempt(id: string): Promise<AttendanceAttempt | null> {
+    try {
+      const rows = await this.sql<AttendanceAttempt[]>`
+        SELECT id, user_id, action_type, status, reason, quality_score, confidence,
+               latitude, longitude, process_time_ms, created_at::text
+        FROM attendance_attempts
+        WHERE id = ${id}
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to get attendance attempt')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async createManualAttendance(params: CreateManualAttendanceParams): Promise<AttendanceRecord> {
+    try {
+      const now = new Date()
+      const todayWIB = params.date ?? getTodayWIB(now)
+      const dayKey = getDayKeyWIB(now)
+
+      let status: AttendanceStatus =
+        params.status ?? (params.actionType === 'check_in' ? 'Hadir' : 'Pulang')
+
+      if (!params.status && params.actionType === 'check_in') {
+        const schedule = await this.getActiveSchedule(dayKey)
+        if (schedule?.selesai_masuk) {
+          const [h = 0, m = 0, s = 0] = schedule.selesai_masuk.split(':').map(Number)
+          const [year = 1970, month = 1, day = 1] = todayWIB.split('-').map(Number)
+          const endUtc = new Date(Date.UTC(year, month - 1, day, h - 7, m, s, 0))
+          if (now > endUtc) {
+            status = 'Terlambat'
+          }
+        }
+      }
+
+      const rows = await this.sql<AttendanceRecord[]>`
+        INSERT INTO attendances (user_id, date, status, action_type, latitude, longitude, created_at)
+        VALUES (${params.userId}, ${todayWIB}, ${status}, ${params.actionType}, ${params.latitude ?? null}, ${params.longitude ?? null}, ${now.toISOString()})
+        RETURNING id, user_id, date, status, action_type, latitude, longitude, created_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.internal('Failed to create manual attendance record.')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to create manual attendance record')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async listAttendances(filter?: {
+    userId?: string
+    date?: string
+    status?: string
+    actionType?: string
+    limit?: number
+  }): Promise<AttendanceRecord[]> {
+    try {
+      const limit = Math.min(Math.max(filter?.limit ?? 50, 1), 100)
+      const rows = await this.sql<AttendanceRecord[]>`
+        SELECT id, user_id, date, status, action_type, latitude, longitude, created_at::text
+        FROM attendances
+        WHERE 1 = 1
+          ${filter?.userId ? this.sql`AND user_id = ${filter.userId}` : this.sql``}
+          ${filter?.date ? this.sql`AND date = ${filter.date}` : this.sql``}
+          ${filter?.status ? this.sql`AND status = ${filter.status}` : this.sql``}
+          ${filter?.actionType ? this.sql`AND action_type = ${filter.actionType}` : this.sql``}
+        ORDER BY created_at DESC
+        LIMIT ${limit}
+      `
+      return rows
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, filter }, 'Failed to list attendances')
       throw AppError.internal('An unexpected database error occurred.')
     }
   }

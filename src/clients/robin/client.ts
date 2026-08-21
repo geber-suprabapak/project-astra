@@ -8,6 +8,7 @@ import {
   RobinIdentifyResponseSchema,
   type RobinEnrollResult,
   type RobinEnrollStatus,
+  type RobinIdentifyResult,
 } from './schemas.js'
 
 const ENROLL_STATUS_TIMEOUT_MS = () => env.robinEnrollStatusTimeoutMs
@@ -83,13 +84,13 @@ export class RobinClient {
 
   // -------------------------------------------------------------------------
   // Identify — timeout: env.robinIdentifyTimeoutMs
-  // Returns only processTimeMs — never leaks student_id/name/confidence
+  // Returns RobinIdentifyResult containing processTimeMs, status, confidence
   // -------------------------------------------------------------------------
   async identify(
     imageBase64: string,
     token: string,
     requestId: string,
-  ): Promise<{ processTimeMs: number }> {
+  ): Promise<RobinIdentifyResult> {
     const res = await fetchWithTimeout(
       `${this.baseUrl}/v1/identify`,
       {
@@ -102,23 +103,25 @@ export class RobinClient {
 
     if (!res.ok) {
       const errorJson = await res.json().catch(() => null)
-      const errorSchema = z.object({ message: z.string() })
+      const errorSchema = z.object({ message: z.string().optional(), detail: z.string().optional() })
       const parsedError = errorSchema.safeParse(errorJson)
-      throw AppError.attendanceBlocked(
-        parsedError.success ? parsedError.data.message : 'Face not recognized.',
-      )
+      const msg = parsedError.success
+        ? (parsedError.data.message || parsedError.data.detail || 'Face not recognized.')
+        : 'Face not recognized.'
+      throw AppError.attendanceBlocked(msg)
     }
 
     const parsed = RobinIdentifyResponseSchema.safeParse(await res.json())
     if (!parsed.success) throw AppError.internal('Unexpected Robin identify response shape.')
 
     const data = parsed.data
-    // Mobile check: faceResult.status === 'ok'
-    if (data.status !== 'ok') {
-      throw AppError.attendanceBlocked(data.message || 'Face not recognized.')
+    return {
+      status: data.status,
+      confidence: data.confidence,
+      qualityScore: data.quality_score,
+      processTimeMs: data.process_time_ms ?? 0,
+      message: data.message || (data.status === 'ok' ? 'Face verified successfully' : 'Face not recognized.'),
     }
-
-    return { processTimeMs: data.process_time_ms ?? 0 }
   }
 
   // -------------------------------------------------------------------------

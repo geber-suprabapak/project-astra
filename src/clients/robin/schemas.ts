@@ -6,9 +6,18 @@ export const RobinIdentifyResponseSchema = z.object({
   student_id: z.string().optional(),
   student_name: z.string().optional(),
   confidence: z.number().optional(),
+  quality_score: z.number().optional(),
   process_time_ms: z.number().optional(),
-  message: z.string(),
+  message: z.string().optional(),
 })
+
+export interface RobinIdentifyResult {
+  status: string
+  confidence?: number
+  qualityScore?: number
+  processTimeMs: number
+  message?: string
+}
 
 // Observed from mobile utils/enrollment.ts EnrollmentStatusResponse interface
 export const RobinEnrollStatusResponseSchema = z.object({

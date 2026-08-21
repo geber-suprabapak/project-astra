@@ -374,13 +374,99 @@ export async function submit(
     throw AppError.enrollmentRequired()
   }
 
-  // Identify face — throws AppError.attendanceBlocked if status !== 'ok'
+  // Identify face — throws on network/timeout/503/400 or returns non-match / match
   const startMs = Date.now()
-  const { processTimeMs } = await actualProviders.robinClient.identify(
-    params.imageBase64,
-    params.token,
-    params.requestId,
-  )
+  let identifyResult: {
+    status?: string
+    confidence?: number
+    qualityScore?: number
+    processTimeMs?: number
+    message?: string
+  }
+
+  try {
+    identifyResult = await actualProviders.robinClient.identify(
+      params.imageBase64,
+      params.token,
+      params.requestId,
+    )
+  } catch (err) {
+    const elapsedMs = Date.now() - startMs
+    if (err instanceof AppError && err.code === 'UPSTREAM_TIMEOUT') {
+      await actualProviders.domainStore.recordAttendanceAttempt({
+        userId: params.userId,
+        actionType: params.actionType,
+        status: 'error',
+        reason: 'Face verification service timeout.',
+        latitude: params.latitude,
+        longitude: params.longitude,
+        processTimeMs: elapsedMs,
+      })
+      throw err
+    }
+
+    if (err instanceof AppError && err.code === 'DEPENDENCY_UNAVAILABLE') {
+      await actualProviders.domainStore.recordAttendanceAttempt({
+        userId: params.userId,
+        actionType: params.actionType,
+        status: 'error',
+        reason: 'Face verification service unavailable.',
+        latitude: params.latitude,
+        longitude: params.longitude,
+        processTimeMs: elapsedMs,
+      })
+      throw err
+    }
+
+    const reason = err instanceof AppError ? err.message : 'Face verification error.'
+    await actualProviders.domainStore.recordAttendanceAttempt({
+      userId: params.userId,
+      actionType: params.actionType,
+      status: 'failed',
+      reason,
+      latitude: params.latitude,
+      longitude: params.longitude,
+      processTimeMs: elapsedMs,
+    })
+    throw err
+  }
+
+  const isMatch =
+    !identifyResult.status ||
+    identifyResult.status === 'ok' ||
+    identifyResult.status === 'match' ||
+    identifyResult.status === 'success'
+
+  const processTimeMs = identifyResult.processTimeMs ?? (Date.now() - startMs)
+
+  if (!isMatch) {
+    const reason = identifyResult.message || 'Face does not match enrolled face.'
+    await actualProviders.domainStore.recordAttendanceAttempt({
+      userId: params.userId,
+      actionType: params.actionType,
+      status: 'failed',
+      reason,
+      confidence: identifyResult.confidence,
+      qualityScore: identifyResult.qualityScore,
+      latitude: params.latitude,
+      longitude: params.longitude,
+      processTimeMs,
+    })
+    throw AppError.attendanceBlocked(reason)
+  }
+
+  // Record successful attempt
+  await actualProviders.domainStore.recordAttendanceAttempt({
+    userId: params.userId,
+    actionType: params.actionType,
+    status: 'success',
+    reason: identifyResult.message || 'Face verified successfully',
+    confidence: identifyResult.confidence,
+    qualityScore: identifyResult.qualityScore,
+    latitude: params.latitude,
+    longitude: params.longitude,
+    processTimeMs,
+  })
 
   // Persist attendance through DomainStore
   const saveResult = await actualProviders.domainStore.saveAttendanceRecord({
@@ -401,6 +487,6 @@ export async function submit(
   return {
     attendance_type: params.actionType,
     status_label: insertStatus,
-    processed_ms: processTimeMs || Date.now() - startMs,
+    processed_ms: processTimeMs,
   }
 }
