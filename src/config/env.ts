@@ -100,6 +100,13 @@ export const envSchema = z
           path: ['OIDC_ISSUER'],
         })
       }
+      if (data.ROBIN_SERVICE_TOKEN === 'dev-robin-service-token') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'ROBIN_SERVICE_TOKEN must be rotated in production',
+          path: ['ROBIN_SERVICE_TOKEN'],
+        })
+      }
     }
   })
 

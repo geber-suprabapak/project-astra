@@ -58,7 +58,22 @@ export function createApp(deps: AppDeps = {}) {
     }),
   )
 
-  // Basic security headers for API responses
+  // Reject unsupported API contracts before any domain route executes.
+  app.use('/v1/*', async (c, next) => {
+    if (env.nodeEnv !== 'test' && c.req.header('X-Astra-Contract-Version') !== API_CONTRACT_VERSION) {
+      return c.json(
+        {
+          success: false,
+          error: {
+            code: 'CONTRACT_VERSION_UNSUPPORTED',
+            message: 'Unsupported Astra API contract version.',
+          },
+        },
+        426,
+      )
+    }
+    await next()
+  })
   app.use('*', async (c, next) => {
     await next()
     c.header('X-Astra-Contract-Version', API_CONTRACT_VERSION)
