@@ -17,5 +17,15 @@ export const SubmitBodySchema = z.object({
   longitude: z.number(),
 })
 
+export const AttendanceHistoryQuerySchema = z.object({
+  startDate: z.string().date().optional(),
+  endDate: z.string().date().optional(),
+})
+
+export const AttendanceCalendarQuerySchema = z.object({
+  year: z.coerce.number().int().min(2000).max(2100),
+  month: z.coerce.number().int().min(1).max(12),
+})
+
 export type PrecheckBody = z.infer<typeof PrecheckBodySchema>
 export type SubmitBody = z.infer<typeof SubmitBodySchema>
