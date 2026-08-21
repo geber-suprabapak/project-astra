@@ -4,14 +4,25 @@ import { AppError } from '../../lib/errors/app-error.js'
 import { logger } from '../../lib/logging/logger.js'
 import type {
   Absence,
+  AcademicPeriod,
   ActivePermitSummary,
   AttendanceActionRpcResponse,
+  AuditLog,
+  AuditLogEntry,
+  BootstrapStatus,
+  ClassRoom,
+  CreateAcademicPeriodParams,
+  CreateClassParams,
+  CreateSchoolParams,
   DomainStore,
   InsertAttendanceData,
   InsertPermitData,
   Permit,
+  RosterReport,
   SaveAttendanceRecordRpcResponse,
   Schedule,
+  School,
+  StageRosterParams,
   UserProfile,
 } from '../types.js'
 
@@ -108,6 +119,22 @@ export class PostgresDomainStore implements DomainStore {
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, userId }, 'Failed to update profile')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getProfileByNis(nis: string): Promise<UserProfile | null> {
+    try {
+      const rows = await this.sql<UserProfile[]>`
+        SELECT user_id, full_name, email, nis, class_name, absence_number, avatar_url, role, lifecycle_status, gender
+        FROM profiles
+        WHERE nis = ${nis}
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, nis }, 'Failed to query profile by NIS')
       throw AppError.internal('An unexpected database error occurred.')
     }
   }
@@ -351,6 +378,381 @@ export class PostgresDomainStore implements DomainStore {
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, params }, 'Failed to save attendance record')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getSchool(): Promise<School | null> {
+    try {
+      const rows = await this.sql<School[]>`
+        SELECT id, name, slug, timezone, signup_open, created_at::text, updated_at::text
+        FROM schools
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err }, 'Failed to query school')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getSchoolBySlug(slug: string): Promise<School | null> {
+    try {
+      const rows = await this.sql<School[]>`
+        SELECT id, name, slug, timezone, signup_open, created_at::text, updated_at::text
+        FROM schools
+        WHERE slug = ${slug}
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, slug }, 'Failed to query school by slug')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async createSchool(params: CreateSchoolParams): Promise<School> {
+    try {
+      const timezone = params.timezone ?? 'Asia/Jakarta'
+      const rows = await this.sql<School[]>`
+        INSERT INTO schools (name, slug, timezone, signup_open)
+        VALUES (${params.name}, ${params.slug}, ${timezone}, false)
+        RETURNING id, name, slug, timezone, signup_open, created_at::text, updated_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.internal('Failed to create school.')
+      }
+      const school = rows[0]
+
+      await this.sql`
+        INSERT INTO academic_periods (school_id, name, start_date, end_date, is_active)
+        SELECT ${school.id}, '2026/2027 Ganjil', '2026-07-01'::date, '2026-12-31'::date, true
+        WHERE NOT EXISTS (SELECT 1 FROM academic_periods WHERE school_id = ${school.id})
+      `
+
+      return school
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to create school')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async createInitialSchoolAdmin(params: {
+    userId: string
+    fullName?: string | null
+    email?: string | null
+  }): Promise<UserProfile> {
+    try {
+      const fullName = params.fullName ?? null
+      const email = params.email ?? null
+      const rows = await this.sql<UserProfile[]>`
+        INSERT INTO profiles (user_id, full_name, email, role, lifecycle_status)
+        VALUES (${params.userId}, ${fullName}, ${email}, 'school_admin', 'approved')
+        ON CONFLICT (user_id) DO UPDATE
+        SET role = 'school_admin', lifecycle_status = 'approved',
+            full_name = COALESCE(EXCLUDED.full_name, profiles.full_name),
+            email = COALESCE(EXCLUDED.email, profiles.email),
+            updated_at = NOW()
+        RETURNING user_id, full_name, email, nis, class_name, absence_number, avatar_url, role, lifecycle_status, gender
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.internal('Failed to create school admin profile.')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to create initial school admin')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getActiveAcademicPeriod(): Promise<AcademicPeriod | null> {
+    try {
+      const rows = await this.sql<AcademicPeriod[]>`
+        SELECT id, school_id, name, start_date::text, end_date::text, is_active, created_at::text, updated_at::text
+        FROM academic_periods
+        WHERE is_active = true
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err }, 'Failed to query active academic period')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async createAcademicPeriod(params: CreateAcademicPeriodParams): Promise<AcademicPeriod> {
+    try {
+      const rows = await this.sql<AcademicPeriod[]>`
+        INSERT INTO academic_periods (school_id, name, start_date, end_date, is_active)
+        VALUES (${params.schoolId}, ${params.name}, ${params.startDate}::date, ${params.endDate}::date, ${params.isActive})
+        RETURNING id, school_id, name, start_date::text, end_date::text, is_active, created_at::text, updated_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.internal('Failed to create academic period.')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to create academic period')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getClasses(schoolId?: string): Promise<ClassRoom[]> {
+    try {
+      if (schoolId) {
+        const rows = await this.sql<ClassRoom[]>`
+          SELECT id, school_id, academic_period_id, name, grade, created_at::text, updated_at::text
+          FROM classes
+          WHERE school_id = ${schoolId}
+          ORDER BY name ASC
+        `
+        return rows ?? []
+      }
+      const rows = await this.sql<ClassRoom[]>`
+        SELECT id, school_id, academic_period_id, name, grade, created_at::text, updated_at::text
+        FROM classes
+        ORDER BY name ASC
+      `
+      return rows ?? []
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, schoolId }, 'Failed to query classes')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async createClass(params: CreateClassParams): Promise<ClassRoom> {
+    try {
+      const rows = await this.sql<ClassRoom[]>`
+        INSERT INTO classes (school_id, academic_period_id, name, grade)
+        VALUES (${params.schoolId}, ${params.academicPeriodId ?? null}, ${params.name}, ${params.grade ?? null})
+        RETURNING id, school_id, academic_period_id, name, grade, created_at::text, updated_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.internal('Failed to create class.')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to create class')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async stageRosterReport(params: StageRosterParams): Promise<RosterReport> {
+    try {
+      const rowsJson = JSON.stringify(params.rows)
+      const rejectedJson = JSON.stringify(params.rejectedItems)
+      const rows = await this.sql<RosterReport[]>`
+        INSERT INTO roster_reports (school_id, total_rows, valid_rows, rejected_rows, status, review_state, rows, rejected_items)
+        VALUES (${params.schoolId ?? null}, ${params.totalRows}, ${params.validRows}, ${params.rejectedRows}, ${params.status}, ${params.reviewState}, ${rowsJson}::jsonb, ${rejectedJson}::jsonb)
+        RETURNING id, school_id, total_rows, valid_rows, rejected_rows, status, review_state, rows, rejected_items, accepted_at::text, accepted_by, created_at::text, updated_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.internal('Failed to stage roster report.')
+      }
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to stage roster report')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getRosterReport(id: string): Promise<RosterReport | null> {
+    try {
+      const rows = await this.sql<RosterReport[]>`
+        SELECT id, school_id, total_rows, valid_rows, rejected_rows, status, review_state, rows, rejected_items, accepted_at::text, accepted_by, created_at::text, updated_at::text
+        FROM roster_reports
+        WHERE id = ${id}
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to query roster report')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async acceptRosterReport(id: string, acceptedBy: string): Promise<RosterReport> {
+    try {
+      const report = await this.getRosterReport(id)
+      if (!report) {
+        throw AppError.notFound('Roster report')
+      }
+      if (report.rejected_rows > 0 || (report.rejected_items && report.rejected_items.length > 0)) {
+        throw AppError.validationError('Cannot accept a roster report with rejected rows.')
+      }
+
+      const school = await this.getSchool()
+      const period = await this.getActiveAcademicPeriod()
+
+      await this.sql.begin(async (sql) => {
+        for (const row of report.rows) {
+          let classId: string | null = null
+          if (school) {
+            const classRows = await sql<{ id: string }[]>`
+              SELECT id FROM classes WHERE school_id = ${school.id} AND LOWER(name) = LOWER(${row.class_name}) LIMIT 1
+            `
+            if (classRows.length > 0) {
+              classId = classRows[0].id
+            } else {
+              const newClassRows = await sql<{ id: string }[]>`
+                INSERT INTO classes (school_id, academic_period_id, name, grade)
+                VALUES (${school.id}, ${period?.id ?? null}, ${row.class_name}, ${row.grade ?? null})
+                RETURNING id
+              `
+              classId = newClassRows[0].id
+            }
+          }
+
+          const studentUserId = `student-${row.nis}`
+          await sql`
+            INSERT INTO profiles (user_id, full_name, nis, class_name, role, lifecycle_status)
+            VALUES (${studentUserId}, ${row.full_name}, ${row.nis}, ${row.class_name}, 'student', 'approved')
+            ON CONFLICT (user_id) DO UPDATE
+            SET full_name = EXCLUDED.full_name, nis = EXCLUDED.nis, class_name = EXCLUDED.class_name, updated_at = NOW()
+          `
+
+          if (classId && period) {
+            await sql`
+              INSERT INTO class_enrollments (user_id, class_id, academic_period_id, status)
+              VALUES (${studentUserId}, ${classId}, ${period.id}, 'active')
+            `
+          }
+        }
+
+        await sql`
+          UPDATE roster_reports
+          SET status = 'accepted', review_state = 'accepted', accepted_at = NOW(), accepted_by = ${acceptedBy}, updated_at = NOW()
+          WHERE id = ${id}
+        `
+      })
+
+      const updated = await this.getRosterReport(id)
+      if (!updated) {
+        throw AppError.internal('Failed to load accepted roster report.')
+      }
+      return updated
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id, acceptedBy }, 'Failed to accept roster report')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async openSignup(): Promise<void> {
+    try {
+      await this.sql`
+        UPDATE schools
+        SET signup_open = true, updated_at = NOW()
+      `
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err }, 'Failed to open signup')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async isSignupOpen(): Promise<boolean> {
+    try {
+      const school = await this.getSchool()
+      return school?.signup_open === true
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err }, 'Failed to check signup status')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getBootstrapStatus(): Promise<BootstrapStatus> {
+    try {
+      const school = await this.getSchool()
+      const activePeriod = await this.getActiveAcademicPeriod()
+      const schoolAdminRows = await this.sql<{ count: string }[]>`
+        SELECT COUNT(*) as count FROM profiles WHERE role = 'school_admin' AND lifecycle_status = 'approved'
+      `
+      const hasSchoolAdmin = Number(schoolAdminRows[0]?.count ?? 0) > 0
+
+      const reportRows = await this.sql<RosterReport[]>`
+        SELECT id, school_id, total_rows, valid_rows, rejected_rows, status, review_state, rows, rejected_items, accepted_at::text, accepted_by, created_at::text, updated_at::text
+        FROM roster_reports
+        ORDER BY created_at DESC
+        LIMIT 1
+      `
+      const latestReport = reportRows[0] ?? null
+
+      const acceptedRows = await this.sql<{ count: string }[]>`
+        SELECT COUNT(*) as count FROM roster_reports WHERE status = 'accepted'
+      `
+      const rosterAccepted = Number(acceptedRows[0]?.count ?? 0) > 0
+
+      return {
+        school_configured: school !== null,
+        school,
+        school_admin_created: hasSchoolAdmin,
+        active_academic_period: activePeriod !== null,
+        latest_roster_report: latestReport,
+        roster_accepted: rosterAccepted,
+        signup_open: school?.signup_open === true,
+      }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err }, 'Failed to get bootstrap status')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async insertAuditLog(entry: AuditLogEntry): Promise<void> {
+    try {
+      const detailsJson = entry.details ? JSON.stringify(entry.details) : null
+      await this.sql`
+        INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, details)
+        VALUES (${entry.actor_id ?? null}, ${entry.action}, ${entry.entity_type}, ${entry.entity_id ?? null}, ${detailsJson}::jsonb)
+      `
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, entry }, 'Failed to insert audit log')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getAuditLogs(entityType?: string, entityId?: string): Promise<AuditLog[]> {
+    try {
+      if (entityType && entityId) {
+        const rows = await this.sql<AuditLog[]>`
+          SELECT id, actor_id, action, entity_type, entity_id, details, created_at::text
+          FROM audit_logs
+          WHERE entity_type = ${entityType} AND entity_id = ${entityId}
+          ORDER BY created_at DESC
+        `
+        return rows ?? []
+      }
+      if (entityType) {
+        const rows = await this.sql<AuditLog[]>`
+          SELECT id, actor_id, action, entity_type, entity_id, details, created_at::text
+          FROM audit_logs
+          WHERE entity_type = ${entityType}
+          ORDER BY created_at DESC
+        `
+        return rows ?? []
+      }
+      const rows = await this.sql<AuditLog[]>`
+        SELECT id, actor_id, action, entity_type, entity_id, details, created_at::text
+        FROM audit_logs
+        ORDER BY created_at DESC
+      `
+      return rows ?? []
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, entityType, entityId }, 'Failed to query audit logs')
       throw AppError.internal('An unexpected database error occurred.')
     }
   }

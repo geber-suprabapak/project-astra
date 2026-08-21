@@ -159,9 +159,16 @@ Stable error codes:
 | `PATCH` | `/v1/mobile/profile/avatar`         | Yes  | Upload or clear avatar                        |
 | `PATCH` | `/v1/mobile/profile/password`       | Yes  | Change password                               |
 | `GET`   | `/v1/mobile/time`                   | Yes  | Return canonical BFF time                     |
-| `GET`   | `/v1/admin/session`                    | Yes  | Validate and return the active privileged identity context |
+| `GET`   | `/v1/admin/session`                 | Yes  | Validate and return the active privileged identity context |
+| `GET`   | `/v1/admin/bootstrap/status`        | Yes  | Read single school configuration and bootstrap readiness state |
+| `POST`  | `/v1/admin/bootstrap/school`        | Yes  | Bootstrap single School entity (platform_admin only) |
+| `POST`  | `/v1/admin/bootstrap/school-admin`  | Yes  | Create initial school_admin profile (platform_admin only) |
+| `POST`  | `/v1/admin/bootstrap/roster`        | Yes  | Stage and validate initial Student roster batch |
+| `GET`   | `/v1/admin/bootstrap/roster/:id`    | Yes  | Read staged roster validation report and review state |
+| `POST`  | `/v1/admin/bootstrap/roster/:id/accept` | Yes | Accept valid report and commit canonical Student profiles (school_admin only) |
+| `POST`  | `/v1/admin/bootstrap/signup/open`   | Yes  | Open Student registration after roster acceptance (school_admin only) |
 
-### Protected identity context
+### Protected identity context & bootstrap boundary
 Astra verifies every bearer token with the configured OIDC issuer, JWKS/signature, and
 audience before loading the matching PostgreSQL profile.
 
@@ -169,6 +176,11 @@ Tokens used for privileged administration must carry a matching `roles` claim, i
 the `openid profile admin:read` scopes, prove MFA through `mfa_verified` or an MFA
 `amr` value, and set `must_change_password` to `false`. Astra denies pending,
 rejected, disabled, or missing profiles before any protected route runs.
+
+Bootstrap operations enforce strict role separation:
+- `platform_admin` boots the single School configuration, registers the initial `school_admin`, and stages the initial Student roster.
+- `school_admin` reviews the staged roster report, accepts clean batches with 0 rejected rows (committing canonical Student and Class Enrollment records), and opens Student signup.
+- Every state mutation writes immutable audit evidence to `audit_logs`.
 
 
 ## Health Semantics

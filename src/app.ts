@@ -9,7 +9,7 @@ import {
 } from './modules/health/routes.js'
 import { type ReadinessResult } from './modules/health/service.js'
 import { createV1Mobile, v1Mobile } from './routes/v1-mobile.js'
-import { adminRouter } from './modules/admin/routes.js'
+import { createAdminRouter, adminRouter } from './modules/admin/routes.js'
 import { defaultProviders } from './providers/index.js'
 import type { AppProviders } from './providers/types.js'
 import { env } from './config/env.js'
@@ -107,7 +107,10 @@ export function createApp(deps: AppDeps = {}) {
   app.route('/', rootHealth)
 
   // Platform administration routes require an approved profile, matching role, and protected identity context.
-  app.route('/v1/admin', deps.adminRouter ?? adminRouter)
+  const resolvedAdminRouter =
+    deps.adminRouter ??
+    (deps.providers ? createAdminRouter({ providers: resolvedProviders }) : adminRouter)
+  app.route('/v1/admin', resolvedAdminRouter)
   // Mobile API routes
   app.route('/v1/mobile', mobileRouter)
 

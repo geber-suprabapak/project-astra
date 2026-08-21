@@ -118,9 +118,149 @@ export interface SaveAttendanceRecordResult {
 /** @deprecated Alias for backwards compatibility */
 export type SaveAttendanceRecordRpcResponse = SaveAttendanceRecordResult
 
+export interface School {
+  id: string
+  name: string
+  slug: string
+  timezone: string
+  signup_open: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+export interface CreateSchoolParams {
+  name: string
+  slug: string
+  timezone?: string
+}
+
+export interface AcademicPeriod {
+  id: string
+  school_id: string
+  name: string
+  start_date: string
+  end_date: string
+  is_active: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+export interface CreateAcademicPeriodParams {
+  schoolId: string
+  name: string
+  startDate: string
+  endDate: string
+  isActive: boolean
+}
+
+export interface ClassRoom {
+  id: string
+  school_id: string
+  academic_period_id?: string | null
+  name: string
+  grade?: number | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface CreateClassParams {
+  schoolId: string
+  academicPeriodId?: string | null
+  name: string
+  grade?: number | null
+}
+
+export interface ClassEnrollment {
+  id: string
+  user_id: string
+  class_id: string
+  academic_period_id: string
+  status: 'active' | 'transferred' | 'promoted' | 'graduated' | 'archived'
+  created_at?: string
+  updated_at?: string
+}
+
+export interface RosterRowInput {
+  nis: string
+  full_name: string
+  class_name: string
+  grade?: number | null
+}
+
+export interface RejectedRosterRow {
+  row_index: number
+  nis?: string | null
+  full_name?: string | null
+  class_name?: string | null
+  grade?: number | null
+  reason: string
+}
+
+export type RosterReportStatus = 'staged' | 'accepted' | 'rejected'
+export type RosterReviewState = 'pending' | 'accepted' | 'rejected'
+
+export interface RosterReport {
+  id: string
+  school_id?: string | null
+  total_rows: number
+  valid_rows: number
+  rejected_rows: number
+  status: RosterReportStatus
+  review_state: RosterReviewState
+  rows: RosterRowInput[]
+  rejected_items: RejectedRosterRow[]
+  accepted_at?: string | null
+  accepted_by?: string | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface StageRosterParams {
+  schoolId?: string | null
+  totalRows: number
+  validRows: number
+  rejectedRows: number
+  status: RosterReportStatus
+  reviewState: RosterReviewState
+  rows: RosterRowInput[]
+  rejectedItems: RejectedRosterRow[]
+}
+
+export interface BootstrapStatus {
+  school_configured: boolean
+  school: School | null
+  school_admin_created: boolean
+  active_academic_period: boolean
+  latest_roster_report: RosterReport | null
+  roster_accepted: boolean
+  signup_open: boolean
+}
+
+export type AuditLogDetailValue = string | number | boolean | null | undefined | readonly string[]
+export type AuditLogDetails = Record<string, AuditLogDetailValue>
+
+export interface AuditLogEntry {
+  actor_id?: string | null
+  action: string
+  entity_type: string
+  entity_id?: string | null
+  details?: AuditLogDetails | null
+}
+
+export interface AuditLog {
+  id: string
+  actor_id: string | null
+  action: string
+  entity_type: string
+  entity_id: string | null
+  details: AuditLogDetails | null
+  created_at: string
+}
+
 export interface DomainStore {
   getUserProfile(userId: string): Promise<UserProfile>
   updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<void>
+  getProfileByNis(nis: string): Promise<UserProfile | null>
   getTodayAbsences(userId: string, dateWIB: string): Promise<Absence[]>
   insertAttendance(data: InsertAttendanceData): Promise<Absence>
   getActiveSchedule(dayKey: string): Promise<Schedule | null>
@@ -142,6 +282,29 @@ export interface DomainStore {
     latitude: number
     longitude: number
   }): Promise<SaveAttendanceRecordRpcResponse>
+
+  // Bootstrap & Roster domain methods
+  getSchool(): Promise<School | null>
+  getSchoolBySlug(slug: string): Promise<School | null>
+  createSchool(params: CreateSchoolParams): Promise<School>
+  createInitialSchoolAdmin(params: {
+    userId: string
+    fullName?: string | null
+    email?: string | null
+  }): Promise<UserProfile>
+  getActiveAcademicPeriod(): Promise<AcademicPeriod | null>
+  createAcademicPeriod(params: CreateAcademicPeriodParams): Promise<AcademicPeriod>
+  getClasses(schoolId?: string): Promise<ClassRoom[]>
+  createClass(params: CreateClassParams): Promise<ClassRoom>
+  stageRosterReport(params: StageRosterParams): Promise<RosterReport>
+  getRosterReport(id: string): Promise<RosterReport | null>
+  acceptRosterReport(id: string, acceptedBy: string): Promise<RosterReport>
+  openSignup(): Promise<void>
+  isSignupOpen(): Promise<boolean>
+  getBootstrapStatus(): Promise<BootstrapStatus>
+  insertAuditLog(entry: AuditLogEntry): Promise<void>
+  getAuditLogs(entityType?: string, entityId?: string): Promise<AuditLog[]>
+
   checkHealth(): Promise<boolean>
   close?(): Promise<void>
 }

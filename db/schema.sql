@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS schools (
     name TEXT NOT NULL,
     slug TEXT NOT NULL UNIQUE,
     timezone TEXT NOT NULL DEFAULT 'Asia/Jakarta',
+    signup_open BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -92,6 +93,31 @@ CREATE TABLE IF NOT EXISTS class_enrollments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_class_enrollments_user_period ON class_enrollments(user_id, academic_period_id);
+
+-- ----------------------------------------------------------------------------
+-- Table: roster_reports
+-- Description: Staged student roster validation reports and review states
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS roster_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID REFERENCES schools(id) ON DELETE CASCADE,
+    total_rows INTEGER NOT NULL DEFAULT 0,
+    valid_rows INTEGER NOT NULL DEFAULT 0,
+    rejected_rows INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'staged',
+    review_state TEXT NOT NULL DEFAULT 'pending',
+    rows JSONB NOT NULL DEFAULT '[]'::jsonb,
+    rejected_items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    accepted_at TIMESTAMPTZ,
+    accepted_by TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT roster_reports_status_check CHECK (status IN ('staged', 'accepted', 'rejected')),
+    CONSTRAINT roster_reports_review_state_check CHECK (review_state IN ('pending', 'accepted', 'rejected'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_roster_reports_school ON roster_reports(school_id);
+CREATE INDEX IF NOT EXISTS idx_roster_reports_status ON roster_reports(status);
 
 -- ----------------------------------------------------------------------------
 -- Table: locations

@@ -68,7 +68,8 @@ Store the token in a Postman environment variable, for example `jwt_token`, and 
 
 ## Architecture & Test Seams
 
-- **Primary test seam**: The versioned `/v1/mobile/*` HTTP API with injectable `AppProviders` (`DomainStore`, `ObjectStorage`, `IdentityProvider`).
+- **Primary test seam**: The versioned `/v1/mobile/*` and `/v1/admin/*` HTTP APIs with injectable `AppProviders` (`DomainStore`, `ObjectStorage`, `IdentityProvider`).
+- **Bootstrap & Roster flow**: `/v1/admin/bootstrap/*` endpoints for single School configuration, initial `school_admin` profile setup, staged roster validation, report acceptance, and Student signup gating.
 - **Domain persistence**: Backed by PostgreSQL through `PostgresDomainStore` in production, or `MemoryDomainStore` in isolated contract tests.
 - **Object storage**: S3-compatible storage through `S3ObjectStorage` in production, or `MemoryObjectStorage` in isolated contract tests.
 - **Identity provider**: OIDC/Logto through `OidcIdentityProvider` in production, or `MemoryIdentityProvider` in isolated contract tests.
