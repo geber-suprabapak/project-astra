@@ -1172,6 +1172,91 @@ describe('PostgresDomainStore (Greenfield)', () => {
     expect(list).toHaveLength(1)
     expect(list[0].id).toBe('att-manual-1')
   })
+
+  it('getLeaveRequestById, listLeaveRequests, updateLeaveRequestStatus, and deleteLeaveRequest operate on leave_requests table', async () => {
+    const mockSql = createMockSql((strings: TemplateStringsArray) => {
+      const query = strings.join('?')
+      if (query.includes('UPDATE leave_requests')) {
+        return [
+          {
+            id: 'leave-123',
+            user_id: 'student-1',
+            category: 'sakit',
+            description: 'Sakit tifus',
+            status: true,
+            attachment_url: 'student-1/doc.jpg',
+            date: '2026-08-21T00:00:00+07:00',
+            approval_status: 'approved',
+            rejection_reason: null,
+            rejected_at: null,
+            created_at: '2026-08-21T07:00:00Z',
+            updated_at: '2026-08-21T07:30:00Z',
+          },
+        ]
+      }
+      if (query.includes('SELECT') && query.includes('FROM profiles') && query.includes('user_id = ?')) {
+        return [
+          {
+            user_id: 'student-1',
+            full_name: 'Budi Santoso',
+            nis: '1001',
+            class_name: 'XII RPL 1',
+            absence_number: '05',
+            role: 'student',
+            lifecycle_status: 'approved',
+          },
+        ]
+      }
+      if (query.includes('SELECT') && query.includes('FROM leave_requests')) {
+        return [
+          {
+            id: 'leave-123',
+            user_id: 'student-1',
+            category: 'sakit',
+            description: 'Sakit tifus',
+            status: false,
+            attachment_url: 'student-1/doc.jpg',
+            date: '2026-08-21T00:00:00+07:00',
+            approval_status: 'pending',
+            rejection_reason: null,
+            rejected_at: null,
+            created_at: '2026-08-21T07:00:00Z',
+            updated_at: '2026-08-21T07:00:00Z',
+            student_name: 'Budi Santoso',
+            student_nis: '1001',
+            student_class: 'XII RPL 1',
+            absence_number: '05',
+          },
+        ]
+      }
+      if (query.includes('DELETE FROM leave_requests')) {
+        return []
+      }
+      return []
+    })
+
+    const store = new PostgresDomainStore({ sql: mockSql })
+
+    const single = await store.getLeaveRequestById('leave-123')
+    expect(single).not.toBeNull()
+    expect(single?.id).toBe('leave-123')
+    expect(single?.student_name).toBe('Budi Santoso')
+
+    const list = await store.listLeaveRequests({ userId: 'student-1', approvalStatus: 'pending' })
+    expect(list).toHaveLength(1)
+    expect(list[0].id).toBe('leave-123')
+
+    const updated = await store.updateLeaveRequestStatus({
+      id: 'leave-123',
+      approvalStatus: 'approved',
+      status: true,
+    })
+    expect(updated.id).toBe('leave-123')
+    expect(updated.approval_status).toBe('approved')
+    expect(updated.status).toBe(true)
+
+    await expect(store.deleteLeaveRequest('leave-123')).resolves.toBeUndefined()
+  })
 })
 
 

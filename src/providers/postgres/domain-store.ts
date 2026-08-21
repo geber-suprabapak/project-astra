@@ -40,6 +40,8 @@ import type {
   FileRecord,
   InsertAttendanceData,
   InsertPermitData,
+  LeaveRequest,
+  ListLeaveRequestsFilter,
   Location,
   PasswordResetCode,
   Permission,
@@ -63,6 +65,7 @@ import type {
   UpdateRoleParams,
   UpdateScheduleParams,
   UpdateStaffParams,
+  UpdateLeaveRequestStatusParams,
   UserProfile,
 } from '../types.js'
 
@@ -328,6 +331,102 @@ export class PostgresDomainStore implements DomainStore {
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, data }, 'Failed to insert permit')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getLeaveRequestById(id: string): Promise<LeaveRequest | null> {
+    try {
+      const rows = await this.sql<LeaveRequest[]>`
+        SELECT lr.id, lr.user_id, lr.category, lr.description, lr.status,
+               lr.attachment_url, lr.date::text AS date, lr.approval_status,
+               lr.rejection_reason, lr.rejected_at::text, lr.created_at::text, lr.updated_at::text,
+               p.full_name AS student_name, p.nis AS student_nis, p.class_name AS student_class,
+               p.absence_number
+        FROM leave_requests lr
+        LEFT JOIN profiles p ON lr.user_id = p.user_id
+        WHERE lr.id = ${id}
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to get leave request by ID')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async listLeaveRequests(filter?: ListLeaveRequestsFilter): Promise<LeaveRequest[]> {
+    try {
+      const rows = await this.sql<LeaveRequest[]>`
+        SELECT lr.id, lr.user_id, lr.category, lr.description, lr.status,
+               lr.attachment_url, lr.date::text AS date, lr.approval_status,
+               lr.rejection_reason, lr.rejected_at::text, lr.created_at::text, lr.updated_at::text,
+               p.full_name AS student_name, p.nis AS student_nis, p.class_name AS student_class,
+               p.absence_number
+        FROM leave_requests lr
+        LEFT JOIN profiles p ON lr.user_id = p.user_id
+        WHERE 1=1
+          ${filter?.userId ? this.sql`AND lr.user_id = ${filter.userId}` : this.sql``}
+          ${filter?.approvalStatus ? this.sql`AND lr.approval_status = ${filter.approvalStatus}` : this.sql``}
+          ${filter?.category ? this.sql`AND lr.category = ${filter.category}` : this.sql``}
+          ${filter?.startDate ? this.sql`AND lr.date >= ${filter.startDate}` : this.sql``}
+          ${filter?.endDate ? this.sql`AND lr.date <= ${filter.endDate}` : this.sql``}
+        ORDER BY lr.created_at DESC
+        ${filter?.limit ? this.sql`LIMIT ${filter.limit}` : this.sql``}
+        ${filter?.offset ? this.sql`OFFSET ${filter.offset}` : this.sql``}
+      `
+      return rows ?? []
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, filter }, 'Failed to list leave requests')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async updateLeaveRequestStatus(params: UpdateLeaveRequestStatusParams): Promise<LeaveRequest> {
+    try {
+      const statusValue = params.status !== undefined ? params.status : (params.approvalStatus === 'approved')
+      const rows = await this.sql<LeaveRequest[]>`
+        UPDATE leave_requests
+        SET approval_status = ${params.approvalStatus},
+            status = ${statusValue},
+            rejection_reason = ${params.rejectionReason ?? null},
+            rejected_at = ${params.rejectedAt ? params.rejectedAt : (params.approvalStatus === 'rejected' ? this.sql`NOW()` : null)},
+            updated_at = NOW()
+        WHERE id = ${params.id}
+        RETURNING id, user_id, category, description, status,
+                  attachment_url, date::text AS date, approval_status,
+                  rejection_reason, rejected_at::text, created_at::text, updated_at::text
+      `
+      if (!rows || rows.length === 0) {
+        throw AppError.notFound('Leave request')
+      }
+      const updated = rows[0]
+      const profile = await this.getUserProfile(updated.user_id).catch(() => null)
+      if (profile) {
+        updated.student_name = profile.full_name ?? null
+        updated.student_nis = profile.nis ?? null
+        updated.student_class = profile.class_name ?? null
+        updated.absence_number = profile.absence_number ?? null
+      }
+      return updated
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to update leave request status')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async deleteLeaveRequest(id: string): Promise<void> {
+    try {
+      await this.sql`
+        DELETE FROM leave_requests
+        WHERE id = ${id}
+      `
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to delete leave request')
       throw AppError.internal('An unexpected database error occurred.')
     }
   }

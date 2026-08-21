@@ -606,4 +606,37 @@ export const attendanceResponseSchema = z.object({
 
 export type AttendanceResponse = z.infer<typeof attendanceResponseSchema>
 
+// ---------------------------------------------------------------------------
+// Leave Requests Admin Schemas
+// ---------------------------------------------------------------------------
+
+export const adminLeaveRequestResponseSchema = z.object({
+  id: z.string(),
+  user_id: z.string(),
+  student_name: z.string().nullable().optional(),
+  student_nis: z.string().nullable().optional(),
+  student_class: z.string().nullable().optional(),
+  absence_number: z.string().nullable().optional(),
+  category: z.enum(['sakit', 'pergi', 'dispensasi', 'lainnya']),
+  description: z.string(),
+  status: z.boolean(),
+  date: z.string(),
+  approval_status: z.enum(['pending', 'approved', 'rejected']),
+  attachment_url: z.string().nullable().optional(),
+  rejection_reason: z.string().nullable().optional(),
+  rejected_at: z.string().nullable().optional(),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
+})
+
+export type AdminLeaveRequestResponse = z.infer<typeof adminLeaveRequestResponseSchema>
+
+export const rejectLeaveRequestSchema = z.object({
+  reason: z.string().min(1).optional(),
+  rejection_reason: z.string().min(1).optional(),
+})
+
+export type RejectLeaveRequestInput = z.infer<typeof rejectLeaveRequestSchema>
+
+
 

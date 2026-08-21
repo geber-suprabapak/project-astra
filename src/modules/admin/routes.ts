@@ -23,6 +23,7 @@ import {
   enrollStudentSchema,
   exitStudentEnrollmentSchema,
   promoteStudentEnrollmentSchema,
+  rejectLeaveRequestSchema,
   rejectStudentSchema,
   requestStaffPasswordResetSchema,
   stageRosterSchema,
@@ -38,6 +39,7 @@ import {
 } from './schema.js'
 import {
   acceptRosterReport,
+  approveLeaveRequest,
   approveStudent,
   bootstrapSchool,
   correctStudentEmail,
@@ -51,6 +53,7 @@ import {
   createSchedule,
   createSchoolAdmin,
   createStaff,
+  deleteAdminLeaveRequest,
   deleteCalendarException,
   deleteLocation,
   deleteSchedule,
@@ -58,6 +61,7 @@ import {
   enrollStudent,
   exitStudentEnrollment,
   generateStudentResetCode,
+  getAdminLeaveRequest,
   getAttendanceAttempt,
   getBootstrapStatus,
   getCalendarException,
@@ -70,6 +74,7 @@ import {
   getStaffEffectivePermissions,
   getStudent,
   listAcademicPeriods,
+  listAdminLeaveRequests,
   listAttendanceAttempts,
   listAttendances,
   listCalendarExceptions,
@@ -83,6 +88,7 @@ import {
   listStudents,
   openStudentSignup,
   promoteStudentEnrollment,
+  rejectLeaveRequest,
   rejectStudent,
   requestStaffPasswordReset,
   resetStudentFaceEnrollment,
@@ -100,6 +106,8 @@ import {
 import {
   attendanceActionTypeSchema,
   attendanceAttemptStatusSchema,
+  leaveRequestApprovalStatusSchema,
+  leaveRequestCategorySchema,
   profileLifecycleStatusSchema,
 } from '../../providers/types.js'
 
@@ -1206,6 +1214,136 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
 
   router.get('/attendance', handleListAttendances)
   router.get('/attendances', handleListAttendances)
+
+  // -------------------------------------------------------------------------
+  // Leave Requests Routes
+  // -------------------------------------------------------------------------
+
+  // GET /v1/admin/leave-requests & /v1/admin/permits
+  const handleListLeaveRequests = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const userId = c.req.query('user_id') ?? c.req.query('userId') ?? c.req.query('student_id') ?? c.req.query('studentId')
+    const statusQuery = c.req.query('status') ?? c.req.query('approval_status') ?? c.req.query('approvalStatus')
+    const categoryQuery = c.req.query('category')
+    const startDate = c.req.query('start_date') ?? c.req.query('startDate')
+    const endDate = c.req.query('end_date') ?? c.req.query('endDate')
+    const limitQuery = c.req.query('limit')
+    const offsetQuery = c.req.query('offset')
+
+    const statusParsed = statusQuery ? leaveRequestApprovalStatusSchema.safeParse(statusQuery) : null
+    const categoryParsed = categoryQuery ? leaveRequestCategorySchema.safeParse(categoryQuery) : null
+
+    if (statusQuery && (!statusParsed || !statusParsed.success)) {
+      throw AppError.validationError('Invalid status query parameter.')
+    }
+    if (categoryQuery && (!categoryParsed || !categoryParsed.success)) {
+      throw AppError.validationError('Invalid category query parameter.')
+    }
+
+    const limit = limitQuery ? Number(limitQuery) : undefined
+    const offset = offsetQuery ? Number(offsetQuery) : undefined
+
+    const leaveRequests = await listAdminLeaveRequests({
+      filter: {
+        userId,
+        approvalStatus: statusParsed ? statusParsed.data : undefined,
+        category: categoryParsed ? categoryParsed.data : undefined,
+        startDate,
+        endDate,
+        limit,
+        offset,
+      },
+      actorRole: c.get('profileRole'),
+      actorId: c.get('userId'),
+      providers,
+    })
+
+    return successResponse(c, leaveRequests, 'Leave requests retrieved successfully.')
+  }
+
+  router.get('/leave-requests', handleListLeaveRequests)
+  router.get('/permits', handleListLeaveRequests)
+
+  // GET /v1/admin/leave-requests/:id & /v1/admin/permits/:id
+  const handleGetLeaveRequest = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const leaveRequest = await getAdminLeaveRequest({
+      id,
+      actorRole: c.get('profileRole'),
+      actorId: c.get('userId'),
+      providers,
+    })
+    return successResponse(c, leaveRequest, 'Leave request retrieved successfully.')
+  }
+
+  router.get('/leave-requests/:id', handleGetLeaveRequest)
+  router.get('/permits/:id', handleGetLeaveRequest)
+
+  // POST|PATCH /v1/admin/leave-requests/:id/approve & /v1/admin/permits/:id/approve
+  const handleApproveLeaveRequest = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const approved = await approveLeaveRequest({
+      id,
+      actorRole: c.get('profileRole'),
+      actorId: c.get('userId'),
+      providers,
+    })
+    return successResponse(c, approved, 'Leave request approved successfully.')
+  }
+
+  router.post('/leave-requests/:id/approve', handleApproveLeaveRequest)
+  router.patch('/leave-requests/:id/approve', handleApproveLeaveRequest)
+  router.post('/permits/:id/approve', handleApproveLeaveRequest)
+  router.patch('/permits/:id/approve', handleApproveLeaveRequest)
+
+  // POST|PATCH /v1/admin/leave-requests/:id/reject & /v1/admin/permits/:id/reject
+  const handleRejectLeaveRequest = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const contentType = c.req.header('content-type') || ''
+    let reason: string | undefined
+
+    if (contentType.includes('application/json')) {
+      const body = await c.req.json().catch(() => ({}))
+      const parsed = rejectLeaveRequestSchema.safeParse(body)
+      if (!parsed.success) {
+        throw AppError.validationError(parsed.error.flatten())
+      }
+      reason = parsed.data.reason ?? parsed.data.rejection_reason
+    }
+
+    const rejected = await rejectLeaveRequest({
+      id,
+      reason,
+      actorRole: c.get('profileRole'),
+      actorId: c.get('userId'),
+      providers,
+    })
+    return successResponse(c, rejected, 'Leave request rejected successfully.')
+  }
+
+  router.post('/leave-requests/:id/reject', handleRejectLeaveRequest)
+  router.patch('/leave-requests/:id/reject', handleRejectLeaveRequest)
+  router.post('/permits/:id/reject', handleRejectLeaveRequest)
+  router.patch('/permits/:id/reject', handleRejectLeaveRequest)
+
+  // DELETE /v1/admin/leave-requests/:id & /v1/admin/permits/:id
+  const handleDeleteLeaveRequest = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    await deleteAdminLeaveRequest({
+      id,
+      actorRole: c.get('profileRole'),
+      actorId: c.get('userId'),
+      providers,
+    })
+    return successResponse(c, { id }, 'Leave request deleted successfully.')
+  }
+
+  router.delete('/leave-requests/:id', handleDeleteLeaveRequest)
+  router.delete('/permits/:id', handleDeleteLeaveRequest)
 
   return router
 }

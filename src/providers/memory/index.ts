@@ -43,6 +43,8 @@ import {
   type IdentityRole,
   type InsertAttendanceData,
   type InsertPermitData,
+  type LeaveRequest,
+  type ListLeaveRequestsFilter,
   type Location,
   type ObjectStorage,
   type PasswordResetCode,
@@ -67,6 +69,7 @@ import {
   type UpdateRoleParams,
   type UpdateScheduleParams,
   type UpdateStaffParams,
+  type UpdateLeaveRequestStatusParams,
   type UserMetadata,
   type UserProfile,
 } from '../types.js'
@@ -946,6 +949,120 @@ export class MemoryDomainStore implements DomainStore {
     }
     this.permits.push(permit)
     return permit
+  }
+
+  async getLeaveRequestById(id: string): Promise<LeaveRequest | null> {
+    const p = this.permits.find((item) => item.id === id)
+    if (!p) return null
+    const profile = this.profiles.get(p.user_id)
+    return {
+      id: p.id,
+      user_id: p.user_id,
+      category: p.kategori_izin,
+      description: p.deskripsi,
+      status: p.status,
+      attachment_url: p.link_foto,
+      date: p.tanggal,
+      approval_status: p.approval_status,
+      rejection_reason: p.rejection_reason ?? null,
+      rejected_at: p.rejected_at ?? null,
+      created_at: p.created_at,
+      updated_at: p.updated_at ?? p.created_at,
+      student_name: profile?.full_name ?? null,
+      student_nis: profile?.nis ?? null,
+      student_class: profile?.class_name ?? null,
+      absence_number: profile?.absence_number ?? null,
+    }
+  }
+
+  async listLeaveRequests(filter?: ListLeaveRequestsFilter): Promise<LeaveRequest[]> {
+    let items = this.permits.slice()
+    if (filter?.userId) {
+      items = items.filter((p) => p.user_id === filter.userId)
+    }
+    if (filter?.approvalStatus) {
+      items = items.filter((p) => p.approval_status === filter.approvalStatus)
+    }
+    if (filter?.category) {
+      items = items.filter((p) => p.kategori_izin === filter.category)
+    }
+    if (filter?.startDate) {
+      items = items.filter((p) => p.tanggal >= filter.startDate!)
+    }
+    if (filter?.endDate) {
+      items = items.filter((p) => p.tanggal <= filter.endDate!)
+    }
+    items.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
+    if (filter?.offset) {
+      items = items.slice(filter.offset)
+    }
+    if (filter?.limit) {
+      items = items.slice(0, filter.limit)
+    }
+    return items.map((p) => {
+      const profile = this.profiles.get(p.user_id)
+      return {
+        id: p.id,
+        user_id: p.user_id,
+        category: p.kategori_izin,
+        description: p.deskripsi,
+        status: p.status,
+        attachment_url: p.link_foto,
+        date: p.tanggal,
+        approval_status: p.approval_status,
+        rejection_reason: p.rejection_reason ?? null,
+        rejected_at: p.rejected_at ?? null,
+        created_at: p.created_at,
+        updated_at: p.updated_at ?? p.created_at,
+        student_name: profile?.full_name ?? null,
+        student_nis: profile?.nis ?? null,
+        student_class: profile?.class_name ?? null,
+        absence_number: profile?.absence_number ?? null,
+      }
+    })
+  }
+
+  async updateLeaveRequestStatus(params: UpdateLeaveRequestStatusParams): Promise<LeaveRequest> {
+    const p = this.permits.find((item) => item.id === params.id)
+    if (!p) {
+      throw AppError.notFound('Leave request')
+    }
+    p.approval_status = params.approvalStatus
+    p.status = params.status !== undefined ? params.status : params.approvalStatus === 'approved'
+    if (params.rejectionReason !== undefined) {
+      p.rejection_reason = params.rejectionReason
+    }
+    if (params.approvalStatus === 'rejected') {
+      p.rejected_at = params.rejectedAt ?? new Date().toISOString()
+    }
+    p.updated_at = new Date().toISOString()
+
+    const profile = this.profiles.get(p.user_id)
+    return {
+      id: p.id,
+      user_id: p.user_id,
+      category: p.kategori_izin,
+      description: p.deskripsi,
+      status: p.status,
+      attachment_url: p.link_foto,
+      date: p.tanggal,
+      approval_status: p.approval_status,
+      rejection_reason: p.rejection_reason ?? null,
+      rejected_at: p.rejected_at ?? null,
+      created_at: p.created_at,
+      updated_at: p.updated_at,
+      student_name: profile?.full_name ?? null,
+      student_nis: profile?.nis ?? null,
+      student_class: profile?.class_name ?? null,
+      absence_number: profile?.absence_number ?? null,
+    }
+  }
+
+  async deleteLeaveRequest(id: string): Promise<void> {
+    const idx = this.permits.findIndex((item) => item.id === id)
+    if (idx !== -1) {
+      this.permits.splice(idx, 1)
+    }
   }
 
   async validateAttendanceAction(params: {
@@ -1871,6 +1988,10 @@ export class MemoryObjectStorage implements ObjectStorage {
   async getSignedPermitUrl(path: string): Promise<string | null> {
     if (!path) return null
     return `https://storage.local/signed/${encodeURIComponent(path)}?expires=604800`
+  }
+
+  async deletePermitAttachment(path: string): Promise<void> {
+    this.objects.delete(path)
   }
 
   async uploadFaceEnrollmentImage(

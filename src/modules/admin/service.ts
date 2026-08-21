@@ -13,6 +13,8 @@ import type {
   ClassRoom,
   IdentityRole,
   IdentityUser,
+  LeaveRequest,
+  ListLeaveRequestsFilter,
   Location,
   Permission,
   ProfileLifecycleStatus,
@@ -26,6 +28,7 @@ import type {
 } from '../../providers/types.js'
 import {
   privilegedSessionSchema,
+  type AdminLeaveRequestResponse,
   type EffectivePermissionsResponse,
   type PrivilegedSession,
   type StaffResponse,
@@ -1824,6 +1827,193 @@ export async function listAttendances(params: {
     throw AppError.forbidden()
   }
   return params.providers.domainStore.listAttendances(params.filter)
+}
+
+// ---------------------------------------------------------------------------
+// Leave Requests Operations
+// ---------------------------------------------------------------------------
+
+async function mapLeaveRequestWithAttachment(
+  lr: LeaveRequest,
+  providers: AppProviders,
+): Promise<AdminLeaveRequestResponse> {
+  const attachmentUrl = lr.attachment_url
+    ? await providers.objectStorage.getSignedPermitUrl(lr.attachment_url)
+    : null
+
+  return {
+    id: lr.id,
+    user_id: lr.user_id,
+    student_name: lr.student_name ?? null,
+    student_nis: lr.student_nis ?? null,
+    student_class: lr.student_class ?? null,
+    absence_number: lr.absence_number ?? null,
+    // SAFETY: LeaveRequest category is constrained by leave_requests_category_check in database and leaveRequestCategorySchema
+    category: lr.category as AdminLeaveRequestResponse['category'],
+    description: lr.description,
+    status: lr.status,
+    date: lr.date,
+    approval_status: lr.approval_status,
+    attachment_url: attachmentUrl,
+    rejection_reason: lr.rejection_reason ?? null,
+    rejected_at: lr.rejected_at ?? null,
+    created_at: lr.created_at,
+    updated_at: lr.updated_at,
+  }
+}
+
+export async function listAdminLeaveRequests(params: {
+  filter?: ListLeaveRequestsFilter
+  actorRole: IdentityRole | null
+  actorId: string
+  providers: AppProviders
+}): Promise<AdminLeaveRequestResponse[]> {
+  if (!params.actorRole || !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)) {
+    throw AppError.forbidden()
+  }
+
+  const items = await params.providers.domainStore.listLeaveRequests(params.filter)
+  return Promise.all(items.map((lr) => mapLeaveRequestWithAttachment(lr, params.providers)))
+}
+
+export async function getAdminLeaveRequest(params: {
+  id: string
+  actorRole: IdentityRole | null
+  actorId: string
+  providers: AppProviders
+}): Promise<AdminLeaveRequestResponse> {
+  if (!params.actorRole || !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)) {
+    throw AppError.forbidden()
+  }
+
+  const lr = await params.providers.domainStore.getLeaveRequestById(params.id)
+  if (!lr) {
+    throw AppError.notFound('Leave request')
+  }
+
+  return mapLeaveRequestWithAttachment(lr, params.providers)
+}
+
+export async function approveLeaveRequest(params: {
+  id: string
+  actorRole: IdentityRole | null
+  actorId: string
+  providers: AppProviders
+}): Promise<AdminLeaveRequestResponse> {
+  if (!params.actorRole || !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)) {
+    throw AppError.forbidden()
+  }
+
+  const lr = await params.providers.domainStore.getLeaveRequestById(params.id)
+  if (!lr) {
+    throw AppError.notFound('Leave request')
+  }
+
+  const updated = await params.providers.domainStore.updateLeaveRequestStatus({
+    id: params.id,
+    approvalStatus: 'approved',
+    status: true,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'approve_leave_request',
+    entity_type: 'leave_request',
+    entity_id: params.id,
+    details: {
+      previous_status: lr.approval_status,
+      student_user_id: lr.user_id,
+      category: lr.category,
+      date: lr.date,
+    },
+  })
+
+  return mapLeaveRequestWithAttachment(updated, params.providers)
+}
+
+export async function rejectLeaveRequest(params: {
+  id: string
+  reason?: string | null
+  actorRole: IdentityRole | null
+  actorId: string
+  providers: AppProviders
+}): Promise<AdminLeaveRequestResponse> {
+  if (!params.actorRole || !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)) {
+    throw AppError.forbidden()
+  }
+
+  const lr = await params.providers.domainStore.getLeaveRequestById(params.id)
+  if (!lr) {
+    throw AppError.notFound('Leave request')
+  }
+
+  const updated = await params.providers.domainStore.updateLeaveRequestStatus({
+    id: params.id,
+    approvalStatus: 'rejected',
+    status: false,
+    rejectionReason: params.reason ?? null,
+    rejectedAt: new Date().toISOString(),
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'reject_leave_request',
+    entity_type: 'leave_request',
+    entity_id: params.id,
+    details: {
+      previous_status: lr.approval_status,
+      student_user_id: lr.user_id,
+      category: lr.category,
+      date: lr.date,
+      rejection_reason: params.reason ?? null,
+    },
+  })
+
+  return mapLeaveRequestWithAttachment(updated, params.providers)
+}
+
+export async function deleteAdminLeaveRequest(params: {
+  id: string
+  actorRole: IdentityRole | null
+  actorId: string
+  providers: AppProviders
+}): Promise<void> {
+  if (!params.actorRole || !['platform_admin', 'school_admin'].includes(params.actorRole)) {
+    throw AppError.forbidden()
+  }
+
+  const lr = await params.providers.domainStore.getLeaveRequestById(params.id)
+  if (!lr) {
+    throw AppError.notFound('Leave request')
+  }
+
+  if (lr.attachment_url) {
+    const files = await params.providers.domainStore.listFiles({
+      userId: lr.user_id,
+      purpose: 'permit_attachment',
+    })
+    const matchedFile = files.find((f) => f.object_path === lr.attachment_url)
+    if (matchedFile) {
+      await params.providers.domainStore.updateFileLifecycle(matchedFile.id, 'deleted')
+    }
+    if (params.providers.objectStorage.deletePermitAttachment) {
+      await params.providers.objectStorage.deletePermitAttachment(lr.attachment_url)
+    }
+  }
+
+  await params.providers.domainStore.deleteLeaveRequest(params.id)
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'delete_leave_request',
+    entity_type: 'leave_request',
+    entity_id: params.id,
+    details: {
+      student_user_id: lr.user_id,
+      category: lr.category,
+      date: lr.date,
+    },
+  })
 }
 
 

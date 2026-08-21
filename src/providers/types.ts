@@ -102,8 +102,52 @@ export interface Permit {
   tanggal: string
   approval_status: 'pending' | 'approved' | 'rejected'
   created_at?: string
+  updated_at?: string
   rejection_reason?: string | null
   rejected_at?: string | null
+}
+
+export const leaveRequestCategorySchema = z.enum(['sakit', 'pergi', 'dispensasi', 'lainnya'])
+export type LeaveRequestCategory = z.infer<typeof leaveRequestCategorySchema>
+
+export const leaveRequestApprovalStatusSchema = z.enum(['pending', 'approved', 'rejected'])
+export type LeaveRequestApprovalStatus = z.infer<typeof leaveRequestApprovalStatusSchema>
+
+export interface LeaveRequest {
+  id: string
+  user_id: string
+  category: LeaveRequestCategory | string
+  description: string
+  status: boolean
+  attachment_url: string | null
+  date: string
+  approval_status: LeaveRequestApprovalStatus
+  rejection_reason?: string | null
+  rejected_at?: string | null
+  created_at?: string
+  updated_at?: string
+  student_name?: string | null
+  student_nis?: string | null
+  student_class?: string | null
+  absence_number?: string | null
+}
+
+export interface ListLeaveRequestsFilter {
+  userId?: string
+  approvalStatus?: LeaveRequestApprovalStatus
+  category?: string
+  startDate?: string
+  endDate?: string
+  limit?: number
+  offset?: number
+}
+
+export interface UpdateLeaveRequestStatusParams {
+  id: string
+  approvalStatus: LeaveRequestApprovalStatus
+  status?: boolean
+  rejectionReason?: string | null
+  rejectedAt?: string | null
 }
 
 export interface ActivePermitSummary {
@@ -559,6 +603,12 @@ export interface DomainStore {
   ): Promise<ActivePermitSummary[]>
   getPermitHistory(userId: string): Promise<Permit[]>
   insertPermit(data: InsertPermitData): Promise<Permit>
+
+  // Leave Requests domain methods
+  getLeaveRequestById(id: string): Promise<LeaveRequest | null>
+  listLeaveRequests(filter?: ListLeaveRequestsFilter): Promise<LeaveRequest[]>
+  updateLeaveRequestStatus(params: UpdateLeaveRequestStatusParams): Promise<LeaveRequest>
+  deleteLeaveRequest(id: string): Promise<void>
   validateAttendanceAction(params: {
     userId: string
     latitude: number
@@ -798,6 +848,7 @@ export interface ObjectStorage {
   getSignedAvatarUrl(path: string): Promise<string | null>
   uploadPermitAttachment(userId: string, file: Buffer, contentType: string): Promise<string>
   getSignedPermitUrl(path: string): Promise<string | null>
+  deletePermitAttachment?(path: string): Promise<void>
   uploadFaceEnrollmentImage(userId: string, imageIndex: number, file: Buffer, contentType: string): Promise<string>
   deleteFaceEnrollmentImages(userId: string): Promise<void>
   getSignedFaceEnrollmentUrl(path: string): Promise<string | null>

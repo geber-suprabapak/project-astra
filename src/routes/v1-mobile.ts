@@ -59,6 +59,7 @@ export function createV1Mobile(deps: V1MobileDeps = {}) {
   router.route('/attendance', attendance)
   router.route('/face/enrollment', enrollment)
   router.route('/permits', permits)
+  router.route('/leave-requests', permits)
   router.route('/profile', profile)
   router.route('/files', files)
   router.route('/time', timeRouter)

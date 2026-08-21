@@ -273,6 +273,15 @@ export class S3ObjectStorage implements ObjectStorage {
     }
   }
 
+  async deletePermitAttachment(path: string): Promise<void> {
+    if (!path) return
+    try {
+      await this.executeS3Request('DELETE', this.bucketPermits, path)
+    } catch (err) {
+      logger.warn({ err, path }, 'Failed to delete permit attachment from S3')
+    }
+  }
+
   async uploadFaceEnrollmentImage(
     userId: string,
     imageIndex: number,
