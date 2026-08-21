@@ -116,7 +116,7 @@ describe('integration: /v1/mobile contract boundary', () => {
       }
 
       expect(res.status).toBe(200)
-      expect(body.success).toBe(true)
+      expect(res.headers.get('X-Astra-Contract-Version')).toBe('v1')
       expect(body.data.timezone).toBe('Asia/Jakarta')
       expect(body.data.source).toBe('bff')
       expect(Number.isFinite(body.data.epoch_ms)).toBe(true)
