@@ -140,7 +140,7 @@ export class PostgresDomainStore implements DomainStore {
   async getUserProfile(userId: string): Promise<UserProfile> {
     try {
       const rows = await this.sql<UserProfile[]>`
-        SELECT user_id, full_name, email, nis, class_name, absence_number, avatar_url, role, lifecycle_status, gender
+        SELECT user_id, full_name, email, nis, class_name, absence_number, avatar_url, notification_token, role, lifecycle_status, gender
         FROM profiles
         WHERE user_id = ${userId}
         LIMIT 1

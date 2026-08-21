@@ -436,6 +436,31 @@ describe('integration: /v1/mobile contract boundary', () => {
     })
   })
 
+  describe('Notification token endpoints', () => {
+    it('persists the current user push token behind Astra', async () => {
+      const update = await app.request('/v1/mobile/notifications/token', {
+        method: 'PATCH',
+        headers: {
+          Authorization: authHeader,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ token: 'ExponentPushToken[test]' }),
+      })
+      expect(update.status).toBe(200)
+ 
+      const read = await app.request('/v1/mobile/notifications/token', {
+        headers: { Authorization: authHeader },
+      })
+      // SAFETY: The notification token route returns the standard success envelope.
+      const body = (await read.json()) as {
+        success: boolean
+        data: { notification_token: string | null }
+      }
+      expect(read.status).toBe(200)
+      expect(body.data.notification_token).toBe('ExponentPushToken[test]')
+    })
+  })
+
   describe('Route 404 fallback', () => {
     it('returns standard 404 error envelope for undefined routes', async () => {
       const res = await app.request('/v1/mobile/non-existent')

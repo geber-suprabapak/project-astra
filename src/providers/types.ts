@@ -15,6 +15,7 @@ export interface UserProfile {
   class_name?: string | null
   absence_number?: string | null
   avatar_url?: string | null
+  notification_token?: string | null
   role?: IdentityRole | null
   lifecycle_status: ProfileLifecycleStatus
   gender?: string | null
