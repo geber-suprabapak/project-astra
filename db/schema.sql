@@ -73,6 +73,12 @@ CREATE TABLE IF NOT EXISTS profiles (
     CONSTRAINT profiles_role_check CHECK (role IN ('platform_admin', 'school_admin', 'teacher', 'student', 'staff')),
     CONSTRAINT profiles_lifecycle_check CHECK (lifecycle_status IN ('pending', 'approved', 'rejected', 'disabled'))
 );
+
+CREATE TABLE IF NOT EXISTS legacy_identity_mappings (
+  legacy_user_id uuid PRIMARY KEY,
+  target_user_id text NOT NULL UNIQUE,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
  
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS notification_token TEXT;
 

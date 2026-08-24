@@ -21,6 +21,10 @@ export interface OidcIdentityProviderOptions {
   logtoEndpoint?: string
   logtoAppId?: string
   logtoAppSecret?: string
+  legacyJwtSecret?: string
+  legacyIssuer?: string
+  legacyAudience?: string
+  legacyBridgeExpiresAt?: string
 }
 
 export class OidcIdentityProvider implements IdentityProvider {
@@ -31,6 +35,10 @@ export class OidcIdentityProvider implements IdentityProvider {
   private readonly logtoEndpoint?: string
   private readonly logtoAppId?: string
   private readonly logtoAppSecret?: string
+  private readonly legacyJwtSecret?: string
+  private readonly legacyIssuer?: string
+  private readonly legacyAudience: string
+  private readonly legacyBridgeExpiresAt?: string
   private jwksGetter: ReturnType<typeof createRemoteJWKSet> | null = null
 
   constructor(options: OidcIdentityProviderOptions = {}) {
@@ -41,6 +49,18 @@ export class OidcIdentityProvider implements IdentityProvider {
     this.logtoEndpoint = 'logtoEndpoint' in options ? options.logtoEndpoint : env.logtoEndpoint
     this.logtoAppId = 'logtoAppId' in options ? options.logtoAppId : env.logtoAppId
     this.logtoAppSecret = 'logtoAppSecret' in options ? options.logtoAppSecret : env.logtoAppSecret
+    this.legacyJwtSecret =
+      'legacyJwtSecret' in options ? options.legacyJwtSecret : env.legacySupabaseJwtSecret
+    this.legacyIssuer =
+      'legacyIssuer' in options ? options.legacyIssuer : env.legacySupabaseJwtIssuer
+    this.legacyAudience =
+      'legacyAudience' in options
+        ? (options.legacyAudience ?? 'authenticated')
+        : env.legacySupabaseJwtAudience
+    this.legacyBridgeExpiresAt =
+      'legacyBridgeExpiresAt' in options
+        ? options.legacyBridgeExpiresAt
+        : env.legacyAuthBridgeExpiresAt
   }
 
   private getJwksGetter() {
@@ -98,6 +118,7 @@ export class OidcIdentityProvider implements IdentityProvider {
 
       return {
         userId: parsedSub.data,
+        authSource: 'logto',
         email: parsedEmail.success ? parsedEmail.data : null,
         roles: parsedRoles.success ? parsedRoles.data : [],
         scopes,
@@ -108,6 +129,48 @@ export class OidcIdentityProvider implements IdentityProvider {
         mustChangePassword: parsedMustChangePassword.success
           ? parsedMustChangePassword.data
           : undefined,
+      }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      throw AppError.authInvalid()
+    }
+  }
+
+  async verifyLegacyToken(token: string): Promise<IdentityUser> {
+    try {
+      if (!this.legacyJwtSecret || !this.legacyIssuer || !this.legacyBridgeExpiresAt) {
+        throw AppError.authInvalid('Legacy mobile authentication bridge is not configured.')
+      }
+      if (new Date(this.legacyBridgeExpiresAt).getTime() <= Date.now()) {
+        throw AppError.authInvalid('Legacy mobile authentication bridge has expired.')
+      }
+
+      const secret = new TextEncoder().encode(this.legacyJwtSecret)
+      const { payload } = await jwtVerify(token, secret, {
+        audience: this.legacyAudience,
+        issuer: this.legacyIssuer,
+        requiredClaims: ['exp', 'sub'],
+      })
+      const parsedSub = z.string().uuid().safeParse(payload.sub)
+      if (!parsedSub.success) {
+        throw AppError.authInvalid('Legacy token has an invalid subject claim.')
+      }
+      const appMetadata = z
+        .object({ role: z.string().optional() })
+        .passthrough()
+        .safeParse(payload.app_metadata)
+      if (!appMetadata.success || appMetadata.data.role !== 'siswa') {
+        throw AppError.forbidden('Legacy bridge accepts student mobile identities only.')
+      }
+      const parsedEmail = z.string().safeParse(payload.email)
+      return {
+        userId: parsedSub.data,
+        legacyUserId: parsedSub.data,
+        authSource: 'legacy_supabase',
+        email: parsedEmail.success ? parsedEmail.data : null,
+        roles: ['student'],
+        scopes: ['legacy:mobile'],
+        mfaVerified: false,
       }
     } catch (err) {
       if (err instanceof AppError) throw err

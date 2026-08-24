@@ -1,0 +1,53 @@
+name: skanida-next-astra
+
+services:
+  astra:
+    image: ${ASTRA_IMAGE:-skanida/astra:bridge-20260824}
+    pull_policy: never
+    restart: unless-stopped
+    # Portainer resolves `env_file` on the Portainer machine while rendering a
+    # stack. Keep target credentials on the Docker host and load the bind mount
+    # from inside the container instead.
+    command:
+      - bun
+      - -e
+      - |
+        import { readFileSync } from 'node:fs'
+
+        const envPath = '/run/secrets/astra.env'
+        for (const rawLine of readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+          const line = rawLine.trim()
+          if (!line || line.startsWith('#')) continue
+          const separator = line.indexOf('=')
+          const key = separator === -1 ? '' : line.slice(0, separator)
+          const value = separator === -1 ? '' : line.slice(separator + 1)
+          const validName = /^[A-Za-z_][A-Za-z0-9_]*/.exec(key)
+          if (!validName || validName[0] !== key) {
+            throw new Error('Invalid environment entry in ' + envPath + ': ' + JSON.stringify(key))
+          }
+          process.env[key] = value
+        }
+
+        await import('./dist/index.js')
+    volumes:
+      - ${ASTRA_ENV_FILE:?Set ASTRA_ENV_FILE to the target host env file}:/run/secrets/astra.env:ro
+    ports:
+      - '${TARGET_LAN_IP:?Set TARGET_LAN_IP}:${ASTRA_PORT:-23000}:3000'
+    networks:
+      data:
+        aliases: [astra]
+      edge: {}
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/ready']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+networks:
+  data:
+    external: true
+    name: ${SKANIDA_DATA_NETWORK:-skanida-next-data}
+  edge:
+    external: true
+    name: ${SKANIDA_EDGE_NETWORK:-skanida-next-edge}

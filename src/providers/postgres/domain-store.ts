@@ -156,6 +156,21 @@ export class PostgresDomainStore implements DomainStore {
     }
   }
 
+  async resolveLegacyUserId(legacyUserId: string): Promise<string | null> {
+    try {
+      const rows = await this.sql<{ target_user_id: string }[]>`
+        SELECT target_user_id
+        FROM legacy_identity_mappings
+        WHERE legacy_user_id = ${legacyUserId}::uuid
+        LIMIT 1
+      `
+      return rows[0]?.target_user_id ?? null
+    } catch (err) {
+      logger.error({ err, legacyUserId }, 'Failed to resolve legacy identity mapping')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
   async updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<void> {
     try {
       // SAFETY: keys of Partial<UserProfile> are valid property names of UserProfile

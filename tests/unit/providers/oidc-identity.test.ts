@@ -45,6 +45,7 @@ describe('OidcIdentityProvider', () => {
 
       await expect(provider.verifyToken(token)).resolves.toEqual({
         userId: 'platform-admin-1',
+        authSource: 'logto',
         email: 'admin@school.sch.id',
         roles: ['platform_admin'],
         scopes: ['openid', 'profile', 'admin:read'],
@@ -91,6 +92,67 @@ describe('OidcIdentityProvider', () => {
       const token = await createToken({})
 
       await expect(provider.verifyToken(token)).rejects.toMatchObject({
+        code: ErrorCode.AUTH_INVALID,
+      })
+    })
+  })
+
+  describe('verifyLegacyToken', () => {
+    const legacySecret = new TextEncoder().encode('legacy-test-secret-at-least-32-chars-long')
+    const legacyUserId = 'd2b0ed61-56bf-4d9e-9329-7c1014db6b5c'
+
+    async function createLegacyToken(role = 'siswa', expiresIn = '5m'): Promise<string> {
+      return new SignJWT({ app_metadata: { role }, email: 'student@school.sch.id' })
+        .setProtectedHeader({ alg: 'HS256' })
+        .setIssuer('https://supabase.test/auth/v1')
+        .setAudience('authenticated')
+        .setSubject(legacyUserId)
+        .setIssuedAt()
+        .setExpirationTime(expiresIn)
+        .sign(legacySecret)
+    }
+
+    it('accepts only a valid student Supabase token before the fixed bridge expiry', async () => {
+      const provider = new OidcIdentityProvider({
+        legacyJwtSecret: new TextDecoder().decode(legacySecret),
+        legacyIssuer: 'https://supabase.test/auth/v1',
+        legacyAudience: 'authenticated',
+        legacyBridgeExpiresAt: '2099-01-01T00:00:00.000Z',
+      })
+
+      await expect(provider.verifyLegacyToken(await createLegacyToken())).resolves.toEqual({
+        userId: legacyUserId,
+        legacyUserId,
+        authSource: 'legacy_supabase',
+        email: 'student@school.sch.id',
+        roles: ['student'],
+        scopes: ['legacy:mobile'],
+        mfaVerified: false,
+      })
+    })
+
+    it('rejects a non-student legacy token even when it is correctly signed', async () => {
+      const provider = new OidcIdentityProvider({
+        legacyJwtSecret: new TextDecoder().decode(legacySecret),
+        legacyIssuer: 'https://supabase.test/auth/v1',
+        legacyBridgeExpiresAt: '2099-01-01T00:00:00.000Z',
+      })
+
+      await expect(
+        provider.verifyLegacyToken(await createLegacyToken('admin')),
+      ).rejects.toMatchObject({
+        code: ErrorCode.FORBIDDEN,
+      })
+    })
+
+    it('rejects legacy tokens after the configured bridge deadline', async () => {
+      const provider = new OidcIdentityProvider({
+        legacyJwtSecret: new TextDecoder().decode(legacySecret),
+        legacyIssuer: 'https://supabase.test/auth/v1',
+        legacyBridgeExpiresAt: '2020-01-01T00:00:00.000Z',
+      })
+
+      await expect(provider.verifyLegacyToken(await createLegacyToken())).rejects.toMatchObject({
         code: ErrorCode.AUTH_INVALID,
       })
     })

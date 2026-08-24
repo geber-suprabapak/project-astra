@@ -44,6 +44,10 @@ export const envSchema = z
     OIDC_JWKS_URL: z.string().url().optional(),
     OIDC_JWT_SECRET: z.string().min(1).optional(),
     OIDC_AUDIENCE: z.string().min(1).default('authenticated'),
+    LEGACY_SUPABASE_JWT_SECRET: z.string().min(1).optional(),
+    LEGACY_SUPABASE_JWT_ISSUER: z.string().min(1).optional(),
+    LEGACY_SUPABASE_JWT_AUDIENCE: z.string().min(1).default('authenticated'),
+    LEGACY_AUTH_BRIDGE_EXPIRES_AT: z.string().datetime({ offset: true }).optional(),
     LOGTO_ENDPOINT: z.string().url().optional(),
     LOGTO_APP_ID: z.string().min(1).optional(),
     LOGTO_APP_SECRET: z.string().min(1).optional(),
@@ -66,6 +70,24 @@ export const envSchema = z
         code: z.ZodIssueCode.custom,
         message: 'Either OIDC_JWT_SECRET or OIDC_JWKS_URL must be provided',
         path: ['OIDC_JWT_SECRET'],
+      })
+    }
+
+    const legacyBridgeFields = [
+      data.LEGACY_SUPABASE_JWT_SECRET,
+      data.LEGACY_SUPABASE_JWT_ISSUER,
+      data.LEGACY_AUTH_BRIDGE_EXPIRES_AT,
+    ]
+    const configuredLegacyBridgeFields = legacyBridgeFields.filter(Boolean).length
+    if (
+      configuredLegacyBridgeFields > 0 &&
+      configuredLegacyBridgeFields < legacyBridgeFields.length
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'LEGACY_SUPABASE_JWT_SECRET, LEGACY_SUPABASE_JWT_ISSUER, and LEGACY_AUTH_BRIDGE_EXPIRES_AT must be set together',
+        path: ['LEGACY_SUPABASE_JWT_SECRET'],
       })
     }
 
@@ -154,6 +176,10 @@ export const env = {
   oidcJwksUrl: raw.OIDC_JWKS_URL,
   oidcJwtSecret: raw.OIDC_JWT_SECRET,
   oidcAudience: raw.OIDC_AUDIENCE,
+  legacySupabaseJwtSecret: raw.LEGACY_SUPABASE_JWT_SECRET,
+  legacySupabaseJwtIssuer: raw.LEGACY_SUPABASE_JWT_ISSUER,
+  legacySupabaseJwtAudience: raw.LEGACY_SUPABASE_JWT_AUDIENCE,
+  legacyAuthBridgeExpiresAt: raw.LEGACY_AUTH_BRIDGE_EXPIRES_AT,
   logtoEndpoint: raw.LOGTO_ENDPOINT,
   logtoAppId: raw.LOGTO_APP_ID,
   logtoAppSecret: raw.LOGTO_APP_SECRET,

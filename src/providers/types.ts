@@ -29,6 +29,8 @@ export interface UserProfile {
 
 export interface IdentityUser {
   userId: string
+  authSource?: 'logto' | 'legacy_supabase'
+  legacyUserId?: string
   email?: string | null
   roles?: readonly IdentityRole[]
   scopes?: readonly string[]
@@ -47,6 +49,7 @@ export interface CreateStudentIdentityParams {
 
 export interface IdentityProvider {
   verifyToken(token: string): Promise<IdentityUser>
+  verifyLegacyToken?(token: string): Promise<IdentityUser>
   verifyPassword(email: string, password: string): Promise<void>
   updatePassword(userId: string, newPassword: string): Promise<void>
   updateUserMetadata(userId: string, metadata: UserMetadata): Promise<void>
@@ -598,6 +601,7 @@ export interface InsertAttendanceData {
 
 export interface DomainStore {
   getUserProfile(userId: string): Promise<UserProfile>
+  resolveLegacyUserId?(legacyUserId: string): Promise<string | null>
   updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<void>
   getProfileByNis(nis: string): Promise<UserProfile | null>
   getTodayAbsences(userId: string, dateWIB: string): Promise<Absence[]>

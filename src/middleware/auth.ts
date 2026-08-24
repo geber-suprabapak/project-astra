@@ -19,21 +19,32 @@ export const auth: MiddlewareHandler<AppEnv> = async (c, next) => {
   try {
     identityUser = await providers.identityProvider.verifyToken(token)
   } catch (err) {
-    if (err instanceof AppError) throw err
-    throw AppError.authInvalid()
+    const isLegacyMobilePath = c.req.path.startsWith('/v1/mobile/')
+    if (!isLegacyMobilePath || !providers.identityProvider.verifyLegacyToken) {
+      if (err instanceof AppError) throw err
+      throw AppError.authInvalid()
+    }
+    identityUser = await providers.identityProvider.verifyLegacyToken(token)
   }
   if (!identityUser.scopes || identityUser.scopes.length === 0) {
     throw AppError.authInvalid('Token missing scope claim.')
   }
 
-  const isRevoked = await providers.domainStore.isSessionRevoked(identityUser.userId)
+  const userId = identityUser.legacyUserId
+    ? await providers.domainStore.resolveLegacyUserId?.(identityUser.legacyUserId)
+    : identityUser.userId
+  if (!userId) {
+    throw AppError.forbidden()
+  }
+
+  const isRevoked = await providers.domainStore.isSessionRevoked(userId)
   if (isRevoked) {
     throw AppError.authInvalid('Session has been revoked.')
   }
 
   let profile
   try {
-    profile = await providers.domainStore.getUserProfile(identityUser.userId)
+    profile = await providers.domainStore.getUserProfile(userId)
   } catch (err) {
     if (err instanceof AppError && err.code === ErrorCode.RESOURCE_NOT_FOUND) {
       throw AppError.forbidden()
@@ -45,7 +56,7 @@ export const auth: MiddlewareHandler<AppEnv> = async (c, next) => {
     throw AppError.forbidden()
   }
 
-  const userRoles = await providers.domainStore.getUserRoles(identityUser.userId)
+  const userRoles = await providers.domainStore.getUserRoles(userId)
   const tokenRoles = new Set(identityUser.roles ?? [])
   // SAFETY: assigned role strings are checked against identity token role set
   const hasMatchingRole =
@@ -56,7 +67,7 @@ export const auth: MiddlewareHandler<AppEnv> = async (c, next) => {
     throw AppError.forbidden()
   }
 
-  c.set('userId', identityUser.userId)
+  c.set('userId', userId)
   c.set('rawToken', token)
   c.set('identityUser', identityUser)
   c.set('profileLifecycleStatus', profile.lifecycle_status)
