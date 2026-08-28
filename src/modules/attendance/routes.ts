@@ -80,8 +80,8 @@ export function createAttendanceRouter(deps: AttendanceRouterDeps = {}) {
   router.get('/', async (c) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const parsed = AttendanceHistoryQuerySchema.safeParse({
-      startDate: c.req.query('startDate'),
-      endDate: c.req.query('endDate'),
+      startDate: c.req.query('startDate') ?? c.req.query('start_date'),
+      endDate: c.req.query('endDate') ?? c.req.query('end_date'),
     })
     if (!parsed.success) throw AppError.validationError(parsed.error.flatten())
 
@@ -98,8 +98,8 @@ export function createAttendanceRouter(deps: AttendanceRouterDeps = {}) {
   router.get('/history', async (c) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const parsed = AttendanceHistoryQuerySchema.safeParse({
-      startDate: c.req.query('startDate'),
-      endDate: c.req.query('endDate'),
+      startDate: c.req.query('startDate') ?? c.req.query('start_date'),
+      endDate: c.req.query('endDate') ?? c.req.query('end_date'),
     })
     if (!parsed.success) throw AppError.validationError(parsed.error.flatten())
 

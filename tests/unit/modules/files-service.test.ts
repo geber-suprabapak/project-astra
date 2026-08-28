@@ -58,8 +58,14 @@ function createTestProviders(): AppProviders {
 
 describe('files service', () => {
   describe('createUploadIntent', () => {
-    it('creates upload intent for approved user', async () => {
+    it('creates upload intent for approved user and routes avatar to avatars bucket', async () => {
       const providers = createTestProviders()
+      let capturedBucket: string | undefined
+      providers.objectStorage.getPresignedUploadUrl = async (params) => {
+        capturedBucket = params.bucket
+        return `https://storage.local/upload/${encodeURIComponent(params.key)}`
+      }
+
       const intent = await createUploadIntent({
         userId: 'student-1',
         purpose: 'avatar',
@@ -71,10 +77,32 @@ describe('files service', () => {
       expect(intent.file_id).toBeDefined()
       expect(intent.upload_url).toBeDefined()
       expect(intent.purpose).toBe('avatar')
+      expect(capturedBucket).toBe('avatars')
 
       const fileRecord = await providers.domainStore.getFileRecord(intent.file_id)
       expect(fileRecord).not.toBeNull()
       expect(fileRecord?.lifecycle).toBe('pending_upload')
+    })
+
+    it('routes permit_attachment upload intent to perizinan bucket', async () => {
+      const providers = createTestProviders()
+      let capturedBucket: string | undefined
+      providers.objectStorage.getPresignedUploadUrl = async (params) => {
+        capturedBucket = params.bucket
+        return `https://storage.local/upload/${encodeURIComponent(params.key)}`
+      }
+
+      const intent = await createUploadIntent({
+        userId: 'student-1',
+        purpose: 'permit_attachment',
+        contentType: 'application/pdf',
+        sizeBytes: 50 * 1024,
+        providers,
+      })
+
+      expect(intent.file_id).toBeDefined()
+      expect(intent.purpose).toBe('permit_attachment')
+      expect(capturedBucket).toBe('perizinan')
     })
 
     it('rejects unapproved user', async () => {

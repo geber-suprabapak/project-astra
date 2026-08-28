@@ -1,5 +1,6 @@
 import { defaultProviders } from '../../providers/index.js'
 import type { AppProviders, FilePurpose, FileRecord } from '../../providers/types.js'
+import { env } from '../../config/env.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { hasScope, logtoScopes } from '../../authz/scopes.js'
 import {
@@ -89,8 +90,17 @@ export async function createUploadIntent(params: {
     lifecycle: 'pending_upload',
   })
 
+  // SAFETY: ObjectStorage provider instance may optionally provide bucketPermits / bucketAvatars, falling back to env config
+  const targetBucket =
+    params.purpose === 'permit_attachment'
+      ? ((providers.objectStorage as { bucketPermits?: string }).bucketPermits ??
+        env.s3BucketPermits)
+      : ((providers.objectStorage as { bucketAvatars?: string }).bucketAvatars ??
+        env.s3BucketAvatars)
+
   const uploadUrl = providers.objectStorage.getPresignedUploadUrl
     ? await providers.objectStorage.getPresignedUploadUrl({
+        bucket: targetBucket,
         key: objectPath,
         contentType: params.contentType,
         expiresInSeconds: 900,

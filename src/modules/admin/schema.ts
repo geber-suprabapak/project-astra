@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import {
   identityRoleSchema,
+  leaveRequestApprovalStatusSchema,
+  leaveRequestCategorySchema,
   notificationPayloadSchema,
   profileLifecycleStatusSchema,
 } from '../../providers/types.js'
@@ -756,6 +758,25 @@ export const rejectLeaveRequestSchema = z.object({
 })
 
 export type RejectLeaveRequestInput = z.infer<typeof rejectLeaveRequestSchema>
+
+export const createAdminLeaveRequestSchema = z
+  .object({
+    user_id: z.string().min(1, 'Target user_id is required').optional(),
+    userId: z.string().min(1, 'Target user_id is required').optional(),
+    category: leaveRequestCategorySchema,
+    description: z.string().min(1, 'Description is required').max(1000),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD required'),
+    file_id: z.string().uuid().optional().nullable(),
+    fileId: z.string().uuid().optional().nullable(),
+    approval_status: leaveRequestApprovalStatusSchema.default('approved'),
+    approvalStatus: leaveRequestApprovalStatusSchema.optional(),
+  })
+  .refine((data) => Boolean(data.user_id || data.userId), {
+    message: 'Target user_id is required',
+    path: ['user_id'],
+  })
+
+export type CreateAdminLeaveRequestInput = z.infer<typeof createAdminLeaveRequestSchema>
 
 // ---------------------------------------------------------------------------
 // Notification Outbox Admin Schemas

@@ -23,6 +23,7 @@ import {
   type CreateCalendarExceptionParams,
   type CreateClassParams,
   type CreateFileRecordParams,
+  type CreateLeaveRequestData,
   type CreateLocationParams,
   type CreateManualAttendanceParams,
   type CreatePasswordResetCodeParams,
@@ -1052,6 +1053,48 @@ export class MemoryDomainStore implements DomainStore {
     }
     this.permits.push(permit)
     return permit
+  }
+
+  async createLeaveRequest(data: CreateLeaveRequestData): Promise<LeaveRequest> {
+    const approvalStatus = data.approval_status ?? 'approved'
+    const status = data.status !== undefined ? data.status : approvalStatus === 'approved'
+    const now = new Date().toISOString()
+    const id = `leave-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const permit: Permit = {
+      id,
+      user_id: data.user_id,
+      kategori_izin: data.category,
+      deskripsi: data.description,
+      status,
+      link_foto: data.attachment_url ?? null,
+      tanggal: data.date,
+      approval_status: approvalStatus,
+      created_at: now,
+      updated_at: now,
+      rejection_reason: null,
+      rejected_at: null,
+    }
+    this.permits.push(permit)
+
+    const profile = this.profiles.get(data.user_id)
+    return {
+      id,
+      user_id: data.user_id,
+      category: data.category,
+      description: data.description,
+      status,
+      attachment_url: data.attachment_url ?? null,
+      date: data.date,
+      approval_status: approvalStatus,
+      rejection_reason: null,
+      rejected_at: null,
+      created_at: now,
+      updated_at: now,
+      student_name: profile?.full_name ?? null,
+      student_nis: profile?.nis ?? null,
+      student_class: profile?.class_name ?? null,
+      absence_number: profile?.absence_number ?? null,
+    }
   }
 
   async getLeaveRequestById(id: string): Promise<LeaveRequest | null> {

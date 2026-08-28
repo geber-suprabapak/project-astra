@@ -160,6 +160,16 @@ export interface UpdateLeaveRequestStatusParams {
   rejectedAt?: string | null
 }
 
+export interface CreateLeaveRequestData {
+  user_id: string
+  category: LeaveRequestCategory | string
+  description: string
+  date: string
+  status?: boolean
+  attachment_url?: string | null
+  approval_status?: LeaveRequestApprovalStatus
+}
+
 export interface ActivePermitSummary {
   id: string
   approval_status: 'pending' | 'approved' | 'rejected'
@@ -616,6 +626,7 @@ export interface DomainStore {
   insertPermit(data: InsertPermitData): Promise<Permit>
 
   // Leave Requests domain methods
+  createLeaveRequest(data: CreateLeaveRequestData): Promise<LeaveRequest>
   getLeaveRequestById(id: string): Promise<LeaveRequest | null>
   listLeaveRequests(filter?: ListLeaveRequestsFilter): Promise<LeaveRequest[]>
   updateLeaveRequestStatus(params: UpdateLeaveRequestStatusParams): Promise<LeaveRequest>

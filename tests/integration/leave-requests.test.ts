@@ -456,4 +456,115 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     })
     expect(adminDeleteRes.status).toBe(200)
   })
+
+  it('School administrator creates leave request on behalf of student via POST /v1/admin/leave-requests and updates via PATCH', async () => {
+    const { domainStore, identityProvider, app } = createIntegrationEnvironment()
+    await setupTestUsers(domainStore, identityProvider)
+
+    const adminToken = tokenFor({
+      sub: 'admin-1',
+      roles: ['school_admin'],
+      scope: 'openid profile admin:read admin:write leave:read leave:approve',
+      mfa_verified: true,
+      must_change_password: false,
+    })
+    const studentToken = tokenFor({ sub: 'student-1', roles: ['student'], scope: 'openid profile' })
+
+    // 1. Admin creates leave request for student-1 with default approval (approved)
+    const createRes = await app.request('/v1/admin/leave-requests', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user_id: 'student-1',
+        category: 'sakit',
+        description: 'Sakit demam berdarah dicatat oleh tata usaha',
+        date: '2026-08-28',
+      }),
+    })
+
+    expect(createRes.status).toBe(201)
+    const createBody = await createRes.json()
+    expect(createBody.success).toBe(true)
+    expect(createBody.data.id).toBeDefined()
+    expect(createBody.data.user_id).toBe('student-1')
+    expect(createBody.data.student_name).toBe('Budi Santoso')
+    expect(createBody.data.category).toBe('sakit')
+    expect(createBody.data.approval_status).toBe('approved')
+    expect(createBody.data.status).toBe(true)
+    const permitId = createBody.data.id
+    expect(permitId).toBeDefined()
+
+    // 2. Admin creates leave request with explicit pending status
+    const pendingCreateRes = await app.request('/v1/admin/leave-requests', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user_id: 'student-2',
+        category: 'dispensasi',
+        description: 'Dispensasi olimpiade sains',
+        date: '2026-08-29',
+        approval_status: 'pending',
+      }),
+    })
+
+    expect(pendingCreateRes.status).toBe(201)
+    const pendingBody = await pendingCreateRes.json()
+    expect(pendingBody.data.approval_status).toBe('pending')
+    expect(pendingBody.data.status).toBe(false)
+    const pendingPermitId = pendingBody.data.id
+
+    // 3. Admin updates pending permit via PATCH /v1/admin/leave-requests/:id
+    const patchRes = await app.request(`/v1/admin/leave-requests/${pendingPermitId}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        approval_status: 'approved',
+      }),
+    })
+
+    expect(patchRes.status).toBe(200)
+    const patchBody = await patchRes.json()
+    expect(patchBody.data.approval_status).toBe('approved')
+    expect(patchBody.data.status).toBe(true)
+
+    // 4. Student token calling POST /v1/admin/leave-requests is rejected with 403 Forbidden
+    const forbiddenRes = await app.request('/v1/admin/leave-requests', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${studentToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user_id: 'student-1',
+        category: 'sakit',
+        description: 'Trying to call admin route as student',
+        date: '2026-08-28',
+      }),
+    })
+    expect(forbiddenRes.status).toBe(403)
+
+    // 5. Validation error when missing required fields
+    const invalidRes = await app.request('/v1/admin/leave-requests', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user_id: 'student-1',
+        category: 'invalid_cat',
+        date: 'not-a-date',
+      }),
+    })
+    expect(invalidRes.status).toBe(422)
+  })
 })

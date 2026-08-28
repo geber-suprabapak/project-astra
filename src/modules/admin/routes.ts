@@ -11,6 +11,7 @@ import {
   bootstrapSchoolSchema,
   classEnrollmentStatusSchema,
   createAcademicPeriodSchema,
+  createAdminLeaveRequestSchema,
   createCalendarExceptionSchema,
   createClassSchema,
   createLocationSchema,
@@ -45,6 +46,7 @@ import {
   bootstrapSchool,
   correctStudentEmail,
   createAcademicPeriod,
+  createAdminLeaveRequest,
   createCalendarException,
   createClass,
   createLocation,
@@ -903,8 +905,8 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
     return successResponse(c, schedule, 'Schedule created successfully.', 201)
   })
 
-  // PUT /v1/admin/schedules/:id
-  router.put('/schedules/:id', async (c) => {
+  // PUT|PATCH /v1/admin/schedules/:id
+  const handleUpdateSchedule = async (c: any) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const id = c.req.param('id')
     const body = await c.req.json()
@@ -929,7 +931,10 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
       providers,
     })
     return successResponse(c, schedule, 'Schedule updated successfully.')
-  })
+  }
+
+  router.put('/schedules/:id', handleUpdateSchedule)
+  router.patch('/schedules/:id', handleUpdateSchedule)
 
   // DELETE /v1/admin/schedules/:id
   router.delete('/schedules/:id', async (c) => {
@@ -991,8 +996,8 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
     return successResponse(c, loc, 'Location created successfully.', 201)
   })
 
-  // PUT /v1/admin/locations/:id
-  router.put('/locations/:id', async (c) => {
+  // PUT|PATCH /v1/admin/locations/:id
+  const handleUpdateLocation = async (c: any) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const id = c.req.param('id')
     const body = await c.req.json()
@@ -1012,7 +1017,10 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
       providers,
     })
     return successResponse(c, loc, 'Location updated successfully.')
-  })
+  }
+
+  router.put('/locations/:id', handleUpdateLocation)
+  router.patch('/locations/:id', handleUpdateLocation)
 
   // DELETE /v1/admin/locations/:id
   router.delete('/locations/:id', async (c) => {
@@ -1280,6 +1288,37 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
   router.get('/leave-requests', handleListLeaveRequests)
   router.get('/permits', handleListLeaveRequests)
 
+  // POST /v1/admin/leave-requests & /v1/admin/permits
+  const handleCreateAdminLeaveRequest = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json()
+    const parsed = createAdminLeaveRequestSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+
+    const userId = parsed.data.user_id ?? parsed.data.userId
+    const fileId = parsed.data.file_id ?? parsed.data.fileId
+    const approvalStatus = parsed.data.approval_status ?? parsed.data.approvalStatus ?? 'approved'
+
+    const created = await createAdminLeaveRequest({
+      userId: userId!,
+      category: parsed.data.category,
+      description: parsed.data.description,
+      date: parsed.data.date,
+      fileId,
+      approvalStatus,
+      actorRole: c.get('profileRole'),
+      actorId: c.get('userId'),
+      providers,
+    })
+
+    return successResponse(c, created, 'Leave request created successfully.', 201)
+  }
+
+  router.post('/leave-requests', handleCreateAdminLeaveRequest)
+  router.post('/permits', handleCreateAdminLeaveRequest)
+
   // GET /v1/admin/leave-requests/:id & /v1/admin/permits/:id
   const handleGetLeaveRequest = async (c: any) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
@@ -1295,6 +1334,37 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
 
   router.get('/leave-requests/:id', handleGetLeaveRequest)
   router.get('/permits/:id', handleGetLeaveRequest)
+
+  // PATCH /v1/admin/leave-requests/:id & /v1/admin/permits/:id
+  const handlePatchLeaveRequest = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const body = await c.req.json().catch(() => ({}))
+    const status = body.approval_status ?? body.approvalStatus
+    if (status === 'approved') {
+      const approved = await approveLeaveRequest({
+        id,
+        actorRole: c.get('profileRole'),
+        actorId: c.get('userId'),
+        providers,
+      })
+      return successResponse(c, approved, 'Leave request approved successfully.')
+    } else if (status === 'rejected') {
+      const rejected = await rejectLeaveRequest({
+        id,
+        reason: body.reason ?? body.rejection_reason ?? body.rejectionReason,
+        actorRole: c.get('profileRole'),
+        actorId: c.get('userId'),
+        providers,
+      })
+      return successResponse(c, rejected, 'Leave request rejected successfully.')
+    } else {
+      throw AppError.validationError('Invalid or missing approval_status in PATCH body.')
+    }
+  }
+
+  router.patch('/leave-requests/:id', handlePatchLeaveRequest)
+  router.patch('/permits/:id', handlePatchLeaveRequest)
 
   // POST|PATCH /v1/admin/leave-requests/:id/approve & /v1/admin/permits/:id/approve
   const handleApproveLeaveRequest = async (c: any) => {

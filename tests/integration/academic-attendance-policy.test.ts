@@ -257,4 +257,109 @@ describe('Academic Attendance Policy Integration', () => {
     const dashAfterData = await dashAfterTransfer.json()
     expect(dashAfterData.data.profile.class_name).toBe('X RPL 2')
   })
+
+  it('supports modifying locations and schedules via both PUT and PATCH methods (ISS-12)', async () => {
+    const { app, adminToken } = setupPolicyTestEnvironment()
+
+    // 1. Create a location
+    const createLocRes = await app.request('/v1/admin/locations', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'Initial Campus',
+        latitude: -6.200000,
+        longitude: 106.816666,
+        radius_meters: 100,
+      }),
+    })
+    expect(createLocRes.status).toBe(201)
+    const locId = (await createLocRes.json()).data.id
+
+    // 2. Update location via PUT
+    const putLocRes = await app.request(`/v1/admin/locations/${locId}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'Campus Updated via PUT',
+        radius_meters: 150,
+      }),
+    })
+    expect(putLocRes.status).toBe(200)
+    const putLocBody = await putLocRes.json()
+    expect(putLocBody.data.name).toBe('Campus Updated via PUT')
+    expect(putLocBody.data.radius_meters).toBe(150)
+
+    // 3. Update location via PATCH
+    const patchLocRes = await app.request(`/v1/admin/locations/${locId}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'Campus Updated via PATCH',
+        radius_meters: 200,
+      }),
+    })
+    expect(patchLocRes.status).toBe(200)
+    const patchLocBody = await patchLocRes.json()
+    expect(patchLocBody.data.name).toBe('Campus Updated via PATCH')
+    expect(patchLocBody.data.radius_meters).toBe(200)
+
+    // 4. Create a schedule
+    const createSchedRes = await app.request('/v1/admin/schedules', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        day_of_week: 'senin',
+        start_time: '06:00',
+        end_time: '07:15',
+        start_checkout: '15:00',
+        end_checkout: '18:00',
+        grace_period_minutes: 15,
+        location_id: locId,
+      }),
+    })
+    expect(createSchedRes.status).toBe(201)
+    const schedId = (await createSchedRes.json()).data.id
+
+    // 5. Update schedule via PUT
+    const putSchedRes = await app.request(`/v1/admin/schedules/${schedId}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        grace_period_minutes: 20,
+      }),
+    })
+    expect(putSchedRes.status).toBe(200)
+    const putSchedBody = await putSchedRes.json()
+    expect(putSchedBody.data.kompensasi_waktu).toBe(20)
+
+    // 6. Update schedule via PATCH
+    const patchSchedRes = await app.request(`/v1/admin/schedules/${schedId}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        grace_period_minutes: 25,
+      }),
+    })
+    expect(patchSchedRes.status).toBe(200)
+    const patchSchedBody = await patchSchedRes.json()
+    expect(patchSchedBody.data.kompensasi_waktu).toBe(25)
+  })
 })

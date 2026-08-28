@@ -17,10 +17,17 @@ export const SubmitBodySchema = z.object({
   longitude: z.number(),
 })
 
-export const AttendanceHistoryQuerySchema = z.object({
-  startDate: z.string().date().optional(),
-  endDate: z.string().date().optional(),
-})
+export const AttendanceHistoryQuerySchema = z
+  .object({
+    startDate: z.string().date().optional(),
+    endDate: z.string().date().optional(),
+    start_date: z.string().date().optional(),
+    end_date: z.string().date().optional(),
+  })
+  .transform((data) => ({
+    startDate: data.startDate ?? data.start_date,
+    endDate: data.endDate ?? data.end_date,
+  }))
 
 export const AttendanceCalendarQuerySchema = z.object({
   year: z.coerce.number().int().min(2000).max(2100),

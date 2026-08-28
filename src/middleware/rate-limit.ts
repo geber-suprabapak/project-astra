@@ -46,6 +46,10 @@ export class MemoryRateLimitStore implements RateLimitStore {
     this.windows.delete(key)
     return Promise.resolve()
   }
+
+  clear(): void {
+    this.windows.clear()
+  }
 }
 
 export class RedisRateLimitStore implements RateLimitStore {

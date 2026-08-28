@@ -1,4 +1,9 @@
 // Test environment setup — provide minimal valid env before any module imports
+for (const key of Object.keys(process.env)) {
+  if (process.env[key] === '') {
+    delete process.env[key]
+  }
+}
 process.env['NODE_ENV'] = 'test'
 process.env['TENANT_KEY'] = 'test-school'
 process.env['TENANT_NAME'] = 'Test School'
@@ -15,3 +20,12 @@ process.env['ROBIN_BASE_URL'] = 'http://localhost:8000'
 process.env['ROBIN_ENROLL_STATUS_TIMEOUT_MS'] = '5000'
 process.env['DB_QUERY_TIMEOUT_MS'] = '5000'
 process.env['STORAGE_UPLOAD_TIMEOUT_MS'] = '15000'
+
+const { beforeEach } = await import('vitest')
+const { defaultStore, MemoryRateLimitStore } = await import('../src/middleware/rate-limit.js')
+
+beforeEach(() => {
+  if (defaultStore instanceof MemoryRateLimitStore) {
+    defaultStore.clear()
+  }
+})

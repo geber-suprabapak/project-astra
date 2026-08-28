@@ -24,6 +24,7 @@ import type {
   CreateCalendarExceptionParams,
   CreateClassParams,
   CreateFileRecordParams,
+  CreateLeaveRequestData,
   CreateLocationParams,
   CreateManualAttendanceParams,
   CreatePasswordResetCodeParams,
@@ -354,6 +355,37 @@ export class PostgresDomainStore implements DomainStore {
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, data }, 'Failed to insert permit')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async createLeaveRequest(data: CreateLeaveRequestData): Promise<LeaveRequest> {
+    try {
+      const approvalStatus = data.approval_status ?? 'approved'
+      const status = data.status !== undefined ? data.status : approvalStatus === 'approved'
+      const rows = await this.sql<LeaveRequest[]>`
+        INSERT INTO leave_requests (user_id, category, description, status, attachment_url, date, approval_status)
+        VALUES (${data.user_id}, ${data.category}, ${data.description}, ${status}, ${data.attachment_url ?? null}, ${data.date}, ${approvalStatus})
+        RETURNING id, user_id, category, description, status,
+                   attachment_url, date::text AS date, approval_status,
+                   rejection_reason, rejected_at::text, created_at::text, updated_at::text
+      `
+      if (!rows || rows.length === 0) {
+        logger.error({ data }, 'Failed to insert leave request: empty return')
+        throw AppError.internal('Failed to create leave request.')
+      }
+      const created = rows[0]
+      const profile = await this.getUserProfile(created.user_id).catch(() => null)
+      if (profile) {
+        created.student_name = profile.full_name ?? null
+        created.student_nis = profile.nis ?? null
+        created.student_class = profile.class_name ?? null
+        created.absence_number = profile.absence_number ?? null
+      }
+      return created
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, data }, 'Failed to insert leave request')
       throw AppError.internal('An unexpected database error occurred.')
     }
   }

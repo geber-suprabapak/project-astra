@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { CreatePermitSchema } from '../../../src/modules/permits/schema.js'
-import { PrecheckBodySchema, SubmitBodySchema } from '../../../src/modules/attendance/schema.js'
+import {
+  AttendanceHistoryQuerySchema,
+  PrecheckBodySchema,
+  SubmitBodySchema,
+} from '../../../src/modules/attendance/schema.js'
+import { createAdminLeaveRequestSchema } from '../../../src/modules/admin/schema.js'
 import { base64ByteSize } from '../../../src/modules/attendance/mapper.js'
 
 describe('Attendance PrecheckBodySchema', () => {
@@ -116,6 +121,67 @@ describe('CreatePermitSchema', () => {
       category: 'sakit',
       description: 'Saya sakit demam tinggi hari ini',
       date: '21-04-2026',
+    })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('AttendanceHistoryQuerySchema normalization', () => {
+  it('parses camelCase query parameters', () => {
+    const result = AttendanceHistoryQuerySchema.safeParse({
+      startDate: '2026-08-01',
+      endDate: '2026-08-31',
+    })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.startDate).toBe('2026-08-01')
+      expect(result.data.endDate).toBe('2026-08-31')
+    }
+  })
+
+  it('parses snake_case query parameters and normalizes them', () => {
+    const result = AttendanceHistoryQuerySchema.safeParse({
+      start_date: '2026-08-01',
+      end_date: '2026-08-31',
+    })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.startDate).toBe('2026-08-01')
+      expect(result.data.endDate).toBe('2026-08-31')
+    }
+  })
+})
+
+describe('createAdminLeaveRequestSchema', () => {
+  it('accepts valid admin leave request input', () => {
+    const result = createAdminLeaveRequestSchema.safeParse({
+      user_id: 'student-1',
+      category: 'sakit',
+      description: 'Sakit flu',
+      date: '2026-08-28',
+    })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.approval_status).toBe('approved')
+    }
+  })
+
+  it('accepts camelCase userId and explicit approvalStatus', () => {
+    const result = createAdminLeaveRequestSchema.safeParse({
+      userId: 'student-1',
+      category: 'dispensasi',
+      description: 'Lomba karya ilmiah',
+      date: '2026-08-28',
+      approvalStatus: 'pending',
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects missing user_id', () => {
+    const result = createAdminLeaveRequestSchema.safeParse({
+      category: 'sakit',
+      description: 'Sakit flu',
+      date: '2026-08-28',
     })
     expect(result.success).toBe(false)
   })

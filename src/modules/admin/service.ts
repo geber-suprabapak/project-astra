@@ -14,6 +14,8 @@ import type {
   IdentityRole,
   IdentityUser,
   LeaveRequest,
+  LeaveRequestApprovalStatus,
+  LeaveRequestCategory,
   ListLeaveRequestsFilter,
   ListNotificationsFilter,
   Location,
@@ -1925,6 +1927,77 @@ async function mapLeaveRequestWithAttachment(
     created_at: lr.created_at,
     updated_at: lr.updated_at,
   }
+}
+
+export async function createAdminLeaveRequest(params: {
+  userId: string
+  category: LeaveRequestCategory | string
+  description: string
+  date: string
+  fileId?: string | null
+  approvalStatus?: LeaveRequestApprovalStatus
+  actorRole: IdentityRole | null
+  actorId: string
+  providers: AppProviders
+}): Promise<AdminLeaveRequestResponse> {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)
+  ) {
+    throw AppError.forbidden()
+  }
+
+  const targetProfile = await params.providers.domainStore.getUserProfile(params.userId)
+  if (!targetProfile) {
+    throw AppError.notFound('Target student profile')
+  }
+
+  let storagePath: string | null = null
+  if (params.fileId) {
+    const fileRecord = await params.providers.domainStore.getFileRecord(params.fileId)
+    if (!fileRecord) {
+      throw AppError.notFound('Attachment file')
+    }
+    if (fileRecord.purpose !== 'permit_attachment') {
+      throw AppError.validationError('File purpose must be permit_attachment.')
+    }
+    if (fileRecord.lifecycle === 'rejected' || fileRecord.lifecycle === 'deleted') {
+      throw AppError.validationError('Attachment file is no longer available.')
+    }
+    if (fileRecord.lifecycle === 'pending_upload') {
+      await params.providers.domainStore.updateFileLifecycle(fileRecord.id, 'available')
+    }
+    storagePath = fileRecord.object_path
+  }
+
+  const approvalStatus: LeaveRequestApprovalStatus = params.approvalStatus ?? 'approved'
+  const status = approvalStatus === 'approved'
+  const dateValue = params.date.includes('T') ? params.date : `${params.date}T00:00:00+07:00`
+
+  const created = await params.providers.domainStore.createLeaveRequest({
+    user_id: params.userId,
+    category: params.category,
+    description: params.description,
+    date: dateValue,
+    status,
+    attachment_url: storagePath,
+    approval_status: approvalStatus,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'create_admin_leave_request',
+    entity_type: 'leave_request',
+    entity_id: created.id,
+    details: {
+      user_id: params.userId,
+      category: params.category,
+      date: params.date,
+      approval_status: approvalStatus,
+    },
+  })
+
+  return mapLeaveRequestWithAttachment(created, params.providers)
 }
 
 export async function listAdminLeaveRequests(params: {
