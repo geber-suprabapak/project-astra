@@ -357,22 +357,60 @@ export class OidcIdentityProvider implements IdentityProvider {
     }
   }
 
+  private m2mToken: string | null = null
+  private m2mTokenExpiresAt = 0
+
+  private async getManagementToken(): Promise<string> {
+    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
+      throw AppError.internal('Identity provider management API is not configured.')
+    }
+
+    if (this.m2mToken && Date.now() < this.m2mTokenExpiresAt - 60000) {
+      return this.m2mToken
+    }
+
+    const credentials = Buffer.from(`${this.logtoAppId}:${this.logtoAppSecret}`).toString('base64')
+    const response = await fetch(`${this.logtoEndpoint.replace(/\/$/, '')}/oidc/token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${credentials}`,
+      },
+      body: 'grant_type=client_credentials&resource=https://default.logto.app/api&scope=all',
+    })
+
+    if (!response.ok) {
+      logger.error({ status: response.status }, 'Failed to fetch Logto management token')
+      throw AppError.internal('Failed to authenticate with identity provider management API.')
+    }
+
+    const data = (await response.json()) as { access_token: string; expires_in?: number }
+    this.m2mToken = data.access_token
+    this.m2mTokenExpiresAt = Date.now() + (data.expires_in ?? 3600) * 1000
+    return this.m2mToken
+  }
+
   async createStudentIdentity(params: CreateStudentIdentityParams): Promise<{ userId: string }> {
     if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
       throw AppError.internal('Identity provider management API is not configured.')
     }
 
     try {
+      const token = await this.getManagementToken()
       const response = await fetch(`${this.logtoEndpoint.replace(/\/$/, '')}/api/users`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
-          username: params.username,
+          ...(params.username && !/^\d+$/.test(params.username) ? { username: params.username } : {}),
           primaryEmail: params.email,
           password: params.password,
           name: params.name,
           isSuspended: params.suspended ?? true,
           roleNames: params.roles ?? ['student'],
+          customData: params.username ? { nis: params.username } : {},
         }),
       })
 
