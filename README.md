@@ -65,7 +65,8 @@ ASTRA_IMAGE=skanida/astra:<immutable-tag>
 ROBIN_IMAGE=skanida/robin:abc40fa
 ASTRA_ENV_FILE=/secure/skanida/astra.env
 ROBIN_ENV_FILE=/secure/skanida/robin.env
-ROBIN_MODELS_PATH=/home/evernight/project-robin/models
+# Set this to the absolute model directory on the Docker host.
+ROBIN_MODELS_PATH=/absolute/path/to/robin-models
 ROBIN_LOGS_PATH=/secure/skanida/robin-logs
 TARGET_LAN_IP=192.168.21.121
 ASTRA_PORT=23000
