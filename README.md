@@ -52,6 +52,32 @@ Astra owns:
 
 Robin stays internal and handles technical face recognition only. Astra/PostgreSQL is the single system of record for domain state.
 
+## Target deployment (Astra + Robin)
+
+Production runs Astra and Robin as one Portainer Docker Standalone stack while
+keeping `infra` as the separate data-plane stack. In Portainer, deploy this
+repository from Git with `docker-compose.target.yml` and set these Compose
+interpolation variables:
+
+```text
+STACK_NAME=skanida-prod-apps
+ASTRA_IMAGE=skanida/astra:<immutable-tag>
+ROBIN_IMAGE=skanida/robin:abc40fa
+ASTRA_ENV_FILE=/secure/skanida/astra.env
+ROBIN_ENV_FILE=/secure/skanida/robin.env
+ROBIN_MODELS_PATH=/secure/skanida/robin-models
+ROBIN_LOGS_PATH=/secure/skanida/robin-logs
+TARGET_LAN_IP=192.168.21.121
+ASTRA_PORT=23000
+SKANIDA_DATA_NETWORK=skanida-prod-data
+SKANIDA_EDGE_NETWORK=skanida-prod-edge
+```
+
+`astra.env` and `robin.env` are host-side files and must already exist on the
+Docker host with mode `600`; they are not committed to Git or pasted into the
+Portainer Compose editor. Robin is attached only to the private data network,
+and Astra waits for Robin's readiness check before starting.
+
 ## Project Structure
 
 ```text
@@ -182,10 +208,12 @@ Stable error codes:
 Astra verifies every bearer token with the configured OIDC issuer, JWKS/signature, and
 audience before loading the matching PostgreSQL profile.
 
-Tokens used for privileged administration must carry a matching `roles` claim, include
-the `openid profile admin:read` scopes, prove MFA through `mfa_verified` or an MFA
-`amr` value, and set `must_change_password` to `false`. Astra denies pending,
-rejected, disabled, or missing profiles before any protected route runs.
+Logto global roles grant API permission scopes. Every Logto user token needs
+`mobile:access`; Astra additionally authorizes privileged requests with `admin:read`
+and cross-user file access with `files:read:any` or `files:delete:any`. It never
+treats a token role-name claim as authorization. Logto owns MFA and password policy.
+Astra denies pending, rejected, disabled, or missing profiles before any protected
+route runs.
 
 Bootstrap and student account operations enforce strict role separation:
 
@@ -248,7 +276,7 @@ All configuration is parsed and validated at boot via `src/config/env.ts`.
 | `OIDC_JWT_SECRET`  | _(Required if no JWKS)_             | Secret key for symmetric HS256 JWT verification.                     |
 | `OIDC_JWKS_URL`    | _(Required if no Secret)_           | JWKS URL for asymmetric JWT verification.                            |
 | `OIDC_ISSUER`      | **Required for token verification** | Expected token issuer claim; production boot rejects it when absent. |
-| `OIDC_AUDIENCE`    | `authenticated`                     | Expected token audience claim.                                       |
+| `OIDC_AUDIENCE`    | `authenticated`                     | Registered Logto API-resource indicator expected in the token audience. |
 | `LOGTO_ENDPOINT`   | _(Optional)_                        | Logto Management API endpoint URL.                                   |
 | `LOGTO_APP_ID`     | _(Optional)_                        | Logto Management API M2M App ID.                                     |
 | `LOGTO_APP_SECRET` | _(Optional)_                        | Logto Management API M2M App Secret.                                 |

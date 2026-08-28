@@ -326,6 +326,21 @@ export class S3ObjectStorage implements ObjectStorage {
     await Promise.allSettled(deletePromises)
   }
 
+  async deleteObject(purpose: 'avatar' | 'permit_attachment' | 'face_enrollment', path: string): Promise<void> {
+    const bucket = purpose === 'permit_attachment' ? this.bucketPermits : this.bucketAvatars
+    try {
+      const response = await this.executeS3Request('DELETE', bucket, path)
+      if (!response.ok) {
+        logger.error({ status: response.status, purpose }, 'S3 object deletion failed')
+        throw AppError.dependencyUnavailable('object storage')
+      }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, purpose }, 'S3 object deletion failed with unexpected error')
+      throw AppError.dependencyUnavailable('object storage')
+    }
+  }
+
   async getSignedFaceEnrollmentUrl(path: string): Promise<string | null> {
     if (!path) return null
     try {

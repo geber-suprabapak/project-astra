@@ -1,6 +1,7 @@
 import { defaultProviders } from '../../providers/index.js'
 import type { AppProviders, FilePurpose, FileRecord } from '../../providers/types.js'
 import { AppError } from '../../lib/errors/app-error.js'
+import { hasScope, logtoScopes } from '../../authz/scopes.js'
 import {
   ALLOWED_AVATAR_MIME,
   ALLOWED_PERMIT_MIME,
@@ -130,7 +131,7 @@ export async function confirmFileUpload(params: {
 export async function getFile(params: {
   userId: string
   fileId: string
-  userRoles?: string[]
+  userScopes?: string[]
   providers?: AppProviders
 }): Promise<{ file: FileRecord; download_url: string | null }> {
   const providers = params.providers ?? defaultProviders
@@ -141,9 +142,7 @@ export async function getFile(params: {
   }
 
   const isOwner = fileRecord.user_id === params.userId
-  const isPrivileged = params.userRoles?.some((r) =>
-    ['platform_admin', 'school_admin', 'teacher', 'staff'].includes(r),
-  )
+  const isPrivileged = hasScope(params.userScopes, logtoScopes.filesReadAny)
   if (!isOwner && !isPrivileged) {
     throw AppError.forbidden('You do not have permission to view this file.')
   }
@@ -167,7 +166,7 @@ export async function getFile(params: {
 export async function deleteFile(params: {
   userId: string
   fileId: string
-  userRoles?: string[]
+  userScopes?: string[]
   providers?: AppProviders
 }): Promise<void> {
   const providers = params.providers ?? defaultProviders
@@ -178,10 +177,11 @@ export async function deleteFile(params: {
   }
 
   const isOwner = fileRecord.user_id === params.userId
-  const isPrivileged = params.userRoles?.some((r) => ['platform_admin', 'school_admin'].includes(r))
+  const isPrivileged = hasScope(params.userScopes, logtoScopes.filesDeleteAny)
   if (!isOwner && !isPrivileged) {
     throw AppError.forbidden('You do not have permission to delete this file.')
   }
 
+  await providers.objectStorage.deleteObject(fileRecord.purpose, fileRecord.object_path)
   await providers.domainStore.deleteFileRecord(params.fileId)
 }

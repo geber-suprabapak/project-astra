@@ -38,7 +38,7 @@ describe('OidcIdentityProvider', () => {
       const token = await createToken({
         email: 'admin@school.sch.id',
         roles: ['platform_admin'],
-        scope: 'openid profile admin:read',
+        scope: 'openid profile mobile:access admin:read',
         amr: ['pwd', 'mfa'],
         must_change_password: false,
       })
@@ -48,7 +48,7 @@ describe('OidcIdentityProvider', () => {
         authSource: 'logto',
         email: 'admin@school.sch.id',
         roles: ['platform_admin'],
-        scopes: ['openid', 'profile', 'admin:read'],
+        scopes: ['openid', 'profile', 'mobile:access', 'admin:read'],
         mfaVerified: true,
         mustChangePassword: false,
       })

@@ -1,8 +1,8 @@
-name: skanida-next-astra
+name: ${STACK_NAME:-skanida-prod-apps}
 
 services:
   astra:
-    image: ${ASTRA_IMAGE:-skanida/astra:bridge-20260824}
+    image: ${ASTRA_IMAGE:-skanida/astra:prod-20260828-f624f8f-dirty}
     pull_policy: never
     restart: unless-stopped
     # Portainer resolves `env_file` on the Portainer machine while rendering a
@@ -37,6 +37,9 @@ services:
       data:
         aliases: [astra]
       edge: {}
+    depends_on:
+      robin:
+        condition: service_healthy
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/ready']
       interval: 30s
@@ -44,10 +47,54 @@ services:
       retries: 3
       start_period: 15s
 
+  robin:
+    image: ${ROBIN_IMAGE:-skanida/robin:abc40fa}
+    pull_policy: never
+    restart: unless-stopped
+    # Robin is an internal technical service. Keep its credentials on the
+    # Docker host and load them from a bind-mounted file rather than Portainer.
+    command:
+      - python
+      - -c
+      - |
+        import os
+        import runpy
+        from pathlib import Path
+
+        env_path = Path('/run/secrets/robin.env')
+        for raw_line in env_path.read_text(encoding='utf-8').splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith('#'):
+                continue
+            key, separator, value = line.partition('=')
+            if (
+                not separator
+                or not key
+                or not key.replace('_', '').isalnum()
+                or (not key[0].isalpha() and key[0] != '_')
+            ):
+                raise RuntimeError(f'Invalid environment entry in {env_path}: {key!r}')
+            os.environ[key] = value
+
+        runpy.run_module('src.main', run_name='__main__')
+    volumes:
+      - ${ROBIN_ENV_FILE:?Set ROBIN_ENV_FILE to the target host env file}:/run/secrets/robin.env:ro
+      - ${ROBIN_MODELS_PATH:?Set ROBIN_MODELS_PATH}:/app/runtime-models:ro
+      - ${ROBIN_LOGS_PATH:?Set ROBIN_LOGS_PATH}:/app/logs
+    networks:
+      data:
+        aliases: [robin]
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:8000/ready']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+
 networks:
   data:
     external: true
-    name: ${SKANIDA_DATA_NETWORK:-skanida-next-data}
+    name: ${SKANIDA_DATA_NETWORK:-skanida-prod-data}
   edge:
     external: true
-    name: ${SKANIDA_EDGE_NETWORK:-skanida-next-edge}
+    name: ${SKANIDA_EDGE_NETWORK:-skanida-prod-edge}

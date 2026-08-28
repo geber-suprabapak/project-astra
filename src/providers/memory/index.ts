@@ -2215,6 +2215,10 @@ export class MemoryObjectStorage implements ObjectStorage {
     }
   }
 
+  async deleteObject(_purpose: 'avatar' | 'permit_attachment' | 'face_enrollment', path: string): Promise<void> {
+    this.objects.delete(path)
+  }
+
   async getSignedFaceEnrollmentUrl(path: string): Promise<string | null> {
     if (!path) return null
     return `https://storage.local/signed/${encodeURIComponent(path)}?expires=86400`

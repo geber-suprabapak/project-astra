@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from 'hono'
+import { hasScope, logtoScopes } from '../authz/scopes.js'
 import { defaultProviders } from '../providers/index.js'
 import { env } from '../config/env.js'
 import { AppError } from '../lib/errors/app-error.js'
@@ -29,6 +30,9 @@ export const auth: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (!identityUser.scopes || identityUser.scopes.length === 0) {
     throw AppError.authInvalid('Token missing scope claim.')
   }
+  if (identityUser.authSource === 'logto' && !hasScope(identityUser.scopes, logtoScopes.mobileAccess)) {
+    throw AppError.forbidden('Token is not authorized for the Skanida API resource.')
+  }
 
   const userId = identityUser.legacyUserId
     ? await providers.domainStore.resolveLegacyUserId?.(identityUser.legacyUserId)
@@ -53,17 +57,6 @@ export const auth: MiddlewareHandler<AppEnv> = async (c, next) => {
   }
 
   if (profile.lifecycle_status !== 'approved') {
-    throw AppError.forbidden()
-  }
-
-  const userRoles = await providers.domainStore.getUserRoles(userId)
-  const tokenRoles = new Set(identityUser.roles ?? [])
-  // SAFETY: assigned role strings are checked against identity token role set
-  const hasMatchingRole =
-    Boolean(profile.role && tokenRoles.has(profile.role)) ||
-    userRoles.some((r) => tokenRoles.has(r as NonNullable<IdentityUser['roles']>[number]))
-
-  if (!hasMatchingRole) {
     throw AppError.forbidden()
   }
 

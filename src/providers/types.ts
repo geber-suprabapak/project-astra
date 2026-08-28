@@ -897,6 +897,8 @@ export interface ObjectStorage {
     contentType: string,
   ): Promise<string>
   deleteFaceEnrollmentImages(userId: string): Promise<void>
+  /** Delete one object belonging to an Astra file record. */
+  deleteObject(purpose: FilePurpose, path: string): Promise<void>
   getSignedFaceEnrollmentUrl(path: string): Promise<string | null>
   getPresignedUploadUrl?(params: {
     bucket?: string

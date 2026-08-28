@@ -66,7 +66,7 @@ export function createFilesRouter(deps: FilesRouterDeps = {}) {
     const result = await getFile({
       userId,
       fileId,
-      userRoles: identityUser?.roles ? [...identityUser.roles] : [],
+      userScopes: identityUser?.scopes ? [...identityUser.scopes] : [],
       providers,
     })
 
@@ -83,7 +83,7 @@ export function createFilesRouter(deps: FilesRouterDeps = {}) {
     await deleteFile({
       userId,
       fileId,
-      userRoles: identityUser?.roles ? [...identityUser.roles] : [],
+      userScopes: identityUser?.scopes ? [...identityUser.scopes] : [],
       providers,
     })
 

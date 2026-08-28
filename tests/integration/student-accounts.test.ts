@@ -203,8 +203,7 @@ describe('integration: student onboarding, approval, and recovery (Ticket 06)', 
     // 7. Student token accessing dashboard BEFORE approval fails with 403 Forbidden
     const pendingStudentToken = tokenFor({
       sub: studentUserId,
-      roles: ['student'],
-      scope: 'openid profile',
+      scope: 'openid profile mobile:access',
     })
     const earlyDashboardRes = await app.request('/v1/mobile/dashboard', {
       headers: { Authorization: `Bearer ${pendingStudentToken}` },
@@ -384,8 +383,7 @@ describe('integration: student onboarding, approval, and recovery (Ticket 06)', 
 
     const signedToken = await signedOidcToken({
       sub: 'student-oidc-1',
-      roles: ['student'],
-      scope: 'openid profile',
+      scope: 'openid profile mobile:access',
     })
 
     const dashboardRes = await app.request('/v1/mobile/dashboard', {

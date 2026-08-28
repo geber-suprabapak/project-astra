@@ -179,7 +179,7 @@ describe('files service', () => {
       const ownerView = await getFile({
         userId: 'student-1',
         fileId: intent.file_id,
-        userRoles: ['student'],
+        userScopes: [],
         providers,
       })
       expect(ownerView.file.id).toBe(intent.file_id)
@@ -188,7 +188,7 @@ describe('files service', () => {
       const staffView = await getFile({
         userId: 'staff-1',
         fileId: intent.file_id,
-        userRoles: ['staff'],
+        userScopes: ['files:read:any'],
         providers,
       })
       expect(staffView.file.id).toBe(intent.file_id)
@@ -207,16 +207,21 @@ describe('files service', () => {
         fileId: intent.file_id,
         providers,
       })
+      providers.objectStorage.objects.set(intent.object_path, {
+        buffer: Buffer.from('fixture'),
+        contentType: 'image/jpeg',
+      })
 
       await deleteFile({
         userId: 'student-1',
         fileId: intent.file_id,
-        userRoles: ['student'],
+        userScopes: [],
         providers,
       })
 
       const record = await providers.domainStore.getFileRecord(intent.file_id)
       expect(record?.lifecycle).toBe('deleted')
+      expect(providers.objectStorage.objects.has(intent.object_path)).toBe(false)
     })
   })
 })

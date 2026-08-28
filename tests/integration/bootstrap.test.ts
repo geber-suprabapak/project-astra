@@ -445,8 +445,7 @@ describe('integration: bootstrap school and validate student roster (Ticket 04)'
 
     const signedToken = await signedOidcToken({
       sub: 'platform-admin-1',
-      roles: ['platform_admin'],
-      scope: 'openid profile admin:read',
+      scope: 'openid profile mobile:access admin:read',
       must_change_password: false,
       mfa_verified: true,
     })

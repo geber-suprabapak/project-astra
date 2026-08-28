@@ -81,14 +81,11 @@ function createPrivilegedApp(
 }
 
 describe('integration: privileged identity boundary', () => {
-  it('denies privileged administration until password change and MFA are complete', async () => {
+  it('denies privileged administration without the Logto admin scope', async () => {
     const app = createPrivilegedApp()
     const token = tokenFor({
       sub: 'platform-admin-1',
-      roles: ['platform_admin'],
-      scope: 'openid profile admin:read',
-      must_change_password: true,
-      mfa_verified: false,
+      scope: 'openid profile',
     })
 
     const response = await app.request('/v1/admin/session', {
@@ -101,28 +98,25 @@ describe('integration: privileged identity boundary', () => {
     expect(body.error.code).toBe('FORBIDDEN')
   })
 
-  it('denies privileged administration when password state is absent', async () => {
+  it('accepts the Logto admin scope without custom role or password claims', async () => {
     const app = createPrivilegedApp()
     const token = tokenFor({
       sub: 'platform-admin-1',
-      roles: ['platform_admin'],
-      scope: 'openid profile admin:read',
-      mfa_verified: true,
+      scope: 'openid profile mobile:access admin:read',
     })
 
     const response = await app.request('/v1/admin/session', {
       headers: { Authorization: `Bearer ${token}` },
     })
 
-    expect(response.status).toBe(403)
+    expect(response.status).toBe(200)
   })
 
-  it('accepts a privileged session only with matching role, approved profile, password, and MFA', async () => {
+  it('accepts a privileged session with an approved profile and Logto admin scope', async () => {
     const app = createPrivilegedApp()
     const token = tokenFor({
       sub: 'platform-admin-1',
-      roles: ['platform_admin'],
-      scope: 'openid profile admin:read',
+      scope: 'openid profile mobile:access admin:read',
       must_change_password: false,
       mfa_verified: true,
     })
@@ -161,8 +155,7 @@ describe('integration: privileged identity boundary', () => {
     const app = createPrivilegedApp('approved', identityProvider)
     const token = await signedOidcToken({
       email: 'admin@school.sch.id',
-      roles: ['platform_admin'],
-      scope: 'openid profile admin:read',
+      scope: 'openid profile mobile:access admin:read',
       mfa_verified: true,
       must_change_password: false,
     })
@@ -182,8 +175,7 @@ describe('integration: privileged identity boundary', () => {
     })
     const app = createPrivilegedApp('approved', identityProvider)
     const claims = {
-      roles: ['platform_admin'],
-      scope: 'openid profile admin:read',
+      scope: 'openid profile mobile:access admin:read',
       mfa_verified: true,
       must_change_password: false,
     }
@@ -206,7 +198,7 @@ describe('integration: privileged identity boundary', () => {
     const token = tokenFor({
       sub: 'platform-admin-1',
       roles: ['platform_admin'],
-      scope: 'openid profile admin:read',
+      scope: 'openid profile mobile:access admin:read',
       must_change_password: false,
       mfa_verified: true,
     })
@@ -232,7 +224,7 @@ describe('integration: privileged identity boundary', () => {
     },
   )
 
-  it('denies a token role that does not match the Astra profile role', async () => {
+  it('does not use token role names as an authorization input', async () => {
     const app = createPrivilegedApp()
     const token = tokenFor({
       sub: 'platform-admin-1',
@@ -246,6 +238,6 @@ describe('integration: privileged identity boundary', () => {
       headers: { Authorization: `Bearer ${token}` },
     })
 
-    expect(response.status).toBe(403)
+    expect(response.status).toBe(200)
   })
 })
