@@ -2,7 +2,7 @@ name: ${STACK_NAME:-skanida-prod-apps}
 
 services:
   astra:
-    image: ${ASTRA_IMAGE:-skanida/astra:prod-20260828-f624f8f-dirty}
+    image: ${ASTRA_IMAGE:-skanida/astra:prod-20260828-61c1446}
     pull_policy: never
     restart: unless-stopped
     # Portainer resolves `env_file` on the Portainer machine while rendering a
