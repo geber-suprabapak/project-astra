@@ -54,30 +54,14 @@ Robin stays internal and handles technical face recognition only. Astra/PostgreS
 
 ## Target deployment (Astra + Robin)
 
-Production runs Astra and Robin as one Portainer Docker Standalone stack while
-keeping `infra` as the separate data-plane stack. In Portainer, deploy this
-repository from Git with `docker-compose.target.yml` and set these Compose
-interpolation variables:
+Production runs Astra and Robin together in the `infra` Portainer stack. Use the
+private `geber-suprabapak/infra` repository, reference `main`, and deploy its
+`compose.yaml`; that compose file also owns Postgres, Logto, Redis, Qdrant, and
+Garage. Robin has no published port and is reachable only by Astra on the
+private Docker network.
 
-```text
-STACK_NAME=skanida-prod-apps
-ASTRA_IMAGE=skanida/astra:<immutable-tag>
-ROBIN_IMAGE=skanida/robin:abc40fa
-ASTRA_ENV_FILE=/secure/skanida/astra.env
-ROBIN_ENV_FILE=/secure/skanida/robin.env
-# Set this to the absolute model directory on the Docker host.
-ROBIN_MODELS_PATH=/absolute/path/to/robin-models
-ROBIN_LOGS_PATH=/secure/skanida/robin-logs
-TARGET_LAN_IP=192.168.21.121
-ASTRA_PORT=23000
-SKANIDA_DATA_NETWORK=skanida-prod-data
-SKANIDA_EDGE_NETWORK=skanida-prod-edge
-```
-
-`astra.env` and `robin.env` are host-side files and must already exist on the
-Docker host with mode `600`; they are not committed to Git or pasted into the
-Portainer Compose editor. Robin is attached only to the private data network,
-and Astra waits for Robin's readiness check before starting.
+This repository's `docker-compose.target.yml` remains available for isolated
+development or image smoke tests. It is not the production Portainer stack.
 
 ## Project Structure
 
