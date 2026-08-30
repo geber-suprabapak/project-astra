@@ -326,7 +326,10 @@ export class S3ObjectStorage implements ObjectStorage {
     await Promise.allSettled(deletePromises)
   }
 
-  async deleteObject(purpose: 'avatar' | 'permit_attachment' | 'face_enrollment', path: string): Promise<void> {
+  async deleteObject(
+    purpose: 'avatar' | 'permit_attachment' | 'face_enrollment',
+    path: string,
+  ): Promise<void> {
     const bucket = purpose === 'permit_attachment' ? this.bucketPermits : this.bucketAvatars
     try {
       const response = await this.executeS3Request('DELETE', bucket, path)

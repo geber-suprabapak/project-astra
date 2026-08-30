@@ -383,6 +383,116 @@ describe('Record Face Attendance & Manual Exceptions Integration Tests (Ticket 0
     )
   })
 
+  it('Admin API: deletes one attendance and bulk-deletes attendance records with audit trail', async () => {
+    const { domainStore, identityProvider, app } = createIntegrationEnvironment()
+    await setupSchoolAndStudent(domainStore, identityProvider, 'student-1')
+
+    const adminToken = await signedOidcToken({
+      sub: 'school-admin-1',
+      roles: ['school_admin'],
+      scope: 'admin:read admin:write openid profile',
+      mfa_verified: true,
+      must_change_password: false,
+    })
+
+    const first = await domainStore.createManualAttendance({
+      userId: 'student-1',
+      actionType: 'check_in',
+      status: 'Hadir',
+      reason: 'Delete regression first record',
+      date: '2026-08-28',
+      actorId: 'school-admin-1',
+    })
+    const second = await domainStore.createManualAttendance({
+      userId: 'student-1',
+      actionType: 'check_out',
+      status: 'Pulang',
+      reason: 'Delete regression second record',
+      date: '2026-08-28',
+      actorId: 'school-admin-1',
+    })
+    const third = await domainStore.createManualAttendance({
+      userId: 'student-1',
+      actionType: 'check_in',
+      status: 'Terlambat',
+      reason: 'Delete regression third record',
+      date: '2026-08-29',
+      actorId: 'school-admin-1',
+    })
+
+    const emptyBulkRes = await app.request('/v1/admin/attendance/bulk', {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ids: [] }),
+    })
+    expect(emptyBulkRes.status).toBe(422)
+
+    const duplicateBulkRes = await app.request('/v1/admin/attendance/bulk', {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ids: [first.id, first.id] }),
+    })
+    expect(duplicateBulkRes.status).toBe(422)
+
+    const failedBulkRes = await app.request('/v1/admin/attendance/bulk', {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ids: [second.id, 'attendance-does-not-exist'] }),
+    })
+    expect(failedBulkRes.status).toBe(404)
+    expect(
+      (await domainStore.listAttendances({ userId: 'student-1' })).map(
+        (attendance) => attendance.id,
+      ),
+    ).toEqual(expect.arrayContaining([first.id, second.id, third.id]))
+
+    const deleteRes = await app.request(`/v1/admin/attendance/${first.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${adminToken}` },
+    })
+    expect(deleteRes.status).toBe(200)
+    const deleteBody = await deleteRes.json()
+    expect(deleteBody.success).toBe(true)
+    expect(deleteBody.data.id).toBe(first.id)
+
+    const afterSingleDelete = await domainStore.listAttendances({ userId: 'student-1' })
+    expect(afterSingleDelete.map((attendance) => attendance.id)).not.toContain(first.id)
+
+    const bulkRes = await app.request('/v1/admin/attendance/bulk', {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ids: [second.id, third.id] }),
+    })
+    expect(bulkRes.status).toBe(200)
+    const bulkBody = await bulkRes.json()
+    expect(bulkBody.success).toBe(true)
+    expect(bulkBody.data).toEqual({
+      deletedCount: 2,
+      deletedIds: [second.id, third.id],
+    })
+
+    expect(await domainStore.listAttendances({ userId: 'student-1' })).toHaveLength(0)
+    for (const id of [first.id, second.id, third.id]) {
+      const auditLogs = await domainStore.getAuditLogs('attendance', id)
+      expect(auditLogs.some((log) => log.action === 'delete_attendance')).toBe(true)
+      expect(auditLogs.find((log) => log.action === 'delete_attendance')?.actor_id).toBe(
+        'school-admin-1',
+      )
+    }
+  })
+
   it('RBAC: Student cannot access /v1/admin/attendance/manual (403)', async () => {
     const { domainStore, identityProvider, app } = createIntegrationEnvironment()
     await setupSchoolAndStudent(domainStore, identityProvider, 'student-1')
@@ -390,7 +500,7 @@ describe('Record Face Attendance & Manual Exceptions Integration Tests (Ticket 0
     const studentToken = await signedOidcToken({
       sub: 'student-1',
       roles: ['student'],
-      scope: 'attendance:write openid profile',
+      scope: 'admin:read attendance:write openid profile',
     })
 
     const res = await app.request('/v1/admin/attendance/manual', {
@@ -407,5 +517,11 @@ describe('Record Face Attendance & Manual Exceptions Integration Tests (Ticket 0
     })
 
     expect(res.status).toBe(403)
+
+    const deleteRes = await app.request('/v1/admin/attendance/nonexistent', {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${studentToken}` },
+    })
+    expect(deleteRes.status).toBe(403)
   })
 })

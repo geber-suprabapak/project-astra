@@ -16,6 +16,8 @@ import {
   createClassSchema,
   createLocationSchema,
   createManualAttendanceSchema,
+  bulkDeleteAttendanceSchema,
+  deleteAttendanceSchema,
   createPermissionSchema,
   createRoleSchema,
   createScheduleSchema,
@@ -51,6 +53,7 @@ import {
   createClass,
   createLocation,
   createManualAttendance,
+  deleteAdminAttendances,
   createPermission,
   createRole,
   createSchedule,
@@ -1153,6 +1156,48 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
 
   router.post('/attendance/manual', handleCreateManualAttendance)
   router.post('/attendances/manual', handleCreateManualAttendance)
+
+  // DELETE /v1/admin/attendance/:id & /v1/admin/attendances/:id
+  const handleDeleteAttendance = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const parsed = deleteAttendanceSchema.safeParse({ id: c.req.param('id') })
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+
+    const result = await deleteAdminAttendances({
+      ids: [parsed.data.id],
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, { id: result.deletedIds[0] }, 'Attendance deleted successfully.')
+  }
+
+  // DELETE /v1/admin/attendance/bulk & /v1/admin/attendances/bulk
+  const handleBulkDeleteAttendances = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json()
+    const parsed = bulkDeleteAttendanceSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+
+    const result = await deleteAdminAttendances({
+      ids: parsed.data.ids,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, result, 'Attendances deleted successfully.')
+  }
+
+  router.delete('/attendance/bulk', handleBulkDeleteAttendances)
+  router.delete('/attendances/bulk', handleBulkDeleteAttendances)
+  router.delete('/attendance/:id', handleDeleteAttendance)
+  router.delete('/attendances/:id', handleDeleteAttendance)
 
   // GET /v1/admin/attendance/attempts & /v1/admin/attendances/attempts
   const handleListAttendanceAttempts = async (c: any) => {

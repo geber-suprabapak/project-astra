@@ -653,6 +653,7 @@ export interface DomainStore {
   }): Promise<AttendanceAttempt[]>
   getAttendanceAttempt(id: string): Promise<AttendanceAttempt | null>
   createManualAttendance(params: CreateManualAttendanceParams): Promise<AttendanceRecord>
+  deleteAttendances(ids: string[]): Promise<AttendanceRecord[]>
   listAttendances(filter?: {
     userId?: string
     date?: string

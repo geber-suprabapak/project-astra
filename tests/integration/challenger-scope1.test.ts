@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import type { JWTPayload } from 'jose'
 import { createApp } from '../../src/app.js'
 import { createAdminLeaveRequestSchema } from '../../src/modules/admin/schema.js'
@@ -53,7 +53,10 @@ function createTestEnv() {
   return { domainStore, identityProvider, objectStorage, robinClient, providers, app }
 }
 
-async function setupUsers(domainStore: MemoryDomainStore, identityProvider: MemoryIdentityProvider) {
+async function setupUsers(
+  domainStore: MemoryDomainStore,
+  identityProvider: MemoryIdentityProvider,
+) {
   await domainStore.createSchool({
     name: 'SMK Negeri 2 Banjarmasin',
     slug: 'smkn2-bjm',
@@ -181,8 +184,23 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
     }
 
     const invalidCategories = [
-      'izin', 'cuti', 'bolos', 'alpha', 'SAKIT', 'sakit ', ' sakit', 'sakit\n',
-      '123', '', null, undefined, true, {}, [], 'dispensasi_khusus', 'LAINNYA',
+      'izin',
+      'cuti',
+      'bolos',
+      'alpha',
+      'SAKIT',
+      'sakit ',
+      ' sakit',
+      'sakit\n',
+      '123',
+      '',
+      null,
+      undefined,
+      true,
+      {},
+      [],
+      'dispensasi_khusus',
+      'LAINNYA',
     ]
     for (const cat of invalidCategories) {
       it(`rejects invalid category '${String(cat)}'`, () => {
@@ -212,9 +230,23 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
     }
 
     const invalidDates = [
-      '28-08-2026', '2026/08/28', '2026.08.28', '28/08/2026', '2026-8-28', '2026-08-8',
-      '2026-08-28T00:00:00Z', '2026-08-28 00:00:00', 'yesterday', 'today', '2026-08-28 ',
-      '', null, undefined, 123456789, {}, [],
+      '28-08-2026',
+      '2026/08/28',
+      '2026.08.28',
+      '28/08/2026',
+      '2026-8-28',
+      '2026-08-8',
+      '2026-08-28T00:00:00Z',
+      '2026-08-28 00:00:00',
+      'yesterday',
+      'today',
+      '2026-08-28 ',
+      '',
+      null,
+      undefined,
+      123456789,
+      {},
+      [],
     ]
     for (const d of invalidDates) {
       it(`rejects invalid date format '${String(d)}'`, () => {
@@ -276,7 +308,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           category: 'sakit',
           description: 'a',
           date: '2026-08-28',
-        }).success
+        }).success,
       ).toBe(true)
 
       expect(
@@ -285,7 +317,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           category: 'sakit',
           description: 'a'.repeat(1000),
           date: '2026-08-28',
-        }).success
+        }).success,
       ).toBe(true)
     })
 
@@ -296,7 +328,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           category: 'sakit',
           description: 'a'.repeat(1001),
           date: '2026-08-28',
-        }).success
+        }).success,
       ).toBe(false)
     })
 
@@ -309,7 +341,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           description: 'desc',
           date: '2026-08-28',
           file_id: validUUID,
-        }).success
+        }).success,
       ).toBe(true)
 
       expect(
@@ -319,7 +351,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           description: 'desc',
           date: '2026-08-28',
           fileId: validUUID,
-        }).success
+        }).success,
       ).toBe(true)
 
       expect(
@@ -329,7 +361,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           description: 'desc',
           date: '2026-08-28',
           file_id: null,
-        }).success
+        }).success,
       ).toBe(true)
 
       expect(
@@ -339,7 +371,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           description: 'desc',
           date: '2026-08-28',
           file_id: 'not-a-valid-uuid',
-        }).success
+        }).success,
       ).toBe(false)
     })
 
@@ -352,7 +384,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
             description: 'desc',
             date: '2026-08-28',
             approval_status: st,
-          }).success
+          }).success,
         ).toBe(true)
       }
 
@@ -363,7 +395,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           description: 'desc',
           date: '2026-08-28',
           approval_status: 'cancelled',
-        }).success
+        }).success,
       ).toBe(false)
     })
   })

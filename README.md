@@ -256,17 +256,17 @@ All configuration is parsed and validated at boot via `src/config/env.ts`.
 
 ### OIDC / Logto Authentication & Helper
 
-| Variable           | Default / Required                  | Description                                                          |
-| ------------------ | ----------------------------------- | -------------------------------------------------------------------- |
-| `OIDC_JWT_SECRET`  | _(Required if no JWKS)_             | Secret key for symmetric HS256 JWT verification.                     |
-| `OIDC_JWKS_URL`    | _(Required if no Secret)_           | JWKS URL for asymmetric JWT verification.                            |
-| `OIDC_ISSUER`      | **Required for token verification** | Expected token issuer claim; production boot rejects it when absent. |
+| Variable           | Default / Required                  | Description                                                             |
+| ------------------ | ----------------------------------- | ----------------------------------------------------------------------- |
+| `OIDC_JWT_SECRET`  | _(Required if no JWKS)_             | Secret key for symmetric HS256 JWT verification.                        |
+| `OIDC_JWKS_URL`    | _(Required if no Secret)_           | JWKS URL for asymmetric JWT verification.                               |
+| `OIDC_ISSUER`      | **Required for token verification** | Expected token issuer claim; production boot rejects it when absent.    |
 | `OIDC_AUDIENCE`    | `authenticated`                     | Registered Logto API-resource indicator expected in the token audience. |
-| `LOGTO_ENDPOINT`   | _(Optional)_                        | Logto Management API endpoint URL.                                   |
-| `LOGTO_APP_ID`     | _(Optional)_                        | Logto Management API M2M App ID.                                     |
-| `LOGTO_APP_SECRET` | _(Optional)_                        | Logto Management API M2M App Secret.                                 |
-| `AUTH_USER_ID`     | _(Optional)_                        | Default user ID for the `bun run auth:token` helper.                 |
-| `AUTH_EMAIL`       | _(Optional)_                        | Default user email for the `bun run auth:token` helper.              |
+| `LOGTO_ENDPOINT`   | _(Optional)_                        | Logto Management API endpoint URL.                                      |
+| `LOGTO_APP_ID`     | _(Optional)_                        | Logto Management API M2M App ID.                                        |
+| `LOGTO_APP_SECRET` | _(Optional)_                        | Logto Management API M2M App Secret.                                    |
+| `AUTH_USER_ID`     | _(Optional)_                        | Default user ID for the `bun run auth:token` helper.                    |
+| `AUTH_EMAIL`       | _(Optional)_                        | Default user email for the `bun run auth:token` helper.                 |
 
 ### Robin (Face Recognition API)
 

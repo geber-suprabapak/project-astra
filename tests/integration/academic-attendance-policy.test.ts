@@ -270,7 +270,7 @@ describe('Academic Attendance Policy Integration', () => {
       },
       body: JSON.stringify({
         name: 'Initial Campus',
-        latitude: -6.200000,
+        latitude: -6.2,
         longitude: 106.816666,
         radius_meters: 100,
       }),
@@ -361,5 +361,63 @@ describe('Academic Attendance Policy Integration', () => {
     expect(patchSchedRes.status).toBe(200)
     const patchSchedBody = await patchSchedRes.json()
     expect(patchSchedBody.data.kompensasi_waktu).toBe(25)
+  })
+
+  it('updates a UUID schedule partially without clearing its existing values', async () => {
+    const { app, domainStore, adminToken } = setupPolicyTestEnvironment()
+    const scheduleId = 'd85474f9-9d2b-4f13-bc55-18f2c66f82f4'
+    domainStore.schedules.set(scheduleId, {
+      id: scheduleId,
+      school_id: 'b1246237-46ec-44ae-abff-1c3eb9b3c899',
+      class_id: 'e043a145-a0f8-4b21-b53c-5ddb8042ab20',
+      academic_period_id: '42de502f-3a7e-412e-a1c3-5af2b4cc40da',
+      location_id: '0e7bb61c-8267-4b94-84ca-e165007a23bc',
+      day_of_week: 'senin',
+      hari: 'senin',
+      mulai_masuk: '06:00:00',
+      selesai_masuk: '07:15:00',
+      mulai_pulang: '15:00:00',
+      selesai_pulang: '18:00:00',
+      kompensasi_waktu: 15,
+      is_active: true,
+    })
+
+    const putRes = await app.request(`/v1/admin/schedules/${scheduleId}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ start_time: '06:30', grace_period_minutes: 20 }),
+    })
+    expect(putRes.status).toBe(200)
+    const putBody = await putRes.json()
+    expect(putBody.data).toMatchObject({
+      id: scheduleId,
+      mulai_masuk: '06:30',
+      selesai_masuk: '07:15:00',
+      mulai_pulang: '15:00:00',
+      selesai_pulang: '18:00:00',
+      kompensasi_waktu: 20,
+      location_id: '0e7bb61c-8267-4b94-84ca-e165007a23bc',
+    })
+
+    const patchRes = await app.request(`/v1/admin/schedules/${scheduleId}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ end_checkout: '18:30' }),
+    })
+    expect(patchRes.status).toBe(200)
+    const patchBody = await patchRes.json()
+    expect(patchBody.data).toMatchObject({
+      id: scheduleId,
+      mulai_masuk: '06:30',
+      selesai_pulang: '18:30',
+      kompensasi_waktu: 20,
+      class_id: 'e043a145-a0f8-4b21-b53c-5ddb8042ab20',
+    })
   })
 })

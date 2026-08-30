@@ -1,11 +1,7 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { createApp } from '../../src/app.js'
 import { env } from '../../src/config/env.js'
-import {
-  createUploadIntent,
-  getFile,
-  deleteFile,
-} from '../../src/modules/files/service.js'
+import { createUploadIntent, getFile, deleteFile } from '../../src/modules/files/service.js'
 import { RequestUploadIntentSchema } from '../../src/modules/files/schema.js'
 import {
   MemoryDomainStore,
@@ -49,7 +45,10 @@ function createTestEnv() {
   return { domainStore, identityProvider, objectStorage, robinClient, providers, app }
 }
 
-async function setupUsers(domainStore: MemoryDomainStore, identityProvider: MemoryIdentityProvider) {
+async function setupUsers(
+  domainStore: MemoryDomainStore,
+  identityProvider: MemoryIdentityProvider,
+) {
   domainStore.profiles.set('student-1', {
     user_id: 'student-1',
     full_name: 'Approved Student',
@@ -117,7 +116,14 @@ async function setupUsers(domainStore: MemoryDomainStore, identityProvider: Memo
     userId: 'admin-1',
     email: 'admin@school.sch.id',
     roles: ['school_admin'],
-    scopes: ['openid', 'profile', 'mobile:access', 'admin:read', 'files:read:any', 'files:delete:any'],
+    scopes: [
+      'openid',
+      'profile',
+      'mobile:access',
+      'admin:read',
+      'files:read:any',
+      'files:delete:any',
+    ],
     mfaVerified: true,
     mustChangePassword: false,
   })
@@ -214,7 +220,17 @@ describe('Scope 2 Challenger: Object Storage Intent Routing (ISS-03) Adversarial
     }
 
     const invalidPurposes = [
-      'document', 'other', 'permits', 'file', 'PERMIT_ATTACHMENT', 'avatar ', ' ', '', null, undefined, 123
+      'document',
+      'other',
+      'permits',
+      'file',
+      'PERMIT_ATTACHMENT',
+      'avatar ',
+      ' ',
+      '',
+      null,
+      undefined,
+      123,
     ]
     for (const p of invalidPurposes) {
       it(`rejects invalid purpose '${String(p)}'`, () => {
@@ -252,7 +268,7 @@ describe('Scope 2 Challenger: Object Storage Intent Routing (ISS-03) Adversarial
             purpose: 'permit_attachment',
             contentType: mime,
             providers: envs.providers,
-          })
+          }),
         ).rejects.toThrow(/(Validation failed|Invalid permit attachment)/)
       }
 
@@ -264,7 +280,7 @@ describe('Scope 2 Challenger: Object Storage Intent Routing (ISS-03) Adversarial
           contentType: 'image/jpeg',
           sizeBytes: 5 * 1024 * 1024 + 1,
           providers: envs.providers,
-        })
+        }),
       ).rejects.toThrow(/(Validation failed|exceeds 5MB)/)
     })
 
@@ -292,7 +308,7 @@ describe('Scope 2 Challenger: Object Storage Intent Routing (ISS-03) Adversarial
             purpose: 'avatar',
             contentType: mime,
             providers: envs.providers,
-          })
+          }),
         ).rejects.toThrow(/(Validation failed|Invalid avatar)/)
       }
 
@@ -304,7 +320,7 @@ describe('Scope 2 Challenger: Object Storage Intent Routing (ISS-03) Adversarial
           contentType: 'image/jpeg',
           sizeBytes: 5 * 1024 * 1024 + 1,
           providers: envs.providers,
-        })
+        }),
       ).rejects.toThrow(/(Validation failed|exceeds 5MB)/)
     })
 
@@ -329,7 +345,7 @@ describe('Scope 2 Challenger: Object Storage Intent Routing (ISS-03) Adversarial
           purpose: 'face_enrollment',
           contentType: 'image/png',
           providers: envs.providers,
-        })
+        }),
       ).rejects.toThrow(/(Validation failed|Invalid face enrollment)/)
 
       // Oversize: 2MB + 1 byte
@@ -340,7 +356,7 @@ describe('Scope 2 Challenger: Object Storage Intent Routing (ISS-03) Adversarial
           contentType: 'image/jpeg',
           sizeBytes: 2 * 1024 * 1024 + 1,
           providers: envs.providers,
-        })
+        }),
       ).rejects.toThrow(/(Validation failed|exceeds 2MB)/)
 
       // Non-student role (teacher) requesting face_enrollment
@@ -350,7 +366,7 @@ describe('Scope 2 Challenger: Object Storage Intent Routing (ISS-03) Adversarial
           purpose: 'face_enrollment',
           contentType: 'image/jpeg',
           providers: envs.providers,
-        })
+        }),
       ).rejects.toThrow(/Only students can request face enrollment/)
     })
   })
@@ -366,7 +382,7 @@ describe('Scope 2 Challenger: Object Storage Intent Routing (ISS-03) Adversarial
           purpose: 'avatar',
           contentType: 'image/jpeg',
           providers: envs.providers,
-        })
+        }),
       ).rejects.toThrow(/Only approved users can request upload intents/)
 
       await expect(
@@ -375,7 +391,7 @@ describe('Scope 2 Challenger: Object Storage Intent Routing (ISS-03) Adversarial
           purpose: 'avatar',
           contentType: 'image/jpeg',
           providers: envs.providers,
-        })
+        }),
       ).rejects.toThrow(/Only approved users can request upload intents/)
     })
 
@@ -399,7 +415,9 @@ describe('Scope 2 Challenger: Object Storage Intent Routing (ISS-03) Adversarial
         providers: envs.providers,
       })
       expect(permitResult.file.id).toBe(permitFile.id)
-      expect(permitResult.download_url).toContain('https://storage.local/signed/student-1%2Fpermit_signed_test.pdf')
+      expect(permitResult.download_url).toContain(
+        'https://storage.local/signed/student-1%2Fpermit_signed_test.pdf',
+      )
 
       // 2. Avatar
       const avatarFile = await envs.domainStore.createFileRecord({
@@ -417,7 +435,9 @@ describe('Scope 2 Challenger: Object Storage Intent Routing (ISS-03) Adversarial
         providers: envs.providers,
       })
       expect(avatarResult.file.id).toBe(avatarFile.id)
-      expect(avatarResult.download_url).toContain('https://storage.local/signed/student-1%2Favatar_test.jpg')
+      expect(avatarResult.download_url).toContain(
+        'https://storage.local/signed/student-1%2Favatar_test.jpg',
+      )
 
       // 3. Face enrollment
       const faceFile = await envs.domainStore.createFileRecord({
@@ -435,7 +455,9 @@ describe('Scope 2 Challenger: Object Storage Intent Routing (ISS-03) Adversarial
         providers: envs.providers,
       })
       expect(faceResult.file.id).toBe(faceFile.id)
-      expect(faceResult.download_url).toContain('https://storage.local/signed/student-1%2Fface_test.jpg')
+      expect(faceResult.download_url).toContain(
+        'https://storage.local/signed/student-1%2Fface_test.jpg',
+      )
     })
 
     it('denies non-owner without privileged scope and allows privileged admin to get and delete files', async () => {
@@ -458,7 +480,7 @@ describe('Scope 2 Challenger: Object Storage Intent Routing (ISS-03) Adversarial
           fileId: file.id,
           userScopes: ['openid', 'profile'],
           providers: envs.providers,
-        })
+        }),
       ).rejects.toThrow(/do not have permission to view this file/)
 
       // Privileged admin with files:read:any -> succeeds
@@ -484,7 +506,7 @@ describe('Scope 2 Challenger: Object Storage Intent Routing (ISS-03) Adversarial
           userId: 'student-1',
           fileId: file.id,
           providers: envs.providers,
-        })
+        }),
       ).rejects.toThrow(/(File not found|no longer available)/i)
     })
   })

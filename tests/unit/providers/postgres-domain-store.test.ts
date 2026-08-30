@@ -1176,6 +1176,92 @@ describe('PostgresDomainStore (Greenfield)', () => {
     expect(list[0].id).toBe('att-manual-1')
   })
 
+  it('updateSchedule casts partial time edits in SQL and preserves omitted columns', async () => {
+    const scheduleId = 'd85474f9-9d2b-4f13-bc55-18f2c66f82f4'
+    const existing = {
+      id: scheduleId,
+      school_id: 'b1246237-46ec-44ae-abff-1c3eb9b3c899',
+      class_id: 'e043a145-a0f8-4b21-b53c-5ddb8042ab20',
+      academic_period_id: '42de502f-3a7e-412e-a1c3-5af2b4cc40da',
+      location_id: '0e7bb61c-8267-4b94-84ca-e165007a23bc',
+      day_of_week: 'senin',
+      hari: 'senin',
+      mulai_masuk: '06:00:00',
+      selesai_masuk: '07:15:00',
+      mulai_pulang: '15:00:00',
+      selesai_pulang: '18:00:00',
+      kompensasi_waktu: 15,
+      is_active: true,
+      created_at: '2026-08-21T00:00:00Z',
+      updated_at: '2026-08-21T00:00:00Z',
+    }
+    const observedUpdates: Array<{ query: string; values: readonly unknown[] }> = []
+    const mockSql = createMockSql((strings: TemplateStringsArray, ...values: readonly unknown[]) => {
+      const query = strings.join('?')
+      if (query.includes('FROM schedules')) return [existing]
+      if (query.includes('UPDATE schedules')) {
+        observedUpdates.push({ query, values })
+        return [{ ...existing, mulai_masuk: '06:30:00', kompensasi_waktu: 20 }]
+      }
+      return []
+    })
+
+    const store = new PostgresDomainStore({ sql: mockSql })
+    const updated = await store.updateSchedule(scheduleId, {
+      startTime: '06:30',
+      gracePeriodMinutes: 20,
+    })
+
+    expect(updated.mulai_masuk).toBe('06:30:00')
+    expect(updated.kompensasi_waktu).toBe(20)
+    expect(observedUpdates).toHaveLength(1)
+    expect(observedUpdates[0].query).toContain('start_time = COALESCE(?::time, start_time)')
+    expect(observedUpdates[0].query).toContain('end_time = COALESCE(?::time, end_time)')
+    expect(observedUpdates[0].query).toContain('start_checkout = COALESCE(?::time, start_checkout)')
+    expect(observedUpdates[0].query).toContain('end_checkout = COALESCE(?::time, end_checkout)')
+    expect(observedUpdates[0].values).toEqual([
+      null,
+      '06:30',
+      null,
+      null,
+      null,
+      20,
+      null,
+      null,
+      null,
+      null,
+      scheduleId,
+    ])
+  })
+
+  it('deleteAttendances locks and deletes the requested attendance records', async () => {
+    const record = {
+      id: 'att-manual-1',
+      user_id: 'student-1',
+      date: '2026-08-21',
+      status: 'Hadir',
+      action_type: 'check_in',
+      latitude: -6.2,
+      longitude: 106.81,
+      created_at: '2026-08-21T07:10:00Z',
+    }
+    const queries: string[] = []
+    const mockSql = createMockSql((strings: TemplateStringsArray) => {
+      const query = strings.join('?')
+      queries.push(query)
+      if (query.includes('FOR UPDATE')) return [record]
+      if (query.includes('DELETE FROM attendances')) return [record]
+      return []
+    })
+
+    const store = new PostgresDomainStore({ sql: mockSql })
+    const deleted = await store.deleteAttendances(['att-manual-1'])
+
+    expect(deleted).toEqual([record])
+    expect(queries.some((query) => query.includes('FOR UPDATE'))).toBe(true)
+    expect(queries.some((query) => query.includes('DELETE FROM attendances'))).toBe(true)
+  })
+
   it('getLeaveRequestById, listLeaveRequests, updateLeaveRequestStatus, and deleteLeaveRequest operate on leave_requests table', async () => {
     const mockSql = createMockSql((strings: TemplateStringsArray) => {
       const query = strings.join('?')

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import type { JWTPayload } from 'jose'
 import { createApp } from '../../src/app.js'
 import { AttendanceHistoryQuerySchema } from '../../src/modules/attendance/schema.js'
@@ -53,7 +53,10 @@ function createTestEnv() {
   return { domainStore, identityProvider, objectStorage, robinClient, providers, app }
 }
 
-async function setupUsersAndAttendance(domainStore: MemoryDomainStore, identityProvider: MemoryIdentityProvider) {
+async function setupUsersAndAttendance(
+  domainStore: MemoryDomainStore,
+  identityProvider: MemoryIdentityProvider,
+) {
   domainStore.profiles.set('student-1', {
     user_id: 'student-1',
     full_name: 'Budi Santoso',
@@ -197,7 +200,7 @@ describe('Scope 3 Challenger: Attendance Query Parameter Normalization (ISS-06)'
         {
           method: 'GET',
           headers: { Authorization: `Bearer ${token}` },
-        }
+        },
       )
       expect(res.status).toBe(200)
       // SAFETY: Response JSON envelope format
@@ -218,7 +221,7 @@ describe('Scope 3 Challenger: Attendance Query Parameter Normalization (ISS-06)'
         {
           method: 'GET',
           headers: { Authorization: `Bearer ${token}` },
-        }
+        },
       )
       expect(res.status).toBe(200)
       // SAFETY: Response JSON envelope format
@@ -240,7 +243,7 @@ describe('Scope 3 Challenger: Attendance Query Parameter Normalization (ISS-06)'
         {
           method: 'GET',
           headers: { Authorization: `Bearer ${token}` },
-        }
+        },
       )
       expect(res.status).toBe(200)
       // SAFETY: Response JSON envelope format
@@ -255,13 +258,10 @@ describe('Scope 3 Challenger: Attendance Query Parameter Normalization (ISS-06)'
 
       const token = tokenFor({ sub: 'student-1', roles: ['student'] })
 
-      const res = await envs.app.request(
-        '/v1/mobile/attendance?startDate=invalid-date-string',
-        {
-          method: 'GET',
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      )
+      const res = await envs.app.request('/v1/mobile/attendance?startDate=invalid-date-string', {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      })
       expect(res.status).toBe(422)
     })
   })

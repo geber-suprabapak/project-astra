@@ -1390,6 +1390,35 @@ export class MemoryDomainStore implements DomainStore {
     return { ...record }
   }
 
+  async deleteAttendances(ids: string[]): Promise<AttendanceRecord[]> {
+    const requestedIds = new Set(ids)
+    const records = this.attendancesList.filter((attendance) => requestedIds.has(attendance.id))
+
+    if (records.length !== requestedIds.size) {
+      throw AppError.notFound('Attendance')
+    }
+
+    this.attendancesList = this.attendancesList.filter(
+      (attendance) => !requestedIds.has(attendance.id),
+    )
+
+    // Manual attendance also maintains the legacy `absences` projection. Remove
+    // only the matching projection row so unrelated mobile attendance remains.
+    for (const record of records) {
+      const legacyIndex = this.absences.findIndex(
+        (absence) =>
+          absence.user_id === record.user_id &&
+          absence.date === record.date &&
+          absence.status === record.status &&
+          absence.created_at === record.created_at,
+      )
+      if (legacyIndex >= 0) this.absences.splice(legacyIndex, 1)
+    }
+
+    const recordsById = new Map(records.map((record) => [record.id, record]))
+    return ids.map((id) => ({ ...recordsById.get(id)! }))
+  }
+
   async listAttendances(filter?: {
     userId?: string
     date?: string
@@ -2258,7 +2287,10 @@ export class MemoryObjectStorage implements ObjectStorage {
     }
   }
 
-  async deleteObject(_purpose: 'avatar' | 'permit_attachment' | 'face_enrollment', path: string): Promise<void> {
+  async deleteObject(
+    _purpose: 'avatar' | 'permit_attachment' | 'face_enrollment',
+    path: string,
+  ): Promise<void> {
     this.objects.delete(path)
   }
 

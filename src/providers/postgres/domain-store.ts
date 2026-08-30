@@ -753,6 +753,37 @@ export class PostgresDomainStore implements DomainStore {
     }
   }
 
+  async deleteAttendances(ids: string[]): Promise<AttendanceRecord[]> {
+    if (ids.length === 0) return []
+
+    try {
+      return await this.sql.begin(async (sql) => {
+        const existing = await sql<AttendanceRecord[]>`
+          SELECT id, user_id, date, status, action_type, latitude, longitude, created_at::text
+          FROM attendances
+          WHERE id IN ${sql(ids)}
+          FOR UPDATE
+        `
+
+        if (existing.length !== ids.length) {
+          throw AppError.notFound('Attendance')
+        }
+
+        const deleted = await sql<AttendanceRecord[]>`
+          DELETE FROM attendances
+          WHERE id IN ${sql(ids)}
+          RETURNING id, user_id, date, status, action_type, latitude, longitude, created_at::text
+        `
+        const deletedById = new Map(deleted.map((record) => [record.id, record]))
+        return ids.map((id) => deletedById.get(id)!).filter(Boolean)
+      })
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, ids }, 'Failed to delete attendance records')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
   async listAttendances(filter?: {
     userId?: string
     date?: string
@@ -1445,10 +1476,10 @@ export class PostgresDomainStore implements DomainStore {
         UPDATE schedules
         SET
           day_of_week = COALESCE(${params.dayOfWeek?.toLowerCase() ?? null}, day_of_week),
-          start_time = COALESCE(${params.startTime ? `${params.startTime}::time` : null}, start_time),
-          end_time = COALESCE(${params.endTime ? `${params.endTime}::time` : null}, end_time),
-          start_checkout = COALESCE(${params.startCheckout ? `${params.startCheckout}::time` : null}, start_checkout),
-          end_checkout = COALESCE(${params.endCheckout ? `${params.endCheckout}::time` : null}, end_checkout),
+          start_time = COALESCE(${params.startTime ?? null}::time, start_time),
+          end_time = COALESCE(${params.endTime ?? null}::time, end_time),
+          start_checkout = COALESCE(${params.startCheckout ?? null}::time, start_checkout),
+          end_checkout = COALESCE(${params.endCheckout ?? null}::time, end_checkout),
           grace_period_minutes = COALESCE(${params.gracePeriodMinutes ?? null}, grace_period_minutes),
           is_active = COALESCE(${params.isActive ?? null}, is_active),
           class_id = COALESCE(${params.classId ?? null}, class_id),

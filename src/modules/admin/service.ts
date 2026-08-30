@@ -1896,6 +1896,37 @@ export async function listAttendances(params: {
   return params.providers.domainStore.listAttendances(params.filter)
 }
 
+export async function deleteAdminAttendances(params: {
+  ids: string[]
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<{ deletedCount: number; deletedIds: string[] }> {
+  checkPolicyAdminAccess(params.actorRole)
+
+  const deleted = await params.providers.domainStore.deleteAttendances(params.ids)
+  for (const attendance of deleted) {
+    await params.providers.domainStore.insertAuditLog({
+      actor_id: params.actorId,
+      action: 'delete_attendance',
+      entity_type: 'attendance',
+      entity_id: attendance.id,
+      details: {
+        user_id: attendance.user_id,
+        date: attendance.date,
+        status: attendance.status,
+        action_type: attendance.action_type,
+        created_at: attendance.created_at,
+      },
+    })
+  }
+
+  return {
+    deletedCount: deleted.length,
+    deletedIds: deleted.map((attendance) => attendance.id),
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Leave Requests Operations
 // ---------------------------------------------------------------------------

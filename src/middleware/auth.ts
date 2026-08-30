@@ -30,7 +30,10 @@ export const auth: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (!identityUser.scopes || identityUser.scopes.length === 0) {
     throw AppError.authInvalid('Token missing scope claim.')
   }
-  if (identityUser.authSource === 'logto' && !hasScope(identityUser.scopes, logtoScopes.mobileAccess)) {
+  if (
+    identityUser.authSource === 'logto' &&
+    !hasScope(identityUser.scopes, logtoScopes.mobileAccess)
+  ) {
     throw AppError.forbidden('Token is not authorized for the Skanida API resource.')
   }
 

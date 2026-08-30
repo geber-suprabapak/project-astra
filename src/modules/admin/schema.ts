@@ -727,6 +727,23 @@ export const attendanceResponseSchema = z.object({
 
 export type AttendanceResponse = z.infer<typeof attendanceResponseSchema>
 
+export const deleteAttendanceSchema = z.object({
+  id: z.string().min(1, 'Attendance ID is required.'),
+})
+
+export type DeleteAttendanceInput = z.infer<typeof deleteAttendanceSchema>
+
+export const bulkDeleteAttendanceSchema = z
+  .object({
+    ids: z.array(z.string().min(1, 'Attendance ID is required.')).min(1).max(1000),
+  })
+  .refine((value) => new Set(value.ids).size === value.ids.length, {
+    message: 'Attendance IDs must be unique.',
+    path: ['ids'],
+  })
+
+export type BulkDeleteAttendanceInput = z.infer<typeof bulkDeleteAttendanceSchema>
+
 // ---------------------------------------------------------------------------
 // Leave Requests Admin Schemas
 // ---------------------------------------------------------------------------

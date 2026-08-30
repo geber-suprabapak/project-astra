@@ -27,6 +27,16 @@ export interface OidcIdentityProviderOptions {
   legacyBridgeExpiresAt?: string
 }
 
+type LogtoCreateUserPayload = {
+  username?: string
+  primaryEmail: string
+  password?: string
+  name?: string
+  isSuspended: boolean
+  roleNames: readonly IdentityRole[]
+  customData: { nis?: string }
+}
+
 export class OidcIdentityProvider implements IdentityProvider {
   private readonly issuer?: string
   private readonly jwksUrl?: string
@@ -384,6 +394,7 @@ export class OidcIdentityProvider implements IdentityProvider {
       throw AppError.internal('Failed to authenticate with identity provider management API.')
     }
 
+    // SAFETY: Successful Logto token responses contain a string access_token and optional expires_in.
     const data = (await response.json()) as { access_token: string; expires_in?: number }
     this.m2mToken = data.access_token
     this.m2mTokenExpiresAt = Date.now() + (data.expires_in ?? 3600) * 1000
@@ -397,21 +408,26 @@ export class OidcIdentityProvider implements IdentityProvider {
 
     try {
       const token = await this.getManagementToken()
+      const userPayload: LogtoCreateUserPayload = {
+        primaryEmail: params.email,
+        password: params.password,
+        name: params.name,
+        isSuspended: params.suspended ?? true,
+        roleNames: params.roles ?? ['student'],
+        customData: params.username ? { nis: params.username } : {},
+      }
+
+      if (params.username && !/^\d+$/.test(params.username)) {
+        userPayload.username = params.username
+      }
+
       const response = await fetch(`${this.logtoEndpoint.replace(/\/$/, '')}/api/users`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          ...(params.username && !/^\d+$/.test(params.username) ? { username: params.username } : {}),
-          primaryEmail: params.email,
-          password: params.password,
-          name: params.name,
-          isSuspended: params.suspended ?? true,
-          roleNames: params.roles ?? ['student'],
-          customData: params.username ? { nis: params.username } : {},
-        }),
+        body: JSON.stringify(userPayload),
       })
 
       if (!response.ok) {
