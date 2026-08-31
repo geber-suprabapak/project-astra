@@ -37,6 +37,17 @@ type LogtoCreateUserPayload = {
   customData: { nis?: string }
 }
 
+type OidcVerificationError = Error & {
+  code?: string
+}
+
+export function getOidcVerificationFailureMetadata(error: OidcVerificationError): {
+  name: string
+  code?: string
+} {
+  return error.code ? { name: error.name, code: error.code } : { name: error.name }
+}
+
 export class OidcIdentityProvider implements IdentityProvider {
   private readonly issuer?: string
   private readonly jwksUrl?: string
@@ -142,6 +153,13 @@ export class OidcIdentityProvider implements IdentityProvider {
       }
     } catch (err) {
       if (err instanceof AppError) throw err
+      // SAFETY: this branch narrows the caught value to Error; jose verification
+      // errors expose their optional machine-readable code as a string.
+      const verification =
+        err instanceof Error
+          ? getOidcVerificationFailureMetadata(err as OidcVerificationError)
+          : { name: 'UnknownError' }
+      logger.warn({ verification }, 'OIDC token verification failed')
       throw AppError.authInvalid()
     }
   }

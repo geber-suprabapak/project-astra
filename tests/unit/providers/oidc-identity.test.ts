@@ -1,10 +1,24 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { SignJWT, type JWTPayload } from 'jose'
-import { OidcIdentityProvider } from '../../../src/providers/identity/oidc-identity.js'
+import {
+  getOidcVerificationFailureMetadata,
+  OidcIdentityProvider,
+} from '../../../src/providers/identity/oidc-identity.js'
 import { AppError } from '../../../src/lib/errors/app-error.js'
 import { ErrorCode } from '../../../src/lib/errors/codes.js'
 
 describe('OidcIdentityProvider', () => {
+  it('records only safe verifier metadata without raw token or error message', () => {
+    const error = Object.assign(new Error('token-value-must-not-be-logged'), {
+      code: 'ERR_JWT_CLAIM_VALIDATION_FAILED',
+    })
+
+    expect(getOidcVerificationFailureMetadata(error)).toEqual({
+      name: 'Error',
+      code: 'ERR_JWT_CLAIM_VALIDATION_FAILED',
+    })
+  })
+
   const originalFetch = globalThis.fetch
 
   beforeEach(() => {
