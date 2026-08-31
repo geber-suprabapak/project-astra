@@ -8,14 +8,17 @@ import { AppError } from '../../../src/lib/errors/app-error.js'
 import { ErrorCode } from '../../../src/lib/errors/codes.js'
 
 describe('OidcIdentityProvider', () => {
-  it('records only safe verifier metadata without raw token or error message', () => {
+  it('records only an allowlisted failed claim without raw token or error message', () => {
     const error = Object.assign(new Error('token-value-must-not-be-logged'), {
       code: 'ERR_JWT_CLAIM_VALIDATION_FAILED',
+      claim: 'aud',
+      payload: { scope: 'sensitive-scope-value' },
     })
 
     expect(getOidcVerificationFailureMetadata(error)).toEqual({
       name: 'Error',
       code: 'ERR_JWT_CLAIM_VALIDATION_FAILED',
+      claim: 'aud',
     })
   })
 

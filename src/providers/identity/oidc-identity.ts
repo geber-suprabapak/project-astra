@@ -39,13 +39,24 @@ type LogtoCreateUserPayload = {
 
 type OidcVerificationError = Error & {
   code?: string
+  claim?: string
 }
 
-export function getOidcVerificationFailureMetadata(error: OidcVerificationError): {
+type OidcVerificationFailureMetadata = {
   name: string
   code?: string
-} {
-  return error.code ? { name: error.name, code: error.code } : { name: error.name }
+  claim?: string
+}
+
+const safeOidcClaimNames = new Set(['iss', 'aud', 'exp', 'nbf'])
+
+export function getOidcVerificationFailureMetadata(
+  error: OidcVerificationError,
+): OidcVerificationFailureMetadata {
+  const metadata: OidcVerificationFailureMetadata = { name: error.name }
+  if (error.code) metadata.code = error.code
+  if (error.claim && safeOidcClaimNames.has(error.claim)) metadata.claim = error.claim
+  return metadata
 }
 
 export class OidcIdentityProvider implements IdentityProvider {
