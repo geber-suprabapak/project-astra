@@ -99,6 +99,7 @@ import {
   openStudentSignup,
   promoteStudentEnrollment,
   rejectLeaveRequest,
+  reopenLeaveRequest,
   rejectStudent,
   requestStaffPasswordReset,
   resetStudentFaceEnrollment,
@@ -1403,6 +1404,14 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
         providers,
       })
       return successResponse(c, rejected, 'Leave request rejected successfully.')
+    } else if (status === 'pending') {
+      const reopened = await reopenLeaveRequest({
+        id,
+        actorRole: c.get('profileRole'),
+        actorId: c.get('userId'),
+        providers,
+      })
+      return successResponse(c, reopened, 'Leave request reopened successfully.')
     } else {
       throw AppError.validationError('Invalid or missing approval_status in PATCH body.')
     }
@@ -1459,6 +1468,24 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
   router.patch('/leave-requests/:id/reject', handleRejectLeaveRequest)
   router.post('/permits/:id/reject', handleRejectLeaveRequest)
   router.patch('/permits/:id/reject', handleRejectLeaveRequest)
+
+  // POST|PATCH /v1/admin/leave-requests/:id/reopen & /v1/admin/permits/:id/reopen
+  const handleReopenLeaveRequest = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const reopened = await reopenLeaveRequest({
+      id,
+      actorRole: c.get('profileRole'),
+      actorId: c.get('userId'),
+      providers,
+    })
+    return successResponse(c, reopened, 'Leave request reopened successfully.')
+  }
+
+  router.post('/leave-requests/:id/reopen', handleReopenLeaveRequest)
+  router.patch('/leave-requests/:id/reopen', handleReopenLeaveRequest)
+  router.post('/permits/:id/reopen', handleReopenLeaveRequest)
+  router.patch('/permits/:id/reopen', handleReopenLeaveRequest)
 
   // DELETE /v1/admin/leave-requests/:id & /v1/admin/permits/:id
   const handleDeleteLeaveRequest = async (c: any) => {

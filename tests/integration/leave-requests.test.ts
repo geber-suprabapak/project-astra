@@ -567,4 +567,140 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     })
     expect(invalidRes.status).toBe(422)
   })
+
+  it('School administrator reopens a rejected leave request via PATCH and dedicated POST /reopen endpoints', async () => {
+    const { domainStore, identityProvider, app } = createIntegrationEnvironment()
+    await setupTestUsers(domainStore, identityProvider)
+
+    const adminToken = tokenFor({
+      sub: 'admin-1',
+      roles: ['school_admin'],
+      scope: 'openid profile admin:read admin:write leave:read leave:approve',
+      mfa_verified: true,
+      must_change_password: false,
+    })
+    const studentToken = tokenFor({ sub: 'student-1', roles: ['student'], scope: 'openid profile' })
+
+    // 1. Student submits leave request
+    const createRes = await app.request('/v1/mobile/leave-requests', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${studentToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        category: 'pergi',
+        description: 'Menghadiri resepsi pernikahan',
+        date: '2026-08-30',
+      }),
+    })
+    const leaveId = (await createRes.json()).data.id
+
+    // 2. Admin rejects the leave request
+    const rejectRes = await app.request(`/v1/admin/leave-requests/${leaveId}/reject`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        reason: 'Dokumentasi tidak lengkap',
+      }),
+    })
+    expect(rejectRes.status).toBe(200)
+    const rejectBody = await rejectRes.json()
+    expect(rejectBody.data.approval_status).toBe('rejected')
+    expect(rejectBody.data.rejection_reason).toBe('Dokumentasi tidak lengkap')
+    expect(rejectBody.data.rejected_at).toBeDefined()
+
+    // 3. Admin reopens via PATCH /v1/admin/leave-requests/:id with Chronos reset payload
+    const patchReopenRes = await app.request(`/v1/admin/leave-requests/${leaveId}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        approval_status: 'pending',
+        status: false,
+        rejection_reason: null,
+        rejected_at: null,
+      }),
+    })
+    expect(patchReopenRes.status).toBe(200)
+    const patchReopenBody = await patchReopenRes.json()
+    expect(patchReopenBody.success).toBe(true)
+    expect(patchReopenBody.data.approval_status).toBe('pending')
+    expect(patchReopenBody.data.status).toBe(false)
+    expect(patchReopenBody.data.rejection_reason).toBeNull()
+    expect(patchReopenBody.data.rejected_at).toBeNull()
+
+    // 4. Reject again to test dedicated POST /reopen endpoint
+    await app.request(`/v1/admin/leave-requests/${leaveId}/reject`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ reason: 'Ditolak lagi' }),
+    })
+
+    // 5. Admin reopens via POST /v1/admin/leave-requests/:id/reopen
+    const postReopenRes = await app.request(`/v1/admin/leave-requests/${leaveId}/reopen`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+      },
+    })
+    expect(postReopenRes.status).toBe(200)
+    const postReopenBody = await postReopenRes.json()
+    expect(postReopenBody.success).toBe(true)
+    expect(postReopenBody.data.approval_status).toBe('pending')
+    expect(postReopenBody.data.status).toBe(false)
+    expect(postReopenBody.data.rejection_reason).toBeNull()
+    expect(postReopenBody.data.rejected_at).toBeNull()
+
+    // 6. Test permit alias POST /v1/admin/permits/:id/reopen
+    // Reject again
+    await app.request(`/v1/admin/permits/${leaveId}/reject`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ reason: 'Ditolak untuk alias check' }),
+    })
+
+    const permitReopenRes = await app.request(`/v1/admin/permits/${leaveId}/reopen`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+      },
+    })
+    expect(permitReopenRes.status).toBe(200)
+    const permitReopenBody = await permitReopenRes.json()
+    expect(permitReopenBody.data.approval_status).toBe('pending')
+    expect(permitReopenBody.data.rejection_reason).toBeNull()
+
+    // 7. Student token attempting to reopen is forbidden (403)
+    const studentReopenRes = await app.request(`/v1/admin/leave-requests/${leaveId}/reopen`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${studentToken}`,
+      },
+    })
+    expect(studentReopenRes.status).toBe(403)
+
+    // 8. Reopening non-existent leave request returns 404
+    const notFoundRes = await app.request(
+      '/v1/admin/leave-requests/00000000-0000-0000-0000-000000000000/reopen',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      },
+    )
+    expect(notFoundRes.status).toBe(404)
+  })
 })

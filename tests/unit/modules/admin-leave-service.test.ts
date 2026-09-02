@@ -6,6 +6,7 @@ import {
   getAdminLeaveRequest,
   listAdminLeaveRequests,
   rejectLeaveRequest,
+  reopenLeaveRequest,
 } from '../../../src/modules/admin/service.js'
 import {
   MemoryDomainStore,
@@ -251,6 +252,111 @@ describe('Admin Leave Requests Service', () => {
     expect(logs).toHaveLength(1)
     expect(logs[0].action).toBe('reject_leave_request')
     expect(logs[0].actor_id).toBe('admin-1')
+  })
+
+  it('reopens a rejected leave request to pending, resets rejection fields, records audit log and enqueues notification', async () => {
+    const { domainStore, providers } = setupTestEnvironment()
+
+    const permit = await domainStore.insertPermit({
+      user_id: 'student-1',
+      kategori_izin: 'sakit',
+      deskripsi: 'Sakit flu',
+      status: false,
+      link_foto: null,
+      tanggal: '2026-08-21T00:00:00+07:00',
+    })
+
+    // First reject it
+    await rejectLeaveRequest({
+      id: permit.id,
+      reason: 'Tidak ada surat dokter',
+      actorRole: 'school_admin',
+      actorId: 'admin-1',
+      providers,
+    })
+
+    // Now reopen it
+    const reopened = await reopenLeaveRequest({
+      id: permit.id,
+      actorRole: 'teacher',
+      actorId: 'teacher-1',
+      providers,
+    })
+
+    expect(reopened.id).toBe(permit.id)
+    expect(reopened.approval_status).toBe('pending')
+    expect(reopened.status).toBe(false)
+    expect(reopened.rejection_reason).toBeNull()
+    expect(reopened.rejected_at).toBeNull()
+
+    // Verify audit log created for reopen
+    const logs = await domainStore.getAuditLogs('leave_request', permit.id)
+    expect(logs).toHaveLength(2)
+    const reopenLog = logs.find((l) => l.action === 'reopen_leave_request')
+    expect(reopenLog).toBeDefined()
+    expect(reopenLog?.actor_id).toBe('teacher-1')
+    expect(reopenLog?.details).toMatchObject({
+      previous_status: 'rejected',
+      student_user_id: 'student-1',
+      category: 'sakit',
+    })
+
+    // Verify push notification enqueued
+    const notifications = await domainStore.listNotifications({ userId: 'student-1' })
+    const reopenNotification = notifications.find((n) => n.payload.type === 'leave_reopened')
+    expect(reopenNotification).toBeDefined()
+    expect(reopenNotification?.payload.title).toBe('Pengajuan Izin Dibuka Kembali')
+    expect(reopenNotification?.payload.leave_request_id).toBe(permit.id)
+  })
+
+  it('forbids unauthorized student or staff role from reopening leave request', async () => {
+    const { domainStore, providers } = setupTestEnvironment()
+
+    const permit = await domainStore.insertPermit({
+      user_id: 'student-1',
+      kategori_izin: 'sakit',
+      deskripsi: 'Sakit demam',
+      status: false,
+      link_foto: null,
+      tanggal: '2026-08-21T00:00:00+07:00',
+    })
+
+    await expect(
+      reopenLeaveRequest({
+        id: permit.id,
+        actorRole: 'student',
+        actorId: 'student-1',
+        providers,
+      }),
+    ).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    })
+
+    await expect(
+      reopenLeaveRequest({
+        id: permit.id,
+        actorRole: 'staff',
+        actorId: 'staff-1',
+        providers,
+      }),
+    ).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    })
+  })
+
+  it('throws notFound when reopening non-existent leave request', async () => {
+    const { providers } = setupTestEnvironment()
+
+    await expect(
+      reopenLeaveRequest({
+        id: '00000000-0000-0000-0000-000000000000',
+        actorRole: 'school_admin',
+        actorId: 'admin-1',
+        providers,
+      }),
+    ).rejects.toMatchObject({
+      code: 'RESOURCE_NOT_FOUND',
+    })
   })
 
   it('deletes a leave request by school_admin and cleans up file record', async () => {

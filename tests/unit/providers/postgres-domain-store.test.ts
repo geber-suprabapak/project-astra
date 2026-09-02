@@ -1196,15 +1196,17 @@ describe('PostgresDomainStore (Greenfield)', () => {
       updated_at: '2026-08-21T00:00:00Z',
     }
     const observedUpdates: Array<{ query: string; values: readonly unknown[] }> = []
-    const mockSql = createMockSql((strings: TemplateStringsArray, ...values: readonly unknown[]) => {
-      const query = strings.join('?')
-      if (query.includes('FROM schedules')) return [existing]
-      if (query.includes('UPDATE schedules')) {
-        observedUpdates.push({ query, values })
-        return [{ ...existing, mulai_masuk: '06:30:00', kompensasi_waktu: 20 }]
-      }
-      return []
-    })
+    const mockSql = createMockSql(
+      (strings: TemplateStringsArray, ...values: readonly unknown[]) => {
+        const query = strings.join('?')
+        if (query.includes('FROM schedules')) return [existing]
+        if (query.includes('UPDATE schedules')) {
+          observedUpdates.push({ query, values })
+          return [{ ...existing, mulai_masuk: '06:30:00', kompensasi_waktu: 20 }]
+        }
+        return []
+      },
+    )
 
     const store = new PostgresDomainStore({ sql: mockSql })
     const updated = await store.updateSchedule(scheduleId, {

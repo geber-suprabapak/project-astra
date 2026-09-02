@@ -2180,6 +2180,61 @@ export async function rejectLeaveRequest(params: {
   return mapLeaveRequestWithAttachment(updated, params.providers)
 }
 
+export async function reopenLeaveRequest(params: {
+  id: string
+  actorRole: IdentityRole | null
+  actorId: string
+  providers: AppProviders
+}): Promise<AdminLeaveRequestResponse> {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)
+  ) {
+    throw AppError.forbidden()
+  }
+
+  const lr = await params.providers.domainStore.getLeaveRequestById(params.id)
+  if (!lr) {
+    throw AppError.notFound('Leave request')
+  }
+
+  const updated = await params.providers.domainStore.updateLeaveRequestStatus({
+    id: params.id,
+    approvalStatus: 'pending',
+    status: false,
+    rejectionReason: null,
+    rejectedAt: null,
+  })
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'reopen_leave_request',
+    entity_type: 'leave_request',
+    entity_id: params.id,
+    details: {
+      previous_status: lr.approval_status,
+      student_user_id: lr.user_id,
+      category: lr.category,
+      date: lr.date,
+    },
+  })
+
+  await params.providers.domainStore.enqueueNotification({
+    userId: lr.user_id,
+    channel: 'push',
+    payload: {
+      title: 'Pengajuan Izin Dibuka Kembali',
+      body: `Pengajuan izin Anda untuk tanggal ${lr.date} telah dibuka kembali untuk ditinjau ulang.`,
+      category: lr.category,
+      date: lr.date,
+      leave_request_id: lr.id,
+      type: 'leave_reopened',
+    },
+  })
+
+  return mapLeaveRequestWithAttachment(updated, params.providers)
+}
+
 export async function deleteAdminLeaveRequest(params: {
   id: string
   actorRole: IdentityRole | null

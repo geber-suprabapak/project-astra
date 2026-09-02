@@ -1177,9 +1177,15 @@ export class MemoryDomainStore implements DomainStore {
     p.status = params.status !== undefined ? params.status : params.approvalStatus === 'approved'
     if (params.rejectionReason !== undefined) {
       p.rejection_reason = params.rejectionReason
+    } else if (params.approvalStatus === 'pending') {
+      p.rejection_reason = null
     }
     if (params.approvalStatus === 'rejected') {
       p.rejected_at = params.rejectedAt ?? new Date().toISOString()
+    } else if (params.approvalStatus === 'pending') {
+      p.rejected_at = params.rejectedAt ?? null
+    } else if (params.rejectedAt !== undefined) {
+      p.rejected_at = params.rejectedAt
     }
     p.updated_at = new Date().toISOString()
 

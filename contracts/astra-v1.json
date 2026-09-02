@@ -57,6 +57,7 @@
     "PATCH /v1/admin/leave-requests/{id}",
     "POST /v1/admin/leave-requests/{id}/approve",
     "POST /v1/admin/leave-requests/{id}/reject",
+    "POST /v1/admin/leave-requests/{id}/reopen",
     "GET /v1/admin/attendance",
     "POST /v1/admin/attendance/manual",
     "GET /v1/admin/attendance/attempts"

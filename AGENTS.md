@@ -39,3 +39,20 @@ Do not commit secrets. Copy `.env.example` and set tenant, database, S3, OIDC, a
 ## Serena Workspace Notes
 
 The `.serena/` directory is part of the working state for this repository. Commit `.serena` changes when they are not ignored by git, and leave only explicitly ignored files uncommitted. Do not treat `.serena` as disposable scratch space unless the file is already ignored or clearly tooling-generated.
+
+<!-- repo-map:start -->
+## Codebase semantic map
+
+Start repository-wide orientation at `docs/codebase-map/README.md`.
+
+- Domain vocabulary and aliases: `docs/codebase-map/glossary.md`
+- Semantic module ownership: `docs/codebase-map/modules.md`
+- Architecture boundaries: `docs/codebase-map/architecture/`
+- Cross-module flows: `docs/codebase-map/flows/`
+- Rules that changes must preserve: `docs/codebase-map/invariants.md`
+- Recorded decision sources: `docs/codebase-map/decisions/README.md`
+
+For structural questions such as symbol callers, imports, dependencies, or code relationships, prefer an available code graph / codebase-memory tool before broad repository scans. The graph is an accelerator; source code, tests, schemas, and project docs remain authoritative.
+
+Read only the map pages relevant to the task, then inspect the implementation they point to.
+<!-- repo-map:end -->
