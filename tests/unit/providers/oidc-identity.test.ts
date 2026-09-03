@@ -240,16 +240,97 @@ describe('OidcIdentityProvider', () => {
       }
     })
 
+    it('updatePassword succeeds and sends Authorization header', async () => {
+      const fetchMock = vi.fn().mockImplementation(async (url: string | URL) => {
+        if (String(url).endsWith('/oidc/token')) {
+          return new Response(
+            JSON.stringify({ access_token: 'm2m-test-token', expires_in: 3600 }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          )
+        }
+        return new Response(null, { status: 200 })
+      })
+      globalThis.fetch = fetchMock
+
+      await expect(configuredProvider.updatePassword('user-1', 'new-pass')).resolves.toBeUndefined()
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:3001/api/users/user-1/password',
+        expect.objectContaining({
+          method: 'PATCH',
+          headers: expect.objectContaining({
+            Authorization: 'Bearer m2m-test-token',
+          }),
+        }),
+      )
+    })
+
     it('updatePassword throws internal AppError when Logto returns non-200', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(new Response('Error', { status: 500 }))
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string | URL) => {
+        if (String(url).endsWith('/oidc/token')) {
+          return new Response(
+            JSON.stringify({ access_token: 'm2m-test-token', expires_in: 3600 }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          )
+        }
+        return new Response('Error', { status: 500 })
+      })
 
       await expect(configuredProvider.updatePassword('user-1', 'new-pass')).rejects.toThrow(
         'Failed to update password in identity provider.',
       )
     })
 
+    it('updateUserMetadata succeeds and sends Authorization header with wrapped customData', async () => {
+      const fetchMock = vi.fn().mockImplementation(async (url: string | URL) => {
+        if (String(url).endsWith('/oidc/token')) {
+          return new Response(
+            JSON.stringify({ access_token: 'm2m-test-token', expires_in: 3600 }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          )
+        }
+        return new Response(JSON.stringify({}), { status: 200 })
+      })
+      globalThis.fetch = fetchMock
+
+      await expect(
+        configuredProvider.updateUserMetadata('user-1', { avatar_url: 'avatar.jpg' }),
+      ).resolves.toBeUndefined()
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:3001/api/users/user-1/custom-data',
+        expect.objectContaining({
+          method: 'PATCH',
+          headers: expect.objectContaining({
+            Authorization: 'Bearer m2m-test-token',
+          }),
+          body: JSON.stringify({ customData: { avatar_url: 'avatar.jpg' } }),
+        }),
+      )
+    })
+
     it('updateUserMetadata throws internal AppError when Logto returns non-200', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(new Response('Error', { status: 500 }))
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string | URL) => {
+        if (String(url).endsWith('/oidc/token')) {
+          return new Response(
+            JSON.stringify({ access_token: 'm2m-test-token', expires_in: 3600 }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          )
+        }
+        return new Response('Error', { status: 500 })
+      })
 
       await expect(
         configuredProvider.updateUserMetadata('user-1', { role: 'admin' }),

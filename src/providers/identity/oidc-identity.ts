@@ -247,11 +247,15 @@ export class OidcIdentityProvider implements IdentityProvider {
     }
 
     try {
+      const token = await this.getManagementToken()
       const response = await fetch(
         `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/password`,
         {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
           body: JSON.stringify({ password: newPassword }),
         },
       )
@@ -275,12 +279,16 @@ export class OidcIdentityProvider implements IdentityProvider {
     }
 
     try {
+      const token = await this.getManagementToken()
       const response = await fetch(
         `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/custom-data`,
         {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(metadata),
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ customData: metadata }),
         },
       )
       if (!response.ok) {
@@ -311,9 +319,13 @@ export class OidcIdentityProvider implements IdentityProvider {
     }
 
     try {
+      const token = await this.getManagementToken()
       const response = await fetch(`${this.logtoEndpoint.replace(/\/$/, '')}/api/users`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           primaryEmail: params.email,
           name: params.fullName,
@@ -366,10 +378,14 @@ export class OidcIdentityProvider implements IdentityProvider {
     }
 
     try {
+      const token = await this.getManagementToken()
       await fetch(
         `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/sign-out`,
         {
           method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         },
       )
     } catch (err) {
@@ -383,11 +399,15 @@ export class OidcIdentityProvider implements IdentityProvider {
     }
 
     try {
+      const token = await this.getManagementToken()
       await fetch(
         `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/roles`,
         {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
           body: JSON.stringify({ roleNames: roles }),
         },
       )
@@ -479,11 +499,15 @@ export class OidcIdentityProvider implements IdentityProvider {
     }
 
     try {
+      const token = await this.getManagementToken()
       const response = await fetch(
         `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/is-suspended`,
         {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
           body: JSON.stringify({ isSuspended: suspended }),
         },
       )
@@ -503,11 +527,15 @@ export class OidcIdentityProvider implements IdentityProvider {
     }
 
     try {
+      const token = await this.getManagementToken()
       const response = await fetch(
         `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/roles`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
           body: JSON.stringify({ roleNames: [role] }),
         },
       )
@@ -527,9 +555,15 @@ export class OidcIdentityProvider implements IdentityProvider {
     }
 
     try {
+      const token = await this.getManagementToken()
       const response = await fetch(
         `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/roles/${encodeURIComponent(role)}`,
-        { method: 'DELETE' },
+        {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
       )
       if (!response.ok && response.status !== 404) {
         throw AppError.internal('Failed to revoke role in identity provider.')
@@ -547,11 +581,15 @@ export class OidcIdentityProvider implements IdentityProvider {
     }
 
     try {
+      const token = await this.getManagementToken()
       const response = await fetch(
         `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/primary-email`,
         {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
           body: JSON.stringify({ primaryEmail: email }),
         },
       )
