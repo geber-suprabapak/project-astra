@@ -15,7 +15,8 @@
     ".roo/**",
     ".serena/**",
     ".windsurf/**",
-    "tools/oxlint/anti-slop/**"
+    "tools/oxlint/anti-slop/**",
+    "**/*.md"
   ],
   "singleQuote": true,
   "semi": false,
