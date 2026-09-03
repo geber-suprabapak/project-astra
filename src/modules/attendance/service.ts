@@ -60,21 +60,39 @@ export async function runGateChecks(
     robin: 'pass',
   }
 
+  type GateEnrollmentCheck =
+    | { status: 'enrolled' | 'not_enrolled'; embeddingCount: number; message: string }
+    | { status: 'unavailable'; embeddingCount: number; message: string }
+
   const [absences, activePermits, robinReady, enrollStatus, activePeriod] = await Promise.all([
     actualProviders.domainStore.getTodayAbsences(params.userId, todayWIB),
     actualProviders.domainStore.getActivePermitsToday(params.userId, startISO, endISO),
     actualProviders.robinClient.checkReadiness(),
-    actualProviders.robinClient.getEnrollmentStatus(params.token, params.requestId).catch(() => ({
-      status: 'not_enrolled' as const,
-      embeddingCount: 0,
-      message: 'Unavailable.',
-    })),
+    actualProviders.robinClient
+      .getEnrollmentStatus(params.token, params.requestId)
+      .catch((err): GateEnrollmentCheck => {
+        if (
+          err instanceof AppError &&
+          (err.code === 'UPSTREAM_TIMEOUT' || err.code === 'DEPENDENCY_UNAVAILABLE')
+        ) {
+          return {
+            status: 'unavailable',
+            embeddingCount: 0,
+            message: err.message,
+          }
+        }
+        return {
+          status: 'not_enrolled',
+          embeddingCount: 0,
+          message: 'Unavailable.',
+        }
+      }),
     actualProviders.domainStore.getActiveAcademicPeriod(),
   ])
 
   const checks: CheckResult = { ...defaults }
 
-  if (!robinReady.healthy) {
+  if (!robinReady.healthy || enrollStatus.status === 'unavailable') {
     checks.robin = 'fail'
     return {
       allowed: false,
@@ -363,6 +381,9 @@ export async function submit(
   )
 
   if (!gate.allowed) {
+    if (gate.reasonCode === 'ENROLLMENT_REQUIRED') {
+      throw AppError.enrollmentRequired()
+    }
     throw AppError.attendanceBlocked(gate.reason ?? 'Attendance not allowed.')
   }
 
@@ -370,15 +391,6 @@ export async function submit(
     throw AppError.attendanceBlocked(
       `Expected action type '${gate.actionType}', got '${params.actionType}'.`,
     )
-  }
-
-  // Verify enrollment before calling identify
-  const enrollment = await actualProviders.robinClient.getEnrollmentStatus(
-    params.token,
-    params.requestId,
-  )
-  if (enrollment.status !== 'enrolled') {
-    throw AppError.enrollmentRequired()
   }
 
   // Identify face — throws on network/timeout/503/400 or returns non-match / match

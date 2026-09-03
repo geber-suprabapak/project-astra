@@ -121,14 +121,29 @@ export class RobinClient {
 
     if (!res.ok) {
       const errorJson = await res.json().catch(() => null)
+      const stringCandidate = z.string().min(1)
       const errorSchema = z.object({
-        message: z.string().optional(),
-        detail: z.string().optional(),
+        message: z.string().nullish(),
+        detail: z.unknown().nullish(),
       })
       const parsedError = errorSchema.safeParse(errorJson)
-      const msg = parsedError.success
-        ? parsedError.data.message || parsedError.data.detail || 'Face not recognized.'
-        : 'Face not recognized.'
+      let msg = 'Face not recognized.'
+      if (parsedError.success && parsedError.data) {
+        const messageCandidate = stringCandidate.safeParse(parsedError.data.message)
+        const detailCandidate = stringCandidate.safeParse(parsedError.data.detail)
+        if (messageCandidate.success) {
+          msg = messageCandidate.data
+        } else if (detailCandidate.success) {
+          msg = detailCandidate.data
+        } else {
+          const detailList = z
+            .array(z.object({ msg: stringCandidate }))
+            .safeParse(parsedError.data.detail)
+          if (detailList.success && detailList.data.length > 0) {
+            msg = detailList.data[0].msg
+          }
+        }
+      }
       throw AppError.attendanceBlocked(msg)
     }
 
@@ -138,8 +153,8 @@ export class RobinClient {
     const data = parsed.data
     return {
       status: data.status,
-      confidence: data.confidence,
-      qualityScore: data.quality_score,
+      confidence: data.confidence ?? undefined,
+      qualityScore: data.quality_score ?? undefined,
       processTimeMs: data.process_time_ms ?? 0,
       message:
         data.message ||
