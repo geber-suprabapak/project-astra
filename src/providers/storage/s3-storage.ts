@@ -2,10 +2,20 @@ import { createHash, createHmac } from 'node:crypto'
 import { env } from '../../config/env.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { logger } from '../../lib/logging/logger.js'
+import { getRedisClient } from '../../clients/redis.js'
 import type { ObjectStorage } from '../types.js'
 
 const AVATAR_TTL_SECONDS = 86400 // 24h
+const SIGNED_AVATAR_URL_CACHE_TTL_SECONDS = 43200 // 12h (well within 24h SigV4 expiration)
 const PERMIT_TTL_SECONDS = 604800 // 7 days
+const SIGNED_PERMIT_URL_CACHE_TTL_SECONDS = 7200 // 2h
+
+export type RedisCacheClient = {
+  isOpen: boolean
+  get(key: string): Promise<string | null>
+  set(key: string, value: string, options?: { EX?: number }): Promise<string | null>
+  del(key: string): Promise<number>
+}
 
 export interface S3ObjectStorageOptions {
   endpoint?: string
@@ -16,6 +26,7 @@ export interface S3ObjectStorageOptions {
   bucketPermits?: string
   forcePathStyle?: boolean
   publicUrl?: string
+  redisClient?: RedisCacheClient | null
 }
 
 function sha256(data: string | Buffer): string {
@@ -53,6 +64,7 @@ export class S3ObjectStorage implements ObjectStorage {
   private readonly bucketPermits: string
   private readonly forcePathStyle: boolean
   private readonly publicUrl: string
+  private readonly redisClient: RedisCacheClient | null
 
   constructor(options: S3ObjectStorageOptions = {}) {
     this.endpoint = (options.endpoint ?? env.s3Endpoint).replace(/\/$/, '')
@@ -63,6 +75,7 @@ export class S3ObjectStorage implements ObjectStorage {
     this.bucketPermits = options.bucketPermits ?? env.s3BucketPermits
     this.forcePathStyle = options.forcePathStyle ?? env.s3ForcePathStyle
     this.publicUrl = (options.publicUrl ?? env.s3PublicUrl ?? this.endpoint).replace(/\/$/, '')
+    this.redisClient = options.redisClient !== undefined ? options.redisClient : getRedisClient()
   }
 
   private buildObjectUrl(bucket: string, key: string, usePublic = false): URL {
@@ -214,6 +227,10 @@ export class S3ObjectStorage implements ObjectStorage {
         logger.error({ status: response.status, errorText }, 'S3 avatar upload failed')
         throw AppError.storageUploadFailed()
       }
+      const redis = this.redisClient
+      if (redis?.isOpen) {
+        await redis.del(`astra:signed_avatar:${path}`).catch(() => {})
+      }
       return path
     } catch (err) {
       if (err instanceof AppError) throw err
@@ -224,17 +241,43 @@ export class S3ObjectStorage implements ObjectStorage {
 
   async deleteAvatar(userId: string): Promise<void> {
     const extensions = ['jpg', 'jpeg', 'png', 'webp']
-    await Promise.allSettled(
-      extensions.map((ext) =>
+    const redis = this.redisClient
+    await Promise.allSettled([
+      ...extensions.map((ext) =>
         this.executeS3Request('DELETE', this.bucketAvatars, `${userId}/avatar.${ext}`),
       ),
-    )
+      ...(redis?.isOpen
+        ? extensions.map((ext) =>
+            redis.del(`astra:signed_avatar:${userId}/avatar.${ext}`).catch(() => {}),
+          )
+        : []),
+    ])
   }
 
   async getSignedAvatarUrl(path: string): Promise<string | null> {
     if (!path) return null
+    const cacheKey = `astra:signed_avatar:${path}`
+    const redis = this.redisClient
+
+    if (redis?.isOpen) {
+      try {
+        const cached = await redis.get(cacheKey)
+        if (cached) return cached
+      } catch (err) {
+        logger.warn({ err, path }, 'Failed to read signed avatar URL from cache')
+      }
+    }
+
     try {
-      return this.signUrl(this.bucketAvatars, path, AVATAR_TTL_SECONDS)
+      const signed = this.signUrl(this.bucketAvatars, path, AVATAR_TTL_SECONDS)
+      if (redis?.isOpen && signed) {
+        try {
+          await redis.set(cacheKey, signed, { EX: SIGNED_AVATAR_URL_CACHE_TTL_SECONDS })
+        } catch (err) {
+          logger.warn({ err, path }, 'Failed to cache signed avatar URL')
+        }
+      }
+      return signed
     } catch {
       return null
     }
@@ -267,8 +310,28 @@ export class S3ObjectStorage implements ObjectStorage {
 
   async getSignedPermitUrl(path: string): Promise<string | null> {
     if (!path) return null
+    const cacheKey = `astra:signed_permit:${path}`
+    const redis = this.redisClient
+
+    if (redis?.isOpen) {
+      try {
+        const cached = await redis.get(cacheKey)
+        if (cached) return cached
+      } catch (err) {
+        logger.warn({ err, path }, 'Failed to read signed permit URL from cache')
+      }
+    }
+
     try {
-      return this.signUrl(this.bucketPermits, path, PERMIT_TTL_SECONDS)
+      const signed = this.signUrl(this.bucketPermits, path, PERMIT_TTL_SECONDS)
+      if (redis?.isOpen && signed) {
+        try {
+          await redis.set(cacheKey, signed, { EX: SIGNED_PERMIT_URL_CACHE_TTL_SECONDS })
+        } catch (err) {
+          logger.warn({ err, path }, 'Failed to cache signed permit URL')
+        }
+      }
+      return signed
     } catch {
       return null
     }
@@ -276,6 +339,10 @@ export class S3ObjectStorage implements ObjectStorage {
 
   async deletePermitAttachment(path: string): Promise<void> {
     if (!path) return
+    const redis = this.redisClient
+    if (redis?.isOpen) {
+      await redis.del(`astra:signed_permit:${path}`).catch(() => {})
+    }
     try {
       await this.executeS3Request('DELETE', this.bucketPermits, path)
     } catch (err) {
@@ -336,6 +403,14 @@ export class S3ObjectStorage implements ObjectStorage {
       if (!response.ok) {
         logger.error({ status: response.status, purpose }, 'S3 object deletion failed')
         throw AppError.dependencyUnavailable('object storage')
+      }
+      const redis = this.redisClient
+      if (redis?.isOpen) {
+        if (purpose === 'avatar') {
+          await redis.del(`astra:signed_avatar:${path}`).catch(() => {})
+        } else if (purpose === 'permit_attachment') {
+          await redis.del(`astra:signed_permit:${path}`).catch(() => {})
+        }
       }
     } catch (err) {
       if (err instanceof AppError) throw err

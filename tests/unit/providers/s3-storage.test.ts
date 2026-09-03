@@ -1,5 +1,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { S3ObjectStorage } from '../../../src/providers/storage/s3-storage.js'
+import {
+  S3ObjectStorage,
+  type RedisCacheClient,
+} from '../../../src/providers/storage/s3-storage.js'
 import { AppError } from '../../../src/lib/errors/app-error.js'
 import { ErrorCode } from '../../../src/lib/errors/codes.js'
 
@@ -110,6 +113,104 @@ describe('S3ObjectStorage', () => {
         expect(appErr.message).toBe('File upload failed.')
         expect(appErr.details).toBeUndefined()
       }
+    })
+  })
+
+  describe('Redis caching for signed URLs', () => {
+    it('returns cached signed avatar URL without generating new one', async () => {
+      const mockRedis: RedisCacheClient = {
+        isOpen: true,
+        get: vi.fn().mockResolvedValue('https://storage.local/cached-avatar.png'),
+        set: vi.fn().mockResolvedValue('OK'),
+        del: vi.fn().mockResolvedValue(1),
+      }
+
+      const storage = new S3ObjectStorage({ ...storageOptions, redisClient: mockRedis })
+      const url = await storage.getSignedAvatarUrl('user-1/avatar.png')
+
+      expect(url).toBe('https://storage.local/cached-avatar.png')
+      expect(mockRedis.get).toHaveBeenCalledWith('astra:signed_avatar:user-1/avatar.png')
+      expect(mockRedis.set).not.toHaveBeenCalled()
+    })
+
+    it('caches generated signed avatar URL on cache miss', async () => {
+      const mockRedis: RedisCacheClient = {
+        isOpen: true,
+        get: vi.fn().mockResolvedValue(null),
+        set: vi.fn().mockResolvedValue('OK'),
+        del: vi.fn().mockResolvedValue(1),
+      }
+
+      const storage = new S3ObjectStorage({ ...storageOptions, redisClient: mockRedis })
+      const url = await storage.getSignedAvatarUrl('user-1/avatar.png')
+
+      expect(url).toContain('http://localhost:9000/avatars/user-1/avatar.png')
+      expect(mockRedis.get).toHaveBeenCalledWith('astra:signed_avatar:user-1/avatar.png')
+      expect(mockRedis.set).toHaveBeenCalledWith('astra:signed_avatar:user-1/avatar.png', url, {
+        EX: 43200,
+      })
+    })
+
+    it('invalidates cached avatar URL on uploadAvatar', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
+      const mockRedis: RedisCacheClient = {
+        isOpen: true,
+        get: vi.fn().mockResolvedValue(null),
+        set: vi.fn().mockResolvedValue('OK'),
+        del: vi.fn().mockResolvedValue(1),
+      }
+
+      const storage = new S3ObjectStorage({ ...storageOptions, redisClient: mockRedis })
+      await storage.uploadAvatar('user-1', Buffer.from('test-image'), 'image/png')
+
+      expect(mockRedis.del).toHaveBeenCalledWith('astra:signed_avatar:user-1/avatar.png')
+    })
+
+    it('invalidates cached avatar URLs on deleteAvatar', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
+      const mockRedis: RedisCacheClient = {
+        isOpen: true,
+        get: vi.fn().mockResolvedValue(null),
+        set: vi.fn().mockResolvedValue('OK'),
+        del: vi.fn().mockResolvedValue(1),
+      }
+
+      const storage = new S3ObjectStorage({ ...storageOptions, redisClient: mockRedis })
+      await storage.deleteAvatar('user-1')
+
+      expect(mockRedis.del).toHaveBeenCalledWith('astra:signed_avatar:user-1/avatar.png')
+      expect(mockRedis.del).toHaveBeenCalledWith('astra:signed_avatar:user-1/avatar.jpg')
+    })
+
+    it('returns cached signed permit URL on cache hit', async () => {
+      const mockRedis: RedisCacheClient = {
+        isOpen: true,
+        get: vi.fn().mockResolvedValue('https://storage.local/cached-permit.png'),
+        set: vi.fn().mockResolvedValue('OK'),
+        del: vi.fn().mockResolvedValue(1),
+      }
+
+      const storage = new S3ObjectStorage({ ...storageOptions, redisClient: mockRedis })
+      const url = await storage.getSignedPermitUrl('user-1/permit.png')
+
+      expect(url).toBe('https://storage.local/cached-permit.png')
+      expect(mockRedis.get).toHaveBeenCalledWith('astra:signed_permit:user-1/permit.png')
+      expect(mockRedis.set).not.toHaveBeenCalled()
+    })
+
+    it('invalidates cached permit URL on deletePermitAttachment', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
+      const mockRedis: RedisCacheClient = {
+        isOpen: true,
+        get: vi.fn().mockResolvedValue(null),
+        set: vi.fn().mockResolvedValue('OK'),
+        del: vi.fn().mockResolvedValue(1),
+      }
+
+      const storage = new S3ObjectStorage({ ...storageOptions, redisClient: mockRedis })
+      await storage.deletePermitAttachment('user-1/permit.png')
+
+      expect(mockRedis.del).toHaveBeenCalledWith('astra:signed_permit:user-1/permit.png')
     })
   })
 })
