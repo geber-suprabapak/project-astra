@@ -40,6 +40,8 @@ import {
   updateScheduleSchema,
   updateStaffSchema,
   updateStudentEmailSchema,
+  createBackupSchema,
+  backupStatusQuerySchema,
 } from './schema.js'
 import {
   acceptRosterReport,
@@ -71,6 +73,8 @@ import {
   generateStudentResetCode,
   getAdminLeaveRequest,
   getAdminNotification,
+  getAdminBackupStatus,
+  getAttendance,
   getAttendanceAttempt,
   getBootstrapStatus,
   getCalendarException,
@@ -97,6 +101,7 @@ import {
   listStaff,
   listStudents,
   openStudentSignup,
+  recordAdminBackup,
   promoteStudentEnrollment,
   rejectLeaveRequest,
   reopenLeaveRequest,
@@ -1173,6 +1178,10 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
       providers,
     })
 
+    if (result.deletedCount === 0) {
+      throw AppError.notFound('Attendance')
+    }
+
     return successResponse(c, { id: result.deletedIds[0] }, 'Attendance deleted successfully.')
   }
 
@@ -1254,27 +1263,96 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
   router.get('/attendance/attempts/:id', handleGetAttendanceAttempt)
   router.get('/attendances/attempts/:id', handleGetAttendanceAttempt)
 
+  // GET /v1/admin/attendance/:id & /v1/admin/attendances/:id
+  const handleGetAttendance = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const id = c.req.param('id')
+    const attendance = await getAttendance({
+      id,
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, attendance, 'Attendance retrieved successfully.')
+  }
+
   // GET /v1/admin/attendance & /v1/admin/attendances
   const handleListAttendances = async (c: any) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const userId = c.req.query('user_id') ?? c.req.query('userId')
     const date = c.req.query('date')
+    const startDate = c.req.query('start_date') ?? c.req.query('startDate')
+    const endDate = c.req.query('end_date') ?? c.req.query('endDate')
     const status = c.req.query('status')
     const actionType = c.req.query('action_type') ?? c.req.query('actionType')
     const limitQuery = c.req.query('limit')
-    const limit = limitQuery ? Number(limitQuery) : undefined
+    const offsetQuery = c.req.query('offset')
+
+    const limit = limitQuery ? Number(limitQuery) : 50
+    const offset = offsetQuery ? Number(offsetQuery) : 0
+
+    if (
+      limitQuery !== undefined &&
+      (limitQuery.trim() === '' || !Number.isInteger(limit) || limit < 1 || limit > 100)
+    ) {
+      throw AppError.validationError('limit must be an integer between 1 and 100.')
+    }
+    if (
+      offsetQuery !== undefined &&
+      (offsetQuery.trim() === '' || !Number.isInteger(offset) || offset < 0)
+    ) {
+      throw AppError.validationError('offset must be a non-negative integer.')
+    }
+
+    const isValidIsoDate = (value: string): boolean => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        return false
+      }
+      const dateObj = new Date(`${value}T00:00:00.000Z`)
+      return !Number.isNaN(dateObj.getTime()) && dateObj.toISOString().slice(0, 10) === value
+    }
+
+    if (date !== undefined && !isValidIsoDate(date)) {
+      throw AppError.validationError('date must be in YYYY-MM-DD format.')
+    }
+    if (startDate !== undefined && !isValidIsoDate(startDate)) {
+      throw AppError.validationError('start_date must be in YYYY-MM-DD format.')
+    }
+    if (endDate !== undefined && !isValidIsoDate(endDate)) {
+      throw AppError.validationError('end_date must be in YYYY-MM-DD format.')
+    }
+    if (startDate !== undefined && endDate !== undefined && startDate > endDate) {
+      throw AppError.validationError('start_date cannot be after end_date.')
+    }
 
     const attendances = await listAttendances({
-      filter: { userId, date, status, actionType, limit },
+      filter: {
+        userId,
+        date,
+        startDate,
+        endDate,
+        status,
+        actionType,
+        limit: limit + 1,
+        offset,
+      },
       actorRole: c.get('profileRole'),
       providers,
     })
+    const hasMore = attendances.length > limit
 
-    return successResponse(c, attendances, 'Attendances retrieved successfully.')
+    return successResponse(
+      c,
+      attendances.slice(0, limit),
+      'Attendances retrieved successfully.',
+      200,
+      { pagination: { limit, offset, has_more: hasMore } },
+    )
   }
 
   router.get('/attendance', handleListAttendances)
   router.get('/attendances', handleListAttendances)
+  router.get('/attendance/:id', handleGetAttendance)
+  router.get('/attendances/:id', handleGetAttendance)
 
   // -------------------------------------------------------------------------
   // Leave Requests Routes
@@ -1620,6 +1698,46 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
   }
 
   router.delete('/notifications/:id', handleDeleteNotification)
+
+  // POST /v1/admin/backups
+  router.post('/backups', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json()
+    const parsed = createBackupSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+
+    const backup = await recordAdminBackup({
+      input: parsed.data,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, backup, 'Backup recorded successfully.', 201)
+  })
+
+  // GET /v1/admin/backups/status
+  router.get('/backups/status', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const query = {
+      year_month: c.req.query('year_month'),
+      scope: c.req.query('scope'),
+    }
+    const parsed = backupStatusQuerySchema.safeParse(query)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+
+    const status = await getAdminBackupStatus({
+      query: parsed.data,
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    return successResponse(c, status, 'Backup status retrieved.')
+  })
 
   return router
 }

@@ -78,10 +78,11 @@ export interface AppProviders {
 }
 
 export interface Absence {
-  status: 'Hadir' | 'Terlambat' | 'Pulang' | 'Alpha'
+  status: 'Hadir' | 'Terlambat' | 'Pulang' | 'Alpha' | 'Datang'
   created_at: string
   date?: string
   user_id?: string
+  action_type?: string | null
 }
 
 export interface Schedule {
@@ -203,6 +204,22 @@ export interface AttendanceRecord {
   latitude?: number | null
   longitude?: number | null
   created_at: string
+}
+
+/**
+ * ADR-002: Deterministically maps historical attendance records with status 'Datang'
+ * to canonical status 'Hadir' and action_type 'check_in'.
+ */
+export function normalizeAttendanceRecord<
+  T extends { status: string; action_type?: AttendanceActionType | null },
+>(record: T): T & { status: AttendanceStatus; action_type: AttendanceActionType | null } {
+  const isDatang = record.status === 'Datang'
+  // SAFETY: ADR-002 normalizes Datang to Hadir; all other valid status strings conform to AttendanceStatus
+  return {
+    ...record,
+    status: (isDatang ? 'Hadir' : record.status) as AttendanceStatus,
+    action_type: isDatang ? (record.action_type ?? 'check_in') : (record.action_type ?? null),
+  }
 }
 
 export interface AttendanceAttempt {
@@ -519,7 +536,12 @@ export interface BootstrapStatus {
   signup_open: boolean
 }
 
-export type AuditLogDetailValue = string | number | boolean | null | undefined | readonly string[]
+export type AuditLogPrimitiveValue = string | number | boolean | null | undefined
+
+export type AuditLogDetailValue =
+  | AuditLogPrimitiveValue
+  | readonly string[]
+  | Record<string, AuditLogPrimitiveValue>
 export type AuditLogDetails = Record<string, AuditLogDetailValue>
 
 export interface AuditLogEntry {
@@ -652,14 +674,18 @@ export interface DomainStore {
     limit?: number
   }): Promise<AttendanceAttempt[]>
   getAttendanceAttempt(id: string): Promise<AttendanceAttempt | null>
+  getAttendance(id: string): Promise<AttendanceRecord | null>
   createManualAttendance(params: CreateManualAttendanceParams): Promise<AttendanceRecord>
   deleteAttendances(ids: string[]): Promise<AttendanceRecord[]>
   listAttendances(filter?: {
     userId?: string
     date?: string
+    startDate?: string
+    endDate?: string
     status?: string
     actionType?: string
     limit?: number
+    offset?: number
   }): Promise<AttendanceRecord[]>
 
   // Academic Periods domain methods
@@ -753,7 +779,10 @@ export interface DomainStore {
   openSignup(): Promise<void>
   isSignupOpen(): Promise<boolean>
   getBootstrapStatus(): Promise<BootstrapStatus>
-  insertAuditLog(entry: AuditLogEntry): Promise<void>
+  insertAuditLog(entry: AuditLogEntry): Promise<AuditLog>
+  /**
+   * Returns audit logs matching the given entity criteria, ordered newest-first (descending by created_at).
+   */
   getAuditLogs(entityType?: string, entityId?: string): Promise<AuditLog[]>
 
   // Roles & Permissions RBAC domain methods

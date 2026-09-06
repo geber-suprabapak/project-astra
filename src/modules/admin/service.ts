@@ -6,6 +6,7 @@ import type {
   AttendanceAttempt,
   AttendanceRecord,
   AttendanceStatus,
+  AuditLog,
   BootstrapStatus,
   CalendarException,
   ClassEnrollment,
@@ -33,8 +34,15 @@ import type {
   UserProfile,
 } from '../../providers/types.js'
 import {
+  backupLogDetailsSchema,
+  isValidDateInMonth,
+  isValidRealYearMonth,
   privilegedSessionSchema,
   type AdminLeaveRequestResponse,
+  type BackupStatusQuery,
+  type BackupStatusRecord,
+  type BackupStatusResponse,
+  type CreateBackupInput,
   type EffectivePermissionsResponse,
   type PrivilegedSession,
   type StaffResponse,
@@ -724,7 +732,10 @@ export async function listStudents(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<UserProfile[]> {
-  if (params.actorRole !== 'platform_admin' && params.actorRole !== 'school_admin') {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
+  ) {
     throw AppError.forbidden()
   }
 
@@ -1157,7 +1168,12 @@ export async function listClasses(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<ClassRoom[]> {
-  checkPolicyAdminAccess(params.actorRole)
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
+  ) {
+    throw AppError.forbidden()
+  }
   return params.providers.domainStore.getClasses(params.schoolId, params.academicPeriodId)
 }
 
@@ -1876,13 +1892,34 @@ export async function getAttendanceAttempt(params: {
   return attempt
 }
 
+export async function getAttendance(params: {
+  id: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<AttendanceRecord> {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
+  ) {
+    throw AppError.forbidden()
+  }
+  const attendance = await params.providers.domainStore.getAttendance(params.id)
+  if (!attendance) {
+    throw AppError.notFound('Attendance')
+  }
+  return attendance
+}
+
 export async function listAttendances(params: {
   filter?: {
     userId?: string
     date?: string
+    startDate?: string
+    endDate?: string
     status?: string
     actionType?: string
     limit?: number
+    offset?: number
   }
   actorRole: IdentityRole | null
   providers: AppProviders
@@ -2427,4 +2464,150 @@ export async function deleteAdminNotification(params: {
       user_id: existing.user_id,
     },
   })
+}
+
+// ---------------------------------------------------------------------------
+// Backup Audit Operations
+// ---------------------------------------------------------------------------
+
+function checkBackupPolicy(actorRole: IdentityRole | null): void {
+  if (actorRole !== 'platform_admin' && actorRole !== 'school_admin') {
+    throw AppError.forbidden()
+  }
+}
+
+export async function recordAdminBackup(params: {
+  input: CreateBackupInput
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<AuditLog> {
+  checkBackupPolicy(params.actorRole)
+
+  const {
+    year_month,
+    scope,
+    format,
+    start_date,
+    end_date,
+    checksum,
+    record_count,
+    byte_length,
+    result,
+  } = params.input
+
+  const inserted = await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'backup',
+    entity_type: 'backup',
+    entity_id: year_month,
+    details: {
+      actor: params.actorId,
+      actor_id: params.actorId,
+      scope,
+      format,
+      start_date,
+      end_date,
+      range: {
+        start_date,
+        end_date,
+      },
+      checksum: checksum ?? null,
+      counts: record_count,
+      record_count,
+      bytes: byte_length,
+      byte_length,
+      result,
+    },
+  })
+
+  return inserted
+}
+
+export async function getAdminBackupStatus(params: {
+  query: BackupStatusQuery
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<BackupStatusResponse> {
+  checkBackupPolicy(params.actorRole)
+
+  const yearMonth = params.query.year_month
+  const scope = params.query.scope
+
+  const logs = await params.providers.domainStore.getAuditLogs('backup', yearMonth)
+
+  // completed=true only when a persisted matching details.result=completed log exists,
+  // using latest completed record. No completed record, including failed-only,
+  // returns completed=false and record=null.
+  const completedLogs = logs.filter((log) => {
+    if (scope && log.details?.scope !== scope) return false
+    return log.details?.result === 'completed'
+  })
+
+  if (completedLogs.length === 0) {
+    return {
+      completed: false,
+      record: null,
+    }
+  }
+
+  // DomainStore.getAuditLogs invariant guarantees newest-first for all adapters.
+  const latestLog = completedLogs[0]
+
+  const ym = latestLog.entity_id || yearMonth
+  if (!isValidRealYearMonth(ym)) {
+    throw AppError.internal('Persisted backup audit log contains invalid entity_id year_month.')
+  }
+
+  const parseResult = backupLogDetailsSchema.safeParse(latestLog.details)
+  if (!parseResult.success) {
+    throw AppError.internal(
+      'Persisted backup audit log details are malformed or missing required fields.',
+    )
+  }
+
+  const details = parseResult.data
+  if (
+    !isValidDateInMonth(details.start_date, ym) ||
+    !isValidDateInMonth(details.end_date, ym) ||
+    details.start_date > details.end_date
+  ) {
+    throw AppError.internal('Persisted backup audit log contains invalid date range for month.')
+  }
+
+  const startDate = details.start_date
+  const endDate = details.end_date
+  const recordCount = (details.record_count ?? details.counts)!
+  const byteLength = (details.byte_length ?? details.bytes)!
+  const format = details.format
+  const recordScope = details.scope
+  const checksum = details.checksum
+  const actor = details.actor ?? latestLog.actor_id
+
+  const record: BackupStatusRecord = {
+    id: latestLog.id,
+    year_month: ym,
+    scope: recordScope,
+    format,
+    start_date: startDate,
+    end_date: endDate,
+    range: {
+      start_date: startDate,
+      end_date: endDate,
+    },
+    checksum,
+    record_count: recordCount,
+    counts: recordCount,
+    byte_length: byteLength,
+    bytes: byteLength,
+    result: 'completed',
+    actor_id: latestLog.actor_id,
+    actor,
+    created_at: latestLog.created_at,
+  }
+
+  return {
+    completed: true,
+    record,
+  }
 }

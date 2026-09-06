@@ -504,7 +504,17 @@ describe('PostgresDomainStore (Greenfield)', () => {
       const query = strings.join('?')
       if (query.includes('INSERT INTO audit_logs')) {
         insertedAudit = true
-        return []
+        return [
+          {
+            id: 'audit-1',
+            actor_id: 'admin-1',
+            action: 'bootstrap_school',
+            entity_type: 'school',
+            entity_id: 'school-1',
+            details: { name: 'SMKN 2' },
+            created_at: '2026-08-21T00:00:00Z',
+          },
+        ]
       }
       if (query.includes('FROM audit_logs')) {
         return [
@@ -523,7 +533,7 @@ describe('PostgresDomainStore (Greenfield)', () => {
     })
 
     const store = new PostgresDomainStore({ sql: mockSql })
-    await store.insertAuditLog({
+    const inserted = await store.insertAuditLog({
       actor_id: 'admin-1',
       action: 'bootstrap_school',
       entity_type: 'school',
@@ -532,6 +542,7 @@ describe('PostgresDomainStore (Greenfield)', () => {
     })
 
     expect(insertedAudit).toBe(true)
+    expect(inserted.id).toBe('audit-1')
 
     const logs = await store.getAuditLogs('school', 'school-1')
     expect(logs.length).toBe(1)

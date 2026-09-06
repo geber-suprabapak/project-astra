@@ -2,6 +2,7 @@ import postgres, { type Sql } from 'postgres'
 import { env } from '../../config/env.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { logger } from '../../lib/logging/logger.js'
+import { normalizeAttendanceRecord } from '../types.js'
 import type {
   Absence,
   AcademicPeriod,
@@ -214,7 +215,10 @@ export class PostgresDomainStore implements DomainStore {
         WHERE user_id = ${userId} AND date = ${dateWIB}
         ORDER BY created_at ASC
       `
-      return rows ?? []
+      return (rows ?? []).map((r) => ({
+        ...r,
+        status: r.status === 'Datang' ? 'Hadir' : r.status,
+      }))
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, userId, dateWIB }, 'Failed to query attendances')
@@ -558,7 +562,11 @@ export class PostgresDomainStore implements DomainStore {
       `
 
       const hasCheckedIn = attendances.some(
-        (r) => r.status === 'Hadir' || r.status === 'Terlambat' || r.action_type === 'check_in',
+        (r) =>
+          r.status === 'Hadir' ||
+          r.status === 'Terlambat' ||
+          r.status === 'Datang' ||
+          r.action_type === 'check_in',
       )
       const hasCheckedOut = attendances.some(
         (r) => r.status === 'Pulang' || r.action_type === 'check_out',
@@ -775,7 +783,10 @@ export class PostgresDomainStore implements DomainStore {
           RETURNING id, user_id, date, status, action_type, latitude, longitude, created_at::text
         `
         const deletedById = new Map(deleted.map((record) => [record.id, record]))
-        return ids.map((id) => deletedById.get(id)!).filter(Boolean)
+        return ids
+          .map((id) => deletedById.get(id)!)
+          .filter(Boolean)
+          .map((record) => normalizeAttendanceRecord(record))
       })
     } catch (err) {
       if (err instanceof AppError) throw err
@@ -787,27 +798,63 @@ export class PostgresDomainStore implements DomainStore {
   async listAttendances(filter?: {
     userId?: string
     date?: string
+    startDate?: string
+    endDate?: string
     status?: string
     actionType?: string
     limit?: number
+    offset?: number
   }): Promise<AttendanceRecord[]> {
     try {
-      const limit = Math.min(Math.max(filter?.limit ?? 50, 1), 100)
+      const limit = Math.min(Math.max(filter?.limit ?? 50, 1), 101)
+      const offset = Math.max(filter?.offset ?? 0, 0)
       const rows = await this.sql<AttendanceRecord[]>`
         SELECT id, user_id, date, status, action_type, latitude, longitude, created_at::text
         FROM attendances
         WHERE 1 = 1
           ${filter?.userId ? this.sql`AND user_id = ${filter.userId}` : this.sql``}
           ${filter?.date ? this.sql`AND date = ${filter.date}` : this.sql``}
-          ${filter?.status ? this.sql`AND status = ${filter.status}` : this.sql``}
-          ${filter?.actionType ? this.sql`AND action_type = ${filter.actionType}` : this.sql``}
-        ORDER BY created_at DESC
+          ${filter?.startDate ? this.sql`AND date >= ${filter.startDate}` : this.sql``}
+          ${filter?.endDate ? this.sql`AND date <= ${filter.endDate}` : this.sql``}
+          ${
+            filter?.status
+              ? filter.status === 'Hadir'
+                ? this.sql`AND status IN ('Hadir', 'Datang')`
+                : this.sql`AND status = ${filter.status}`
+              : this.sql``
+          }
+          ${
+            filter?.actionType
+              ? filter.actionType === 'check_in'
+                ? this
+                    .sql`AND (action_type = 'check_in' OR (action_type IS NULL AND status IN ('Hadir', 'Terlambat', 'Datang')))`
+                : this.sql`AND action_type = ${filter.actionType}`
+              : this.sql``
+          }
+        ORDER BY created_at DESC, id DESC
         LIMIT ${limit}
+        OFFSET ${offset}
       `
-      return rows
+      return (rows ?? []).map((r) => normalizeAttendanceRecord(r))
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, filter }, 'Failed to list attendances')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getAttendance(id: string): Promise<AttendanceRecord | null> {
+    try {
+      const rows = await this.sql<AttendanceRecord[]>`
+        SELECT id, user_id, date, status, action_type, latitude, longitude, created_at::text
+        FROM attendances
+        WHERE id = ${id}
+        LIMIT 1
+      `
+      return rows[0] ? normalizeAttendanceRecord(rows[0]) : null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id }, 'Failed to get attendance')
       throw AppError.internal('An unexpected database error occurred.')
     }
   }
@@ -1886,13 +1933,19 @@ export class PostgresDomainStore implements DomainStore {
     }
   }
 
-  async insertAuditLog(entry: AuditLogEntry): Promise<void> {
+  async insertAuditLog(entry: AuditLogEntry): Promise<AuditLog> {
     try {
       const detailsJson = entry.details ? JSON.stringify(entry.details) : null
-      await this.sql`
+      const rows = await this.sql<AuditLog[]>`
         INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, details)
         VALUES (${entry.actor_id ?? null}, ${entry.action}, ${entry.entity_type}, ${entry.entity_id ?? null}, ${detailsJson}::jsonb)
+        RETURNING id, actor_id, action, entity_type, entity_id, details, created_at::text
       `
+      const inserted = rows[0]
+      if (!inserted) {
+        throw AppError.internal('Failed to return inserted audit log record.')
+      }
+      return inserted
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, entry }, 'Failed to insert audit log')

@@ -52,6 +52,7 @@ import {
   type Location,
   type NotificationRecord,
   type ObjectStorage,
+  normalizeAttendanceRecord,
   type PasswordResetCode,
   type Permission,
   type Permit,
@@ -413,9 +414,14 @@ export class MemoryDomainStore implements DomainStore {
   }
 
   async getTodayAbsences(userId: string, dateWIB: string): Promise<Absence[]> {
-    return this.absences.filter(
-      (a) => a.user_id === userId && (a.date === dateWIB || a.created_at.startsWith(dateWIB)),
-    )
+    return this.absences
+      .filter(
+        (a) => a.user_id === userId && (a.date === dateWIB || a.created_at.startsWith(dateWIB)),
+      )
+      .map((a) => ({
+        ...a,
+        status: a.status === 'Datang' ? 'Hadir' : a.status,
+      }))
   }
 
   async insertAttendance(data: InsertAttendanceData): Promise<Absence> {
@@ -1268,7 +1274,13 @@ export class MemoryDomainStore implements DomainStore {
         a.user_id === params.userId && (a.date === todayWIB || a.created_at.startsWith(todayWIB)),
     )
 
-    const hasCheckedIn = attendances.some((r) => r.status === 'Hadir' || r.status === 'Terlambat')
+    const hasCheckedIn = attendances.some(
+      (r) =>
+        r.status === 'Hadir' ||
+        r.status === 'Terlambat' ||
+        r.status === 'Datang' ||
+        r.action_type === 'check_in',
+    )
     const hasCheckedOut = attendances.some((r) => r.status === 'Pulang')
     const hasAbsent = attendances.some((r) => r.status === 'Alpha')
 
@@ -1422,15 +1434,18 @@ export class MemoryDomainStore implements DomainStore {
     }
 
     const recordsById = new Map(records.map((record) => [record.id, record]))
-    return ids.map((id) => ({ ...recordsById.get(id)! }))
+    return ids.map((id) => normalizeAttendanceRecord(recordsById.get(id)!))
   }
 
   async listAttendances(filter?: {
     userId?: string
     date?: string
+    startDate?: string
+    endDate?: string
     status?: string
     actionType?: string
     limit?: number
+    offset?: number
   }): Promise<AttendanceRecord[]> {
     let items = [...this.attendancesList]
     if (filter?.userId) {
@@ -1439,14 +1454,44 @@ export class MemoryDomainStore implements DomainStore {
     if (filter?.date) {
       items = items.filter((a) => a.date === filter.date)
     }
+    if (filter?.startDate) {
+      items = items.filter((a) => a.date >= filter.startDate!)
+    }
+    if (filter?.endDate) {
+      items = items.filter((a) => a.date <= filter.endDate!)
+    }
     if (filter?.status) {
-      items = items.filter((a) => a.status === filter.status)
+      items = items.filter((a) =>
+        filter.status === 'Hadir'
+          ? // SAFETY: Legacy records may have unnormalized status 'Datang'
+            a.status === 'Hadir' || (a.status as string) === 'Datang'
+          : a.status === filter.status,
+      )
     }
     if (filter?.actionType) {
-      items = items.filter((a) => a.action_type === filter.actionType)
+      items = items.filter((a) =>
+        filter.actionType === 'check_in'
+          ? a.action_type === 'check_in' ||
+            (a.action_type === null &&
+              (a.status === 'Hadir' ||
+                a.status === 'Terlambat' ||
+                // SAFETY: Legacy records may have unnormalized status 'Datang'
+                (a.status as string) === 'Datang'))
+          : a.action_type === filter.actionType,
+      )
     }
-    const limit = Math.min(Math.max(filter?.limit ?? 50, 1), 100)
-    return items.slice(0, limit).map((a) => ({ ...a }))
+    items.sort((a, b) => {
+      const createdAtOrder = b.created_at.localeCompare(a.created_at)
+      return createdAtOrder || b.id.localeCompare(a.id)
+    })
+    const limit = Math.min(Math.max(filter?.limit ?? 50, 1), 101)
+    const offset = Math.max(filter?.offset ?? 0, 0)
+    return items.slice(offset, offset + limit).map((a) => normalizeAttendanceRecord(a))
+  }
+
+  async getAttendance(id: string): Promise<AttendanceRecord | null> {
+    const item = this.attendancesList.find((a) => a.id === id)
+    return item ? normalizeAttendanceRecord(item) : null
   }
 
   async getSchool(): Promise<School | null> {
@@ -1644,21 +1689,22 @@ export class MemoryDomainStore implements DomainStore {
     }
   }
 
-  async insertAuditLog(entry: AuditLogEntry): Promise<void> {
+  async insertAuditLog(entry: AuditLogEntry): Promise<AuditLog> {
     const log: AuditLog = {
       id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       actor_id: entry.actor_id ?? null,
       action: entry.action,
       entity_type: entry.entity_type,
       entity_id: entry.entity_id ?? null,
-      details: entry.details ?? null,
+      details: entry.details ? JSON.parse(JSON.stringify(entry.details)) : null,
       created_at: new Date().toISOString(),
     }
     this.auditLogs.push(log)
+    return log
   }
 
   async getAuditLogs(entityType?: string, entityId?: string): Promise<AuditLog[]> {
-    return this.auditLogs.filter((log) => {
+    return [...this.auditLogs].reverse().filter((log) => {
       if (entityType && log.entity_type !== entityType) return false
       if (entityId && log.entity_id !== entityId) return false
       return true

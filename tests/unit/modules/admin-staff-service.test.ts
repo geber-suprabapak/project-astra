@@ -164,7 +164,8 @@ describe('admin staff, roles, and permissions service unit tests (Ticket 05)', (
 
       const auditLogs = await domainStore.getAuditLogs('role', role.id)
       expect(auditLogs.length).toBe(2)
-      expect(auditLogs[1].action).toBe('update_role')
+      expect(auditLogs[0].action).toBe('update_role')
+      expect(auditLogs[1].action).toBe('create_role')
     })
 
     it('school_admin is forbidden from creating roles, updating roles, and defining permissions', async () => {
@@ -349,7 +350,8 @@ describe('admin staff, roles, and permissions service unit tests (Ticket 05)', (
 
       const auditLogs = await domainStore.getAuditLogs('profile', staff.user_id)
       expect(auditLogs.length).toBe(2)
-      expect(auditLogs[1].action).toBe('update_staff')
+      expect(auditLogs[0].action).toBe('update_staff')
+      expect(auditLogs[1].action).toBe('create_staff')
     })
 
     it('disabling staff profile revokes active sessions', async () => {

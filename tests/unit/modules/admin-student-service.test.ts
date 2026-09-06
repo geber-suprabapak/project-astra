@@ -106,7 +106,7 @@ describe('unit: admin student management service', () => {
     expect(approvedStudents[0].user_id).toBe('s2')
   })
 
-  it('rejects list students for non-admin actors', async () => {
+  it('rejects list students for non-privileged actors', async () => {
     const providers = createTestProviders()
 
     await expect(
@@ -118,10 +118,26 @@ describe('unit: admin student management service', () => {
 
     await expect(
       listStudents({
-        actorRole: 'teacher',
+        actorRole: null,
         providers,
       }),
     ).rejects.toThrowError(AppError)
+  })
+
+  it('allows list students for teacher and staff roles', async () => {
+    const providers = createTestProviders()
+
+    const teacherStudents = await listStudents({
+      actorRole: 'teacher',
+      providers,
+    })
+    expect(teacherStudents).toEqual([])
+
+    const staffStudents = await listStudents({
+      actorRole: 'staff',
+      providers,
+    })
+    expect(staffStudents).toEqual([])
   })
 
   it('retrieves individual student profile by user_id', async () => {

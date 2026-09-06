@@ -61,8 +61,7 @@ export interface AttendanceStatus {
 
 export function computeAttendanceStatus(absences: Absence[]): AttendanceStatus {
   const inRec = absences.find(
-    (r): r is Absence & { status: 'Hadir' | 'Terlambat' } =>
-      r.status === 'Hadir' || r.status === 'Terlambat',
+    (r) => r.status === 'Hadir' || r.status === 'Terlambat' || r.status === 'Datang',
   )
   const outRec = absences.find((r) => r.status === 'Pulang')
   const absentRec = absences.find((r) => r.status === 'Alpha')
@@ -73,7 +72,11 @@ export function computeAttendanceStatus(absences: Absence[]): AttendanceStatus {
 
   const hasCheckedIn = Boolean(inRec)
   const hasCheckedOut = Boolean(outRec)
-  const checkInStatus = inRec ? inRec.status : null
+  const checkInStatus: 'Hadir' | 'Terlambat' | null = inRec
+    ? inRec.status === 'Terlambat'
+      ? 'Terlambat'
+      : 'Hadir'
+    : null
 
   return {
     today: hasCheckedIn ? 'present' : 'pending',
@@ -294,7 +297,9 @@ export function computePrimaryAction(params: {
 // ---------------------------------------------------------------------------
 
 function computeTotalWorkHours(absences: Absence[]): number | null {
-  const checkIn = absences.find((r) => r.status === 'Hadir' || r.status === 'Terlambat')
+  const checkIn = absences.find(
+    (r) => r.status === 'Hadir' || r.status === 'Terlambat' || r.status === 'Datang',
+  )
   const checkOut = absences.find((r) => r.status === 'Pulang')
   if (!checkIn || !checkOut) return null
 
@@ -429,7 +434,9 @@ export async function getDashboard(
     : null
 
   // Extract check-in/out times and total hours
-  const checkInRecord = absences.find((r) => r.status === 'Hadir' || r.status === 'Terlambat')
+  const checkInRecord = absences.find(
+    (r) => r.status === 'Hadir' || r.status === 'Terlambat' || r.status === 'Datang',
+  )
   const checkOutRecord = absences.find((r) => r.status === 'Pulang')
 
   return {

@@ -18,6 +18,7 @@ import {
 } from './modules/auth/routes.js'
 import { defaultProviders } from './providers/index.js'
 import type { AppProviders } from './providers/types.js'
+import { errorResponse } from './lib/http/responses.js'
 import { env } from './config/env.js'
 import { logger } from './lib/logging/logger.js'
 import type { AppEnv } from './types/context.js'
@@ -63,25 +64,6 @@ export function createApp(deps: AppDeps = {}) {
     }),
   )
 
-  // Reject unsupported API contracts before any domain route executes.
-  app.use('/v1/*', async (c, next) => {
-    if (
-      env.nodeEnv !== 'test' &&
-      c.req.header('X-Astra-Contract-Version') !== API_CONTRACT_VERSION
-    ) {
-      return c.json(
-        {
-          success: false,
-          error: {
-            code: 'CONTRACT_VERSION_UNSUPPORTED',
-            message: 'Unsupported Astra API contract version.',
-          },
-        },
-        426,
-      )
-    }
-    await next()
-  })
   app.use('*', async (c, next) => {
     await next()
     c.header('X-Astra-Contract-Version', API_CONTRACT_VERSION)
@@ -89,6 +71,25 @@ export function createApp(deps: AppDeps = {}) {
     c.header('X-Frame-Options', 'DENY')
     c.header('Referrer-Policy', 'no-referrer')
     c.header('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'")
+  })
+
+  // Reject unsupported API contracts before any domain route executes.
+  app.use('/v1/*', async (c, next) => {
+    const versionHeader = c.req.header('X-Astra-Contract-Version')
+    if (
+      (versionHeader && versionHeader !== API_CONTRACT_VERSION) ||
+      (!versionHeader && env.nodeEnv !== 'test')
+    ) {
+      return errorResponse(
+        c,
+        {
+          code: 'CONTRACT_VERSION_UNSUPPORTED',
+          message: 'Unsupported Astra API contract version.',
+        },
+        426,
+      )
+    }
+    await next()
   })
 
   // Request logging
@@ -159,8 +160,12 @@ export function createApp(deps: AppDeps = {}) {
 
   // 404 fallback
   app.notFound((c) =>
-    c.json(
-      { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'Route not found.' } },
+    errorResponse(
+      c,
+      {
+        code: 'RESOURCE_NOT_FOUND',
+        message: 'Route not found.',
+      },
       404,
     ),
   )

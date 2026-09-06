@@ -614,8 +614,17 @@ export async function getAttendanceCalendar(params: {
   }
 
   for (const [date, records] of byDate) {
-    const checkIn = records.find((record) => record.action_type === 'check_in')
-    const checkOut = records.find((record) => record.action_type === 'check_out')
+    const checkIn = records.find(
+      (record) =>
+        record.action_type === 'check_in' ||
+        record.status === 'Hadir' ||
+        record.status === 'Terlambat' ||
+        // SAFETY: Legacy records may have unnormalized status 'Datang'
+        (record.status as string) === 'Datang',
+    )
+    const checkOut = records.find(
+      (record) => record.action_type === 'check_out' || record.status === 'Pulang',
+    )
     const late = records.some((record) => record.status === 'Terlambat')
     const absent = records.some((record) => record.status === 'Alpha')
     items.push({
@@ -655,7 +664,15 @@ export async function getAttendanceCalendar(params: {
     start_date: startDate,
     end_date: endDate,
     stats: {
-      hadir: monthAttendance.filter((record) => record.status === 'Hadir').length > 0 ? 1 : 0,
+      hadir:
+        monthAttendance.filter(
+          (record) =>
+            record.status === 'Hadir' ||
+            // SAFETY: Legacy records may have unnormalized status 'Datang'
+            (record.status as string) === 'Datang',
+        ).length > 0
+          ? 1
+          : 0,
       terlambat:
         monthAttendance.filter((record) => record.status === 'Terlambat').length > 0 ? 1 : 0,
       alpha: monthAttendance.filter((record) => record.status === 'Alpha').length > 0 ? 1 : 0,

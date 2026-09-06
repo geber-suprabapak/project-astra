@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-`src/` contains the BFF runtime. `src/app.ts` wires middleware and routes with injectable provider seams, `src/index.ts` starts the server, `src/routes/v1-mobile.ts` mounts the mobile API, and `src/modules/*` holds feature areas such as `dashboard`, `attendance`, `enrollment`, `permits`, `profile`, `time`, and `health`. Pluggable provider seams live in `src/providers/` (`DomainStore` for PostgreSQL, `ObjectStorage` for S3, `IdentityProvider` for OIDC/Logto), shared clients live in `src/clients/`, config in `src/config/`, middleware in `src/middleware/`, and shared HTTP/error helpers in `src/lib/`. Tests live under `tests/unit/` and `tests/integration/`. Planning docs are kept in `plan/`.
+`src/` contains the BFF runtime. `src/app.ts` wires middleware and routes with injectable provider seams, `src/index.ts` starts the server, `src/routes/v1-mobile.ts` mounts the mobile API, and `src/modules/*` holds feature areas including `admin`, `attendance`, `auth`, `dashboard`, `enrollment`, `files`, `health`, `notifications`, `permits`, `profile`, and `time`. Pluggable provider seams live in `src/providers/` (`DomainStore` for PostgreSQL, `ObjectStorage` for S3, `IdentityProvider` for OIDC/Logto), shared clients live in `src/clients/`, config in `src/config/`, middleware in `src/middleware/`, and shared HTTP/error helpers in `src/lib/`. Tests live under `tests/unit/` and `tests/integration/`. Planning docs are kept in `plan/`.
 
 ## Build, Test, and Development Commands
 

@@ -1,6 +1,7 @@
 import type { AttendanceStatus } from '../dashboard/service.js'
 
 export { computeAttendanceStatus } from '../dashboard/service.js'
+export { normalizeAttendanceRecord } from '../../providers/types.js'
 
 /** Determine action type from attendance status */
 export function computeActionType(status: AttendanceStatus): 'check_in' | 'check_out' | 'done' {
