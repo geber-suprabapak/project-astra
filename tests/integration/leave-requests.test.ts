@@ -387,10 +387,11 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     const leave1 = (await create1Res.json()).data
 
     // Student creates leave request 2
+    const student2Token = tokenFor({ sub: 'student-2', roles: ['student'], scope: 'openid profile' })
     const create2Res = await app.request('/v1/mobile/leave-requests', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${studentToken}`,
+        Authorization: `Bearer ${student2Token}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -409,9 +410,10 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     expect(adminListRes.status).toBe(200)
     const adminListBody = await adminListRes.json()
     expect(adminListBody.data).toHaveLength(2)
-    expect(adminListBody.data[0].student_name).toBe('Budi Santoso')
-    expect(adminListBody.data[0].student_nis).toBe('1001')
-    expect(adminListBody.data[0].student_class).toBe('XII RPL 1')
+    const budi = adminListBody.data.find((item: { user_id: string }) => item.user_id === 'student-1')
+    expect(budi.student_name).toBe('Budi Santoso')
+    expect(budi.student_nis).toBe('1001')
+    expect(budi.student_class).toBe('XII RPL 1')
 
     // Admin approves leave request 1
     const approveRes = await app.request(`/v1/admin/leave-requests/${leave1.id}/approve`, {
@@ -710,5 +712,169 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
       },
     )
     expect(notFoundRes.status).toBe(404)
+  })
+
+  it('rejects pending and overlapping requests atomically and reports every approval attendance conflict', async () => {
+    const { domainStore, identityProvider, app } = createIntegrationEnvironment()
+    await setupTestUsers(domainStore, identityProvider)
+
+    const studentToken = tokenFor({ sub: 'student-1', roles: ['student'], scope: 'openid profile' })
+    const adminToken = tokenFor({
+      sub: 'admin-1',
+      roles: ['school_admin'],
+      scope: 'openid profile admin:read leave:read leave:approve',
+      mfa_verified: true,
+      must_change_password: false,
+    })
+
+    const create = (date: string) =>
+      app.request('/v1/mobile/leave-requests', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${studentToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          category: 'sakit',
+          description: `Permohonan sakit ${date}`,
+          date,
+        }),
+      })
+
+    const createAdmin = (date: string) =>
+      app.request('/v1/admin/leave-requests', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: 'student-1',
+          category: 'sakit',
+          description: `Permohonan sakit ${date}`,
+          date,
+        }),
+      })
+
+    const first = await create('2026-08-20')
+    expect(first.status).toBe(201)
+    const firstBody = await first.json()
+
+    const pending = await create('2026-08-21')
+    expect(pending.status).toBe(409)
+    const pendingBody = await pending.json()
+    expect(pendingBody.error.code).toBe('LEAVE_REQUEST_PENDING')
+    expect(pendingBody.error.details).toMatchObject({
+      pending_request_id: firstBody.data.id,
+      requested_start_date: '2026-08-21',
+    })
+
+    const reject = await app.request(`/v1/admin/leave-requests/${firstBody.data.id}/reject`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ reason: 'Silakan ajukan ulang dengan tanggal yang benar.' }),
+    })
+    expect(reject.status).toBe(200)
+
+    const approved = await create('2026-08-21')
+    expect(approved.status).toBe(201)
+    const approvedBody = await approved.json()
+    const approve = await app.request(`/v1/admin/leave-requests/${approvedBody.data.id}/approve`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ duration_days: 2 }),
+    })
+    expect(approve.status).toBe(200)
+
+    const boundary = await create('2026-08-22')
+    expect(boundary.status).toBe(409)
+    const boundaryBody = await boundary.json()
+    expect(boundaryBody.error.code).toBe('LEAVE_PERIOD_OVERLAP')
+    expect(boundaryBody.error.details.overlapping_request_id).toBe(approvedBody.data.id)
+
+    const future = await create('2026-08-23')
+    expect(future.status).toBe(201)
+    const futureBody = await future.json()
+    const rejectFuture = await app.request(`/v1/admin/leave-requests/${futureBody.data.id}/reject`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ reason: 'Disiapkan ulang untuk pengujian konflik kehadiran.' }),
+    })
+    expect(rejectFuture.status).toBe(200)
+
+    await domainStore.insertAttendance({
+      user_id: 'student-1',
+      date: '2026-08-24',
+      status: 'Hadir',
+      action_type: 'check_in',
+    })
+    await domainStore.insertAttendance({
+      user_id: 'student-1',
+      date: '2026-08-26',
+      status: 'Pulang',
+      action_type: 'check_out',
+    })
+
+    const conflictRequest = await createAdmin('2026-08-24')
+    expect(conflictRequest.status).toBe(201)
+    const conflictBody = await conflictRequest.json()
+    const conflictApprove = await app.request(
+      `/v1/admin/leave-requests/${conflictBody.data.id}/approve`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ duration_days: 3 }),
+      },
+    )
+    expect(conflictApprove.status).toBe(409)
+    const conflictError = await conflictApprove.json()
+    expect(conflictError.error.code).toBe('LEAVE_APPROVAL_CONFLICT')
+    expect(conflictError.error.details.conflicting_dates).toEqual(['2026-08-24', '2026-08-26'])
+
+    const unchanged = await app.request(`/v1/admin/leave-requests/${conflictBody.data.id}`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    })
+    const unchangedBody = await unchanged.json()
+    expect(unchangedBody.data.approval_status).toBe('pending')
+    expect(unchangedBody.data.original_end_date).toBeNull()
+    expect(unchangedBody.data.effective_end_date).toBeNull()
+    expect((await domainStore.getTodayAbsences('student-1', '2026-08-24')).map((row) => row.date)).toEqual([
+      '2026-08-24',
+    ])
+    expect((await domainStore.getTodayAbsences('student-1', '2026-08-26')).map((row) => row.date)).toEqual([
+      '2026-08-26',
+    ])
+  })
+
+  it('allows only one concurrent pending request for a student', async () => {
+    const { domainStore, identityProvider, app } = createIntegrationEnvironment()
+    await setupTestUsers(domainStore, identityProvider)
+    const studentToken = tokenFor({ sub: 'student-1', roles: ['student'], scope: 'openid profile' })
+    const request = (date: string) =>
+      app.request('/v1/mobile/leave-requests', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${studentToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ category: 'pergi', description: 'Permohonan bersamaan', date }),
+      })
+
+    const responses = await Promise.all([request('2026-09-01'), request('2026-09-02')])
+    expect(responses.map((response) => response.status).sort()).toEqual([201, 409])
+    const items = await domainStore.listLeaveRequests({ userId: 'student-1' })
+    expect(items).toHaveLength(1)
   })
 })

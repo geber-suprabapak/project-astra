@@ -341,6 +341,23 @@ function calculateDistanceMeters(lat1: number, lon1: number, lat2: number, lon2:
   return R * c
 }
 
+function addCalendarDays(date: string, days: number): string {
+  return new Date(Date.parse(`${date.slice(0, 10)}T00:00:00Z`) + days * 86_400_000)
+    .toISOString()
+    .slice(0, 10)
+}
+
+function isPhysicalAttendance(status: string, actionType?: string | null): boolean {
+  return (
+    actionType === 'check_in' ||
+    actionType === 'check_out' ||
+    status === 'Hadir' ||
+    status === 'Terlambat' ||
+    status === 'Pulang' ||
+    status === 'Datang'
+  )
+}
+
 export class MemoryDomainStore implements DomainStore {
   public profiles = new Map<string, UserProfile>()
   public absences: Absence[] = []
@@ -1055,27 +1072,68 @@ export class MemoryDomainStore implements DomainStore {
   }
 
   async insertPermit(data: InsertPermitData): Promise<Permit> {
-    const permit: Permit = {
-      id: `permit-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    const created = await this.createLeaveRequest({
       user_id: data.user_id,
-      kategori_izin: data.kategori_izin,
-      deskripsi: data.deskripsi,
+      category: data.kategori_izin,
+      description: data.deskripsi,
       status: data.status,
-      link_foto: data.link_foto,
-      tanggal: data.tanggal,
+      attachment_url: data.link_foto,
+      date: data.tanggal,
       approval_status: 'pending',
-      created_at: new Date().toISOString(),
-      rejection_reason: null,
-      rejected_at: null,
-      ...getLeavePeriodFields({ date: data.tanggal, approval_status: 'pending' }),
+    })
+    return {
+      id: created.id,
+      user_id: created.user_id,
+      kategori_izin: created.category,
+      deskripsi: created.description,
+      status: created.status,
+      link_foto: created.attachment_url,
+      tanggal: created.date,
+      approval_status: created.approval_status,
+      created_at: created.created_at,
+      updated_at: created.updated_at,
+      rejection_reason: created.rejection_reason,
+      rejected_at: created.rejected_at,
+      requested_start_date: created.requested_start_date,
+      original_end_date: created.original_end_date,
+      effective_end_date: created.effective_end_date,
+      duration_days: created.duration_days,
     }
-    this.permits.push(permit)
-    return permit
   }
 
   async createLeaveRequest(data: CreateLeaveRequestData): Promise<LeaveRequest> {
     const approvalStatus = data.approval_status ?? 'approved'
     const status = data.status !== undefined ? data.status : approvalStatus === 'approved'
+    const requestedStart = data.date.slice(0, 10)
+    const pending = this.permits
+      .filter((permit) => permit.user_id === data.user_id && permit.approval_status === 'pending')
+      .sort((a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? '') || a.id.localeCompare(b.id))[0]
+    if (pending) {
+      throw AppError.leaveRequestPending({
+        pending_request_id: pending.id,
+        requested_start_date: requestedStart,
+      })
+    }
+
+    const overlapping = this.permits
+      .filter((permit) => {
+        if (permit.user_id !== data.user_id || permit.approval_status !== 'approved') return false
+        const start = permit.tanggal.slice(0, 10)
+        const end = permit.effective_end_date ?? permit.original_end_date ?? start
+        return requestedStart >= start && requestedStart <= end
+      })
+      .sort((a, b) => a.tanggal.localeCompare(b.tanggal) || a.id.localeCompare(b.id))[0]
+    if (overlapping) {
+      const start = overlapping.tanggal.slice(0, 10)
+      const end = overlapping.effective_end_date ?? overlapping.original_end_date ?? start
+      throw AppError.leavePeriodOverlap({
+        overlapping_request_id: overlapping.id,
+        overlapping_start_date: start,
+        overlapping_end_date: end,
+        requested_start_date: requestedStart,
+      })
+    }
+
     const now = new Date().toISOString()
     const id = `leave-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
     const permit: Permit = {
@@ -1210,6 +1268,41 @@ export class MemoryDomainStore implements DomainStore {
     if (!p) {
       throw AppError.notFound('Leave request')
     }
+
+    if (params.approvalStatus === 'approved') {
+      const durationDays = params.durationDays ?? 1
+      const start = p.tanggal.slice(0, 10)
+      const end = addCalendarDays(start, durationDays - 1)
+      const conflictDates = new Set<string>()
+      for (const attendance of this.attendancesList) {
+        if (
+          attendance.user_id === p.user_id &&
+          isPhysicalAttendance(attendance.status, attendance.action_type) &&
+          attendance.date.slice(0, 10) >= start &&
+          attendance.date.slice(0, 10) <= end
+        ) {
+          conflictDates.add(attendance.date.slice(0, 10))
+        }
+      }
+      for (const absence of this.absences) {
+        if (
+          absence.user_id === p.user_id &&
+          isPhysicalAttendance(absence.status) &&
+          (absence.date ?? absence.created_at).slice(0, 10) >= start &&
+          (absence.date ?? absence.created_at).slice(0, 10) <= end
+        ) {
+          conflictDates.add((absence.date ?? absence.created_at).slice(0, 10))
+        }
+      }
+      if (conflictDates.size > 0) {
+        throw AppError.leaveApprovalConflict({
+          conflicting_dates: [...conflictDates].sort(),
+          requested_start_date: start,
+          requested_end_date: end,
+        })
+      }
+    }
+
     p.approval_status = params.approvalStatus
     p.status = params.status !== undefined ? params.status : params.approvalStatus === 'approved'
     if (params.rejectionReason !== undefined) {

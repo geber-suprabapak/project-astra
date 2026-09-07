@@ -329,7 +329,7 @@ export class PostgresDomainStore implements DomainStore {
     try {
       const rows = await this.sql<Permit[]>`
         SELECT id, user_id, category AS kategori_izin, description AS deskripsi,
-               status, attachment_url AS link_foto, date::text AS tanggal,
+               status, attachment_url AS link_foto, (date AT TIME ZONE 'Asia/Jakarta')::date::text AS tanggal,
                approval_status, original_end_date::text, effective_end_date::text,
                duration_days, created_at::text, rejection_reason, rejected_at::text
         FROM leave_requests
@@ -354,33 +354,32 @@ export class PostgresDomainStore implements DomainStore {
   }
 
   async insertPermit(data: InsertPermitData): Promise<Permit> {
-    try {
-      const rows = await this.sql<Permit[]>`
-        INSERT INTO leave_requests (user_id, category, description, status, attachment_url, date)
-        VALUES (${data.user_id}, ${data.kategori_izin}, ${data.deskripsi}, ${data.status}, ${data.link_foto}, ${data.tanggal})
-        RETURNING id, user_id, category AS kategori_izin, description AS deskripsi,
-                   status, attachment_url AS link_foto, date::text AS tanggal,
-                   approval_status, original_end_date::text, effective_end_date::text,
-                   duration_days, created_at::text, rejection_reason, rejected_at::text
-      `
-      if (!rows || rows.length === 0) {
-        logger.error({ data }, 'Failed to insert permit: empty return')
-        throw AppError.internal('Failed to insert permit.')
-      }
-      return {
-        ...rows[0],
-        ...getLeavePeriodFields({
-          date: rows[0].tanggal,
-          approval_status: rows[0].approval_status,
-          original_end_date: rows[0].original_end_date,
-          effective_end_date: rows[0].effective_end_date,
-          duration_days: rows[0].duration_days,
-        }),
-      }
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      logger.error({ err, data }, 'Failed to insert permit')
-      throw AppError.internal('An unexpected database error occurred.')
+    const created = await this.createLeaveRequest({
+      user_id: data.user_id,
+      category: data.kategori_izin,
+      description: data.deskripsi,
+      status: data.status,
+      attachment_url: data.link_foto,
+      date: data.tanggal,
+      approval_status: 'pending',
+    })
+    return {
+      id: created.id,
+      user_id: created.user_id,
+      kategori_izin: created.category,
+      deskripsi: created.description,
+      status: created.status,
+      link_foto: created.attachment_url,
+      tanggal: created.date,
+      approval_status: created.approval_status,
+      created_at: created.created_at,
+      updated_at: created.updated_at,
+      rejection_reason: created.rejection_reason,
+      rejected_at: created.rejected_at,
+      requested_start_date: created.requested_start_date,
+      original_end_date: created.original_end_date,
+      effective_end_date: created.effective_end_date,
+      duration_days: created.duration_days,
     }
   }
 
@@ -392,19 +391,59 @@ export class PostgresDomainStore implements DomainStore {
         date: data.date,
         approval_status: approvalStatus,
       })
-      const rows = await this.sql<LeaveRequest[]>`
-        INSERT INTO leave_requests (user_id, category, description, status, attachment_url, date, approval_status, original_end_date, effective_end_date, duration_days)
-        VALUES (${data.user_id}, ${data.category}, ${data.description}, ${status}, ${data.attachment_url ?? null}, ${data.date}, ${approvalStatus}, ${periodFields.original_end_date}, ${periodFields.effective_end_date}, ${periodFields.duration_days})
-        RETURNING id, user_id, category, description, status,
-                   attachment_url, date::text AS date, approval_status,
-                   original_end_date::text, effective_end_date::text, duration_days,
-                   rejection_reason, rejected_at::text, created_at::text, updated_at::text
-      `
-      if (!rows || rows.length === 0) {
+      const dateOnly = data.date.slice(0, 10)
+      const created = await this.sql.begin(async (sql) => {
+        await sql`SELECT pg_advisory_xact_lock(hashtextextended(${data.user_id}, 0))`
+
+        const pending = await sql<{ id: string }[]>`
+          SELECT id
+          FROM leave_requests
+          WHERE user_id = ${data.user_id} AND approval_status = 'pending'
+          ORDER BY created_at ASC, id ASC
+          LIMIT 1
+        `
+        if (pending[0]) {
+          throw AppError.leaveRequestPending({
+            pending_request_id: pending[0].id,
+            requested_start_date: dateOnly,
+          })
+        }
+
+        const overlapping = await sql<{ id: string; start_date: string; end_date: string }[]>`
+          SELECT id,
+                 (date AT TIME ZONE 'Asia/Jakarta')::date::text AS start_date,
+                 COALESCE(effective_end_date, original_end_date, (date AT TIME ZONE 'Asia/Jakarta')::date)::text AS end_date
+          FROM leave_requests
+          WHERE user_id = ${data.user_id}
+            AND approval_status = 'approved'
+            AND ${dateOnly}::date BETWEEN (date AT TIME ZONE 'Asia/Jakarta')::date
+              AND COALESCE(effective_end_date, original_end_date, (date AT TIME ZONE 'Asia/Jakarta')::date)
+          ORDER BY start_date ASC, id ASC
+          LIMIT 1
+        `
+        if (overlapping[0]) {
+          throw AppError.leavePeriodOverlap({
+            overlapping_request_id: overlapping[0].id,
+            overlapping_start_date: overlapping[0].start_date,
+            overlapping_end_date: overlapping[0].end_date,
+            requested_start_date: dateOnly,
+          })
+        }
+
+        const rows = await sql<LeaveRequest[]>`
+          INSERT INTO leave_requests (user_id, category, description, status, attachment_url, date, approval_status, original_end_date, effective_end_date, duration_days)
+          VALUES (${data.user_id}, ${data.category}, ${data.description}, ${status}, ${data.attachment_url ?? null}, ${data.date}, ${approvalStatus}, ${periodFields.original_end_date}, ${periodFields.effective_end_date}, ${periodFields.duration_days})
+          RETURNING id, user_id, category, description, status,
+                     attachment_url, (date AT TIME ZONE 'Asia/Jakarta')::date::text AS date, approval_status,
+                     original_end_date::text, effective_end_date::text, duration_days,
+                     rejection_reason, rejected_at::text, created_at::text, updated_at::text
+        `
+        return rows[0]
+      })
+      if (!created) {
         logger.error({ data }, 'Failed to insert leave request: empty return')
         throw AppError.internal('Failed to create leave request.')
       }
-      const created = rows[0]
       Object.assign(
         created,
         getLeavePeriodFields({
@@ -434,7 +473,7 @@ export class PostgresDomainStore implements DomainStore {
     try {
       const rows = await this.sql<LeaveRequest[]>`
         SELECT lr.id, lr.user_id, lr.category, lr.description, lr.status,
-               lr.attachment_url, lr.date::text AS date, lr.approval_status,
+               lr.attachment_url, (lr.date AT TIME ZONE 'Asia/Jakarta')::date::text AS date, lr.approval_status,
                lr.original_end_date::text, lr.effective_end_date::text, lr.duration_days,
                lr.rejection_reason, lr.rejected_at::text, lr.created_at::text, lr.updated_at::text,
                p.full_name AS student_name, p.nis AS student_nis, p.class_name AS student_class,
@@ -467,7 +506,7 @@ export class PostgresDomainStore implements DomainStore {
     try {
       const rows = await this.sql<LeaveRequest[]>`
         SELECT lr.id, lr.user_id, lr.category, lr.description, lr.status,
-               lr.attachment_url, lr.date::text AS date, lr.approval_status,
+               lr.attachment_url, (lr.date AT TIME ZONE 'Asia/Jakarta')::date::text AS date, lr.approval_status,
                lr.original_end_date::text, lr.effective_end_date::text, lr.duration_days,
                lr.rejection_reason, lr.rejected_at::text, lr.created_at::text, lr.updated_at::text,
                p.full_name AS student_name, p.nis AS student_nis, p.class_name AS student_class,
@@ -502,9 +541,96 @@ export class PostgresDomainStore implements DomainStore {
   }
 
   async updateLeaveRequestStatus(params: UpdateLeaveRequestStatusParams): Promise<LeaveRequest> {
+    if (params.approvalStatus === 'approved') {
+      try {
+        const currentRows = await this.sql<{ user_id: string }[]>`
+          SELECT user_id FROM leave_requests WHERE id = ${params.id} LIMIT 1
+        `
+        if (!currentRows[0]) throw AppError.notFound('Leave request')
+
+        const updated = await this.sql.begin(async (sql) => {
+          await sql`SELECT pg_advisory_xact_lock(hashtextextended(${currentRows[0].user_id}, 0))`
+          const current = await sql<LeaveRequest[]>`
+            SELECT id, user_id, category, description, status,
+                   attachment_url, (date AT TIME ZONE 'Asia/Jakarta')::date::text AS date, approval_status,
+                   original_end_date::text, effective_end_date::text, duration_days,
+                   rejection_reason, rejected_at::text, created_at::text, updated_at::text
+            FROM leave_requests
+            WHERE id = ${params.id}
+            FOR UPDATE
+          `
+          if (!current[0]) throw AppError.notFound('Leave request')
+
+          const durationDays = params.durationDays ?? 1
+          const conflicts = await sql<{ date: string }[]>`
+            SELECT DISTINCT a.date::date::text AS date
+            FROM attendances a
+            WHERE a.user_id = ${current[0].user_id}
+              AND a.status IN ('Hadir', 'Terlambat', 'Pulang', 'Datang')
+              AND a.date::date BETWEEN ((${current[0].date})::timestamptz AT TIME ZONE 'Asia/Jakarta')::date
+                AND (((${current[0].date})::timestamptz AT TIME ZONE 'Asia/Jakarta')::date + (${durationDays} - 1))
+            ORDER BY date ASC
+          `
+          if (conflicts.length > 0) {
+            throw AppError.leaveApprovalConflict({
+              conflicting_dates: conflicts.map((row) => row.date),
+              requested_start_date: current[0].date.slice(0, 10),
+              requested_end_date: new Date(
+                Date.parse(`${current[0].date.slice(0, 10)}T00:00:00Z`) +
+                  (durationDays - 1) * 86_400_000,
+              )
+                .toISOString()
+                .slice(0, 10),
+            })
+          }
+
+          const rows = await sql<LeaveRequest[]>`
+            UPDATE leave_requests
+            SET approval_status = 'approved',
+                status = ${params.status !== undefined ? params.status : true},
+                original_end_date = (date AT TIME ZONE 'Asia/Jakarta')::date + (${durationDays} - 1),
+                effective_end_date = (date AT TIME ZONE 'Asia/Jakarta')::date + (${durationDays} - 1),
+                duration_days = ${durationDays},
+                rejection_reason = NULL,
+                rejected_at = NULL,
+                updated_at = NOW()
+            WHERE id = ${params.id}
+            RETURNING id, user_id, category, description, status,
+                      attachment_url, (date AT TIME ZONE 'Asia/Jakarta')::date::text AS date, approval_status,
+                      original_end_date::text, effective_end_date::text, duration_days,
+                      rejection_reason, rejected_at::text, created_at::text, updated_at::text
+          `
+          if (!rows[0]) throw AppError.notFound('Leave request')
+          return rows[0]
+        })
+
+        const profile = await this.getUserProfile(updated.user_id).catch(() => null)
+        if (profile) {
+          updated.student_name = profile.full_name ?? null
+          updated.student_nis = profile.nis ?? null
+          updated.student_class = profile.class_name ?? null
+          updated.absence_number = profile.absence_number ?? null
+        }
+        return {
+          ...updated,
+          ...getLeavePeriodFields({
+            date: updated.date,
+            approval_status: updated.approval_status,
+            original_end_date: updated.original_end_date,
+            effective_end_date: updated.effective_end_date,
+            duration_days: updated.duration_days,
+          }),
+        }
+      } catch (err) {
+        if (err instanceof AppError) throw err
+        logger.error({ err, params }, 'Failed to approve leave request')
+        throw AppError.internal('An unexpected database error occurred.')
+      }
+    }
+
     try {
       const statusValue =
-        params.status !== undefined ? params.status : params.approvalStatus === 'approved'
+        params.status !== undefined ? params.status : false
       const durationDays = params.durationDays ?? 1
       const rows = await this.sql<LeaveRequest[]>`
         UPDATE leave_requests
@@ -518,7 +644,7 @@ export class PostgresDomainStore implements DomainStore {
             updated_at = NOW()
         WHERE id = ${params.id}
         RETURNING id, user_id, category, description, status,
-                  attachment_url, date::text AS date, approval_status,
+                  attachment_url, (date AT TIME ZONE 'Asia/Jakarta')::date::text AS date, approval_status,
                   original_end_date::text, effective_end_date::text, duration_days,
                   rejection_reason, rejected_at::text, created_at::text, updated_at::text
       `

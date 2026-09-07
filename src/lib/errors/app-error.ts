@@ -74,6 +74,33 @@ export class AppError extends Error {
     return new AppError(ErrorCode.CONFLICT, 409, message)
   }
 
+  static leaveRequestPending(details?: AppErrorDetails): AppError {
+    return new AppError(
+      ErrorCode.LEAVE_REQUEST_PENDING,
+      409,
+      'A pending leave request already exists for this student.',
+      details,
+    )
+  }
+
+  static leavePeriodOverlap(details?: AppErrorDetails): AppError {
+    return new AppError(
+      ErrorCode.LEAVE_PERIOD_OVERLAP,
+      409,
+      'The requested leave date overlaps an approved Leave Period.',
+      details,
+    )
+  }
+
+  static leaveApprovalConflict(details?: AppErrorDetails): AppError {
+    return new AppError(
+      ErrorCode.LEAVE_APPROVAL_CONFLICT,
+      409,
+      'The requested Leave Period conflicts with existing physical Attendance.',
+      details,
+    )
+  }
+
   static tenantMismatch(): AppError {
     return new AppError(ErrorCode.TENANT_MISMATCH, 403, 'Tenant mismatch.')
   }

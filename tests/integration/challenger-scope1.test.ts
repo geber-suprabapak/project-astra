@@ -452,6 +452,18 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
         expect(json.data.category).toBe('sakit')
         expect(json.data.approval_status).toBe('pending')
         expect(json.data.status).toBe(false)
+
+        // A pending request is intentionally exclusive per Student. Clear this
+        // fixture through the public transition before the next role creates one.
+        const clear = await env.app.request(`/v1/admin/leave-requests/${json.data.id}/reject`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ reason: 'Fixture cleanup.' }),
+        })
+        expect(clear.status).toBe(200)
       }
     })
 
