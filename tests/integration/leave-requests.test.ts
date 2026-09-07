@@ -507,6 +507,28 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     const permitId = createBody.data.id
     expect(permitId).toBeDefined()
 
+    // A pending leave request must not block a physical attendance record for the same student.
+    const attendanceRes = await app.request('/v1/admin/attendance/manual', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user_id: 'student-1',
+        action_type: 'check_in',
+        status: 'Hadir',
+        reason: 'Physical attendance recorded while leave is pending',
+        date: '2026-08-28',
+      }),
+    })
+
+    expect(attendanceRes.status).toBe(201)
+    const attendanceBody = await attendanceRes.json()
+    expect(attendanceBody.data.user_id).toBe('student-1')
+    expect(attendanceBody.data.date).toBe('2026-08-28')
+    expect(attendanceBody.data.status).toBe('Hadir')
+
     // 2. Admin creates leave request with explicit pending status
     const pendingCreateRes = await app.request('/v1/admin/leave-requests', {
       method: 'POST',
