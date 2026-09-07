@@ -12,6 +12,7 @@ import {
   classEnrollmentStatusSchema,
   createAcademicPeriodSchema,
   createAdminLeaveRequestSchema,
+  approveLeaveRequestSchema,
   createCalendarExceptionSchema,
   createClassSchema,
   createLocationSchema,
@@ -1570,8 +1571,19 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
   const handleApproveLeaveRequest = async (c: any) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const id = c.req.param('id')
+    const contentType = c.req.header('content-type') || ''
+    let durationDays: number | undefined
+    if (contentType.includes('application/json')) {
+      const body = await c.req.json().catch(() => ({}))
+      const parsed = approveLeaveRequestSchema.safeParse(body)
+      if (!parsed.success) {
+        throw AppError.validationError(parsed.error.flatten())
+      }
+      durationDays = parsed.data.duration_days ?? parsed.data.durationDays
+    }
     const approved = await approveLeaveRequest({
       id,
+      durationDays,
       actorRole: c.get('profileRole'),
       actorId: c.get('userId'),
       providers,

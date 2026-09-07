@@ -416,12 +416,20 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     // Admin approves leave request 1
     const approveRes = await app.request(`/v1/admin/leave-requests/${leave1.id}/approve`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${adminToken}` },
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ duration_days: 2 }),
     })
     expect(approveRes.status).toBe(200)
     const approveBody = await approveRes.json()
     expect(approveBody.data.approval_status).toBe('approved')
     expect(approveBody.data.status).toBe(true)
+    expect(approveBody.data.requested_start_date).toBe('2026-08-23')
+    expect(approveBody.data.original_end_date).toBe('2026-08-24')
+    expect(approveBody.data.effective_end_date).toBe('2026-08-24')
+    expect(approveBody.data.duration_days).toBe(2)
 
     // Student cannot delete approved leave request
     const studentDeleteRes = await app.request(`/v1/mobile/leave-requests/${leave1.id}`, {

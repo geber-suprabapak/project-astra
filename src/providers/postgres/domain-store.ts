@@ -3,6 +3,7 @@ import { env } from '../../config/env.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { logger } from '../../lib/logging/logger.js'
 import { normalizeAttendanceRecord } from '../types.js'
+import { getLeavePeriodFields } from '../types.js'
 import type {
   Absence,
   AcademicPeriod,
@@ -329,12 +330,22 @@ export class PostgresDomainStore implements DomainStore {
       const rows = await this.sql<Permit[]>`
         SELECT id, user_id, category AS kategori_izin, description AS deskripsi,
                status, attachment_url AS link_foto, date::text AS tanggal,
-               approval_status, created_at::text, rejection_reason, rejected_at::text
+               approval_status, original_end_date::text, effective_end_date::text,
+               duration_days, created_at::text, rejection_reason, rejected_at::text
         FROM leave_requests
         WHERE user_id = ${userId}
         ORDER BY created_at DESC
       `
-      return rows ?? []
+      return (rows ?? []).map((row) => ({
+        ...row,
+        ...getLeavePeriodFields({
+          date: row.tanggal,
+          approval_status: row.approval_status,
+          original_end_date: row.original_end_date,
+          effective_end_date: row.effective_end_date,
+          duration_days: row.duration_days,
+        }),
+      }))
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, userId }, 'Failed to query permit history')
@@ -349,13 +360,23 @@ export class PostgresDomainStore implements DomainStore {
         VALUES (${data.user_id}, ${data.kategori_izin}, ${data.deskripsi}, ${data.status}, ${data.link_foto}, ${data.tanggal})
         RETURNING id, user_id, category AS kategori_izin, description AS deskripsi,
                    status, attachment_url AS link_foto, date::text AS tanggal,
-                   approval_status, created_at::text, rejection_reason, rejected_at::text
+                   approval_status, original_end_date::text, effective_end_date::text,
+                   duration_days, created_at::text, rejection_reason, rejected_at::text
       `
       if (!rows || rows.length === 0) {
         logger.error({ data }, 'Failed to insert permit: empty return')
         throw AppError.internal('Failed to insert permit.')
       }
-      return rows[0]
+      return {
+        ...rows[0],
+        ...getLeavePeriodFields({
+          date: rows[0].tanggal,
+          approval_status: rows[0].approval_status,
+          original_end_date: rows[0].original_end_date,
+          effective_end_date: rows[0].effective_end_date,
+          duration_days: rows[0].duration_days,
+        }),
+      }
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, data }, 'Failed to insert permit')
@@ -367,11 +388,16 @@ export class PostgresDomainStore implements DomainStore {
     try {
       const approvalStatus = data.approval_status ?? 'approved'
       const status = data.status !== undefined ? data.status : approvalStatus === 'approved'
+      const periodFields = getLeavePeriodFields({
+        date: data.date,
+        approval_status: approvalStatus,
+      })
       const rows = await this.sql<LeaveRequest[]>`
-        INSERT INTO leave_requests (user_id, category, description, status, attachment_url, date, approval_status)
-        VALUES (${data.user_id}, ${data.category}, ${data.description}, ${status}, ${data.attachment_url ?? null}, ${data.date}, ${approvalStatus})
+        INSERT INTO leave_requests (user_id, category, description, status, attachment_url, date, approval_status, original_end_date, effective_end_date, duration_days)
+        VALUES (${data.user_id}, ${data.category}, ${data.description}, ${status}, ${data.attachment_url ?? null}, ${data.date}, ${approvalStatus}, ${periodFields.original_end_date}, ${periodFields.effective_end_date}, ${periodFields.duration_days})
         RETURNING id, user_id, category, description, status,
                    attachment_url, date::text AS date, approval_status,
+                   original_end_date::text, effective_end_date::text, duration_days,
                    rejection_reason, rejected_at::text, created_at::text, updated_at::text
       `
       if (!rows || rows.length === 0) {
@@ -379,6 +405,16 @@ export class PostgresDomainStore implements DomainStore {
         throw AppError.internal('Failed to create leave request.')
       }
       const created = rows[0]
+      Object.assign(
+        created,
+        getLeavePeriodFields({
+          date: created.date,
+          approval_status: created.approval_status,
+          original_end_date: created.original_end_date,
+          effective_end_date: created.effective_end_date,
+          duration_days: created.duration_days,
+        }),
+      )
       const profile = await this.getUserProfile(created.user_id).catch(() => null)
       if (profile) {
         created.student_name = profile.full_name ?? null
@@ -399,6 +435,7 @@ export class PostgresDomainStore implements DomainStore {
       const rows = await this.sql<LeaveRequest[]>`
         SELECT lr.id, lr.user_id, lr.category, lr.description, lr.status,
                lr.attachment_url, lr.date::text AS date, lr.approval_status,
+               lr.original_end_date::text, lr.effective_end_date::text, lr.duration_days,
                lr.rejection_reason, lr.rejected_at::text, lr.created_at::text, lr.updated_at::text,
                p.full_name AS student_name, p.nis AS student_nis, p.class_name AS student_class,
                p.absence_number
@@ -407,7 +444,18 @@ export class PostgresDomainStore implements DomainStore {
         WHERE lr.id = ${id}
         LIMIT 1
       `
-      return rows[0] ?? null
+      const row = rows[0]
+      if (!row) return null
+      return {
+        ...row,
+        ...getLeavePeriodFields({
+          date: row.date,
+          approval_status: row.approval_status,
+          original_end_date: row.original_end_date,
+          effective_end_date: row.effective_end_date,
+          duration_days: row.duration_days,
+        }),
+      }
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, id }, 'Failed to get leave request by ID')
@@ -420,6 +468,7 @@ export class PostgresDomainStore implements DomainStore {
       const rows = await this.sql<LeaveRequest[]>`
         SELECT lr.id, lr.user_id, lr.category, lr.description, lr.status,
                lr.attachment_url, lr.date::text AS date, lr.approval_status,
+               lr.original_end_date::text, lr.effective_end_date::text, lr.duration_days,
                lr.rejection_reason, lr.rejected_at::text, lr.created_at::text, lr.updated_at::text,
                p.full_name AS student_name, p.nis AS student_nis, p.class_name AS student_class,
                p.absence_number
@@ -435,7 +484,16 @@ export class PostgresDomainStore implements DomainStore {
         ${filter?.limit ? this.sql`LIMIT ${filter.limit}` : this.sql``}
         ${filter?.offset ? this.sql`OFFSET ${filter.offset}` : this.sql``}
       `
-      return rows ?? []
+      return (rows ?? []).map((row) => ({
+        ...row,
+        ...getLeavePeriodFields({
+          date: row.date,
+          approval_status: row.approval_status,
+          original_end_date: row.original_end_date,
+          effective_end_date: row.effective_end_date,
+          duration_days: row.duration_days,
+        }),
+      }))
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, filter }, 'Failed to list leave requests')
@@ -447,16 +505,21 @@ export class PostgresDomainStore implements DomainStore {
     try {
       const statusValue =
         params.status !== undefined ? params.status : params.approvalStatus === 'approved'
+      const durationDays = params.durationDays ?? 1
       const rows = await this.sql<LeaveRequest[]>`
         UPDATE leave_requests
         SET approval_status = ${params.approvalStatus},
             status = ${statusValue},
+            original_end_date = CASE WHEN ${params.approvalStatus} = 'approved' THEN date::date + (${durationDays} - 1) ELSE NULL END,
+            effective_end_date = CASE WHEN ${params.approvalStatus} = 'approved' THEN date::date + (${durationDays} - 1) ELSE NULL END,
+            duration_days = CASE WHEN ${params.approvalStatus} = 'approved' THEN ${durationDays} ELSE NULL END,
             rejection_reason = ${params.rejectionReason ?? null},
             rejected_at = ${params.rejectedAt ? params.rejectedAt : params.approvalStatus === 'rejected' ? this.sql`NOW()` : null},
             updated_at = NOW()
         WHERE id = ${params.id}
         RETURNING id, user_id, category, description, status,
                   attachment_url, date::text AS date, approval_status,
+                  original_end_date::text, effective_end_date::text, duration_days,
                   rejection_reason, rejected_at::text, created_at::text, updated_at::text
       `
       if (!rows || rows.length === 0) {
@@ -470,7 +533,16 @@ export class PostgresDomainStore implements DomainStore {
         updated.student_class = profile.class_name ?? null
         updated.absence_number = profile.absence_number ?? null
       }
-      return updated
+      return {
+        ...updated,
+        ...getLeavePeriodFields({
+          date: updated.date,
+          approval_status: updated.approval_status,
+          original_end_date: updated.original_end_date,
+          effective_end_date: updated.effective_end_date,
+          duration_days: updated.duration_days,
+        }),
+      }
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, params }, 'Failed to update leave request status')

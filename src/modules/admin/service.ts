@@ -1988,6 +1988,10 @@ async function mapLeaveRequestWithAttachment(
     description: lr.description,
     status: lr.status,
     date: lr.date,
+    requested_start_date: lr.requested_start_date ?? lr.date.slice(0, 10),
+    original_end_date: lr.original_end_date ?? null,
+    effective_end_date: lr.effective_end_date ?? null,
+    duration_days: lr.duration_days ?? null,
     approval_status: lr.approval_status,
     attachment_url: attachmentUrl,
     rejection_reason: lr.rejection_reason ?? null,
@@ -2108,13 +2112,14 @@ export async function getAdminLeaveRequest(params: {
 
 export async function approveLeaveRequest(params: {
   id: string
+  durationDays?: number
   actorRole: IdentityRole | null
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse> {
   if (
     !params.actorRole ||
-    !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)
+    !['platform_admin', 'school_admin'].includes(params.actorRole)
   ) {
     throw AppError.forbidden()
   }
@@ -2124,10 +2129,20 @@ export async function approveLeaveRequest(params: {
     throw AppError.notFound('Leave request')
   }
 
+  if (lr.approval_status === 'approved') {
+    throw AppError.conflict('Approved Leave Period cannot be edited or extended.')
+  }
+
+  const durationDays = params.durationDays ?? 1
+  if (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > 30) {
+    throw AppError.validationError({ duration_days: ['Duration must be between 1 and 30 days.'] })
+  }
+
   const updated = await params.providers.domainStore.updateLeaveRequestStatus({
     id: params.id,
     approvalStatus: 'approved',
     status: true,
+    durationDays,
   })
 
   await params.providers.domainStore.insertAuditLog({
@@ -2140,6 +2155,10 @@ export async function approveLeaveRequest(params: {
       student_user_id: lr.user_id,
       category: lr.category,
       date: lr.date,
+      duration_days: durationDays,
+      requested_start_date: updated.requested_start_date,
+      original_end_date: updated.original_end_date,
+      effective_end_date: updated.effective_end_date,
     },
   })
 
@@ -2168,7 +2187,7 @@ export async function rejectLeaveRequest(params: {
 }): Promise<AdminLeaveRequestResponse> {
   if (
     !params.actorRole ||
-    !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)
+    !['platform_admin', 'school_admin'].includes(params.actorRole)
   ) {
     throw AppError.forbidden()
   }
@@ -2176,6 +2195,10 @@ export async function rejectLeaveRequest(params: {
   const lr = await params.providers.domainStore.getLeaveRequestById(params.id)
   if (!lr) {
     throw AppError.notFound('Leave request')
+  }
+
+  if (lr.approval_status === 'approved') {
+    throw AppError.conflict('Approved Leave Period cannot be edited or extended.')
   }
 
   const updated = await params.providers.domainStore.updateLeaveRequestStatus({
@@ -2225,7 +2248,7 @@ export async function reopenLeaveRequest(params: {
 }): Promise<AdminLeaveRequestResponse> {
   if (
     !params.actorRole ||
-    !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)
+    !['platform_admin', 'school_admin'].includes(params.actorRole)
   ) {
     throw AppError.forbidden()
   }
@@ -2233,6 +2256,10 @@ export async function reopenLeaveRequest(params: {
   const lr = await params.providers.domainStore.getLeaveRequestById(params.id)
   if (!lr) {
     throw AppError.notFound('Leave request')
+  }
+
+  if (lr.approval_status === 'approved') {
+    throw AppError.conflict('Approved Leave Period cannot be edited or extended.')
   }
 
   const updated = await params.providers.domainStore.updateLeaveRequestStatus({

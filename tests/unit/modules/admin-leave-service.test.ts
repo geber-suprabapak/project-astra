@@ -203,20 +203,100 @@ describe('Admin Leave Requests Service', () => {
 
     const approved = await approveLeaveRequest({
       id: permit.id,
-      actorRole: 'teacher',
-      actorId: 'teacher-1',
+      actorRole: 'school_admin',
+      actorId: 'admin-1',
+      durationDays: 3,
       providers,
     })
 
     expect(approved.id).toBe(permit.id)
     expect(approved.approval_status).toBe('approved')
     expect(approved.status).toBe(true)
+    expect(approved.requested_start_date).toBe('2026-08-21')
+    expect(approved.original_end_date).toBe('2026-08-23')
+    expect(approved.effective_end_date).toBe('2026-08-23')
+    expect(approved.duration_days).toBe(3)
 
     // Verify audit log created
     const logs = await domainStore.getAuditLogs('leave_request', permit.id)
     expect(logs).toHaveLength(1)
     expect(logs[0].action).toBe('approve_leave_request')
-    expect(logs[0].actor_id).toBe('teacher-1')
+    expect(logs[0].actor_id).toBe('admin-1')
+  })
+
+  it('rejects teacher approval while preserving a one-day legacy period on read', async () => {
+    const { domainStore, providers } = setupTestEnvironment()
+
+    const permit = await domainStore.createLeaveRequest({
+      user_id: 'student-1',
+      category: 'sakit',
+      description: 'Sakit demam',
+      date: '2026-08-21T00:00:00+07:00',
+      approval_status: 'approved',
+    })
+
+    await expect(
+      approveLeaveRequest({
+        id: permit.id,
+        actorRole: 'teacher',
+        actorId: 'teacher-1',
+        durationDays: 2,
+        providers,
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+
+    const legacy = await getAdminLeaveRequest({
+      id: permit.id,
+      actorRole: 'school_admin',
+      actorId: 'admin-1',
+      providers,
+    })
+    expect(legacy.requested_start_date).toBe('2026-08-21')
+    expect(legacy.original_end_date).toBe('2026-08-21')
+    expect(legacy.effective_end_date).toBe('2026-08-21')
+    expect(legacy.duration_days).toBe(1)
+  })
+
+  it.each([0, 31])('rejects approval duration %s outside the inclusive boundary', async (durationDays) => {
+    const { domainStore, providers } = setupTestEnvironment()
+    const permit = await domainStore.insertPermit({
+      user_id: 'student-1',
+      kategori_izin: 'sakit',
+      deskripsi: 'Sakit demam',
+      status: false,
+      link_foto: null,
+      tanggal: '2026-08-21T00:00:00+07:00',
+    })
+
+    await expect(
+      approveLeaveRequest({
+        id: permit.id,
+        actorRole: 'school_admin',
+        actorId: 'admin-1',
+        durationDays,
+        providers,
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+  })
+
+  it('does not reopen an approved Leave Period', async () => {
+    const { domainStore, providers } = setupTestEnvironment()
+    const permit = await domainStore.createLeaveRequest({
+      user_id: 'student-1',
+      category: 'sakit',
+      description: 'Sakit demam',
+      date: '2026-08-21T00:00:00+07:00',
+      approval_status: 'approved',
+    })
+
+    await expect(
+      reopenLeaveRequest({
+        id: permit.id,
+        actorRole: 'school_admin',
+        actorId: 'admin-1',
+        providers,
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' })
   })
 
   it('rejects a leave request with reason and records an audit log', async () => {
@@ -278,8 +358,8 @@ describe('Admin Leave Requests Service', () => {
     // Now reopen it
     const reopened = await reopenLeaveRequest({
       id: permit.id,
-      actorRole: 'teacher',
-      actorId: 'teacher-1',
+      actorRole: 'school_admin',
+      actorId: 'admin-1',
       providers,
     })
 
@@ -294,7 +374,7 @@ describe('Admin Leave Requests Service', () => {
     expect(logs).toHaveLength(2)
     const reopenLog = logs.find((l) => l.action === 'reopen_leave_request')
     expect(reopenLog).toBeDefined()
-    expect(reopenLog?.actor_id).toBe('teacher-1')
+    expect(reopenLog?.actor_id).toBe('admin-1')
     expect(reopenLog?.details).toMatchObject({
       previous_status: 'rejected',
       student_user_id: 'student-1',

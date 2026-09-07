@@ -47,6 +47,7 @@ import {
   type InsertAttendanceData,
   type InsertPermitData,
   type LeaveRequest,
+  getLeavePeriodFields,
   type ListLeaveRequestsFilter,
   type ListNotificationsFilter,
   type Location,
@@ -1041,6 +1042,16 @@ export class MemoryDomainStore implements DomainStore {
     return this.permits
       .filter((p) => p.user_id === userId)
       .sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
+      .map((p) => ({
+        ...p,
+        ...getLeavePeriodFields({
+          date: p.tanggal,
+          approval_status: p.approval_status,
+          original_end_date: p.original_end_date,
+          effective_end_date: p.effective_end_date,
+          duration_days: p.duration_days,
+        }),
+      }))
   }
 
   async insertPermit(data: InsertPermitData): Promise<Permit> {
@@ -1056,6 +1067,7 @@ export class MemoryDomainStore implements DomainStore {
       created_at: new Date().toISOString(),
       rejection_reason: null,
       rejected_at: null,
+      ...getLeavePeriodFields({ date: data.tanggal, approval_status: 'pending' }),
     }
     this.permits.push(permit)
     return permit
@@ -1079,6 +1091,7 @@ export class MemoryDomainStore implements DomainStore {
       updated_at: now,
       rejection_reason: null,
       rejected_at: null,
+      ...getLeavePeriodFields({ date: data.date, approval_status: approvalStatus }),
     }
     this.permits.push(permit)
 
@@ -1100,6 +1113,10 @@ export class MemoryDomainStore implements DomainStore {
       student_nis: profile?.nis ?? null,
       student_class: profile?.class_name ?? null,
       absence_number: profile?.absence_number ?? null,
+      ...getLeavePeriodFields({
+        date: data.date,
+        approval_status: approvalStatus,
+      }),
     }
   }
 
@@ -1124,6 +1141,13 @@ export class MemoryDomainStore implements DomainStore {
       student_nis: profile?.nis ?? null,
       student_class: profile?.class_name ?? null,
       absence_number: profile?.absence_number ?? null,
+      ...getLeavePeriodFields({
+        date: p.tanggal,
+        approval_status: p.approval_status,
+        original_end_date: p.original_end_date,
+        effective_end_date: p.effective_end_date,
+        duration_days: p.duration_days,
+      }),
     }
   }
 
@@ -1170,6 +1194,13 @@ export class MemoryDomainStore implements DomainStore {
         student_nis: profile?.nis ?? null,
         student_class: profile?.class_name ?? null,
         absence_number: profile?.absence_number ?? null,
+        ...getLeavePeriodFields({
+          date: p.tanggal,
+          approval_status: p.approval_status,
+          original_end_date: p.original_end_date,
+          effective_end_date: p.effective_end_date,
+          duration_days: p.duration_days,
+        }),
       }
     })
   }
@@ -1195,6 +1226,21 @@ export class MemoryDomainStore implements DomainStore {
     }
     p.updated_at = new Date().toISOString()
 
+    if (params.approvalStatus === 'approved') {
+      const durationDays = params.durationDays ?? 1
+      const start = Date.parse(`${p.tanggal.slice(0, 10)}T00:00:00Z`)
+      const end = new Date(start + (durationDays - 1) * 86_400_000)
+        .toISOString()
+        .slice(0, 10)
+      p.original_end_date = end
+      p.effective_end_date = end
+      p.duration_days = durationDays
+    } else {
+      p.original_end_date = undefined
+      p.effective_end_date = undefined
+      p.duration_days = undefined
+    }
+
     const profile = this.profiles.get(p.user_id)
     return {
       id: p.id,
@@ -1213,6 +1259,13 @@ export class MemoryDomainStore implements DomainStore {
       student_nis: profile?.nis ?? null,
       student_class: profile?.class_name ?? null,
       absence_number: profile?.absence_number ?? null,
+      ...getLeavePeriodFields({
+        date: p.tanggal,
+        approval_status: p.approval_status,
+        original_end_date: p.original_end_date,
+        effective_end_date: p.effective_end_date,
+        duration_days: p.duration_days,
+      }),
     }
   }
 

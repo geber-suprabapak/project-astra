@@ -257,6 +257,13 @@ CREATE TABLE IF NOT EXISTS leave_requests (
     CONSTRAINT leave_requests_approval_status_check CHECK (approval_status IN ('pending', 'approved', 'rejected'))
 );
 
+ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS original_end_date DATE;
+ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS effective_end_date DATE;
+ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS duration_days INTEGER;
+ALTER TABLE leave_requests DROP CONSTRAINT IF EXISTS leave_requests_duration_days_check;
+ALTER TABLE leave_requests ADD CONSTRAINT leave_requests_duration_days_check
+    CHECK (duration_days IS NULL OR duration_days BETWEEN 1 AND 30);
+
 CREATE INDEX IF NOT EXISTS idx_leave_requests_user_date ON leave_requests(user_id, date);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_approval ON leave_requests(approval_status);
 

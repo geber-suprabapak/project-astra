@@ -116,6 +116,10 @@ export interface Permit {
   updated_at?: string
   rejection_reason?: string | null
   rejected_at?: string | null
+  requested_start_date?: string
+  original_end_date?: string | null
+  effective_end_date?: string | null
+  duration_days?: number | null
 }
 
 export const leaveRequestCategorySchema = z.enum(['sakit', 'pergi', 'dispensasi', 'lainnya'])
@@ -141,6 +145,65 @@ export interface LeaveRequest {
   student_nis?: string | null
   student_class?: string | null
   absence_number?: string | null
+  requested_start_date?: string
+  original_end_date?: string | null
+  effective_end_date?: string | null
+  duration_days?: number | null
+}
+
+export interface LeavePeriodFields {
+  requested_start_date: string
+  original_end_date: string | null
+  effective_end_date: string | null
+  duration_days: number | null
+}
+
+export function getLeavePeriodFields(request: {
+  date: string
+  approval_status: LeaveRequestApprovalStatus
+  original_end_date?: string | null
+  effective_end_date?: string | null
+  duration_days?: number | null
+}): LeavePeriodFields {
+  const requestedStart = request.date.slice(0, 10)
+  const originalEnd = request.original_end_date?.slice(0, 10) ?? null
+  const effectiveEnd = request.effective_end_date?.slice(0, 10) ?? null
+
+  if (request.approval_status !== 'approved') {
+    return {
+      requested_start_date: requestedStart,
+      original_end_date: originalEnd,
+      effective_end_date: effectiveEnd,
+      duration_days: request.duration_days ?? null,
+    }
+  }
+
+  if (originalEnd || effectiveEnd) {
+    const resolvedOriginalEnd = originalEnd ?? effectiveEnd
+    const resolvedEffectiveEnd = effectiveEnd ?? resolvedOriginalEnd
+    const duration = request.duration_days ??
+      (resolvedOriginalEnd && resolvedOriginalEnd >= requestedStart
+        ? Math.round(
+            (Date.parse(`${resolvedOriginalEnd}T00:00:00Z`) -
+              Date.parse(`${requestedStart}T00:00:00Z`)) /
+              86_400_000,
+          ) + 1
+        : null)
+    return {
+      requested_start_date: requestedStart,
+      original_end_date: resolvedOriginalEnd,
+      effective_end_date: resolvedEffectiveEnd,
+      duration_days: duration,
+    }
+  }
+
+  // Legacy approved rows only contain `date`; read them as a one-day period.
+  return {
+    requested_start_date: requestedStart,
+    original_end_date: requestedStart,
+    effective_end_date: requestedStart,
+    duration_days: 1,
+  }
 }
 
 export interface ListLeaveRequestsFilter {
@@ -159,6 +222,7 @@ export interface UpdateLeaveRequestStatusParams {
   status?: boolean
   rejectionReason?: string | null
   rejectedAt?: string | null
+  durationDays?: number
 }
 
 export interface CreateLeaveRequestData {

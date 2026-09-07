@@ -759,6 +759,10 @@ export const adminLeaveRequestResponseSchema = z.object({
   description: z.string(),
   status: z.boolean(),
   date: z.string(),
+  requested_start_date: z.string().optional(),
+  original_end_date: z.string().nullable().optional(),
+  effective_end_date: z.string().nullable().optional(),
+  duration_days: z.number().int().min(1).max(30).nullable().optional(),
   approval_status: z.enum(['pending', 'approved', 'rejected']),
   attachment_url: z.string().nullable().optional(),
   rejection_reason: z.string().nullable().optional(),
@@ -772,6 +776,11 @@ export type AdminLeaveRequestResponse = z.infer<typeof adminLeaveRequestResponse
 export const rejectLeaveRequestSchema = z.object({
   reason: z.string().min(1).optional(),
   rejection_reason: z.string().min(1).optional(),
+})
+
+export const approveLeaveRequestSchema = z.object({
+  duration_days: z.number().int().min(1).max(30).optional(),
+  durationDays: z.number().int().min(1).max(30).optional(),
 })
 
 export type RejectLeaveRequestInput = z.infer<typeof rejectLeaveRequestSchema>

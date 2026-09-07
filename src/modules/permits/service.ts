@@ -8,6 +8,10 @@ export interface PermitResponse {
   category: string
   description: string
   date: string
+  requested_start_date: string
+  original_end_date: string | null
+  effective_end_date: string | null
+  duration_days: number | null
   approval_status: string
   attachment_url: string | null
   created_at: string | undefined
@@ -25,11 +29,23 @@ function toPermitResponse(
   const category = 'kategori_izin' in permit ? permit.kategori_izin : permit.category
   const description = 'deskripsi' in permit ? permit.deskripsi : permit.description
   const date = 'tanggal' in permit ? permit.tanggal : permit.date
+  const requestedStartDate =
+    ('requested_start_date' in permit ? permit.requested_start_date : null) ?? date.slice(0, 10)
+  const approved = permit.approval_status === 'approved'
   return {
     id: permit.id,
     category,
     description,
     date,
+    requested_start_date: requestedStartDate,
+    original_end_date:
+      ('original_end_date' in permit ? permit.original_end_date : null) ??
+      (approved ? requestedStartDate : null),
+    effective_end_date:
+      ('effective_end_date' in permit ? permit.effective_end_date : null) ??
+      (approved ? requestedStartDate : null),
+    duration_days:
+      ('duration_days' in permit ? permit.duration_days : null) ?? (approved ? 1 : null),
     approval_status: permit.approval_status,
     attachment_url: attachmentUrl,
     created_at: permit.created_at,

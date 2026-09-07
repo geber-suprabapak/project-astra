@@ -110,7 +110,7 @@ async function setupTestEntities(ctx: ReturnType<typeof createTestContext>) {
 }
 
 describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-01)', () => {
-  it('Role Matrix: allows platform_admin, school_admin, and teacher; strictly forbids student and unauthenticated roles', async () => {
+  it('Role Matrix: allows platform_admin and school_admin; strictly forbids teacher, student, and unauthenticated roles', async () => {
     const ctx = createTestContext()
     const {
       lr,
@@ -159,19 +159,14 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
     })
     expect(unauthReopen.status).toBe(401)
 
-    // 5. Reopen as teacher -> 200 OK
+    // 5. Reopen as teacher -> 403 Forbidden (approval is school-admin-only)
     const teacherReopen = await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/reopen`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${teacherToken}`,
       },
     })
-    expect(teacherReopen.status).toBe(200)
-    const teacherData = await teacherReopen.json()
-    expect(teacherData.data.approval_status).toBe('pending')
-    expect(teacherData.data.status).toBe(false)
-    expect(teacherData.data.rejection_reason).toBeNull()
-    expect(teacherData.data.rejected_at).toBeNull()
+    expect(teacherReopen.status).toBe(403)
 
     // 6. Reject again and reopen as school_admin -> 200 OK
     await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/reject`, {
@@ -224,7 +219,7 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
     expect(errBody.error.code).toBe('RESOURCE_NOT_FOUND')
   })
 
-  it('Already Approved Request: reopening approved request transitions back to pending and resets boolean status', async () => {
+  it('Already Approved Request: reopening approved request is rejected to preserve the Leave Period', async () => {
     const ctx = createTestContext()
     const { lr, adminToken } = await setupTestEntities(ctx)
 
@@ -247,12 +242,9 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
         Authorization: `Bearer ${adminToken}`,
       },
     })
-    expect(reopenRes.status).toBe(200)
+    expect(reopenRes.status).toBe(409)
     const reopenedData = await reopenRes.json()
-    expect(reopenedData.data.approval_status).toBe('pending')
-    expect(reopenedData.data.status).toBe(false)
-    expect(reopenedData.data.rejection_reason).toBeNull()
-    expect(reopenedData.data.rejected_at).toBeNull()
+    expect(reopenedData.error.code).toBe('CONFLICT')
   })
 
   it('Database & Notification State Resets: audit log and push notification outbox are recorded accurately', async () => {
