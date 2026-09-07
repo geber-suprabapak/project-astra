@@ -181,7 +181,8 @@ export function getLeavePeriodFields(request: {
   if (originalEnd || effectiveEnd) {
     const resolvedOriginalEnd = originalEnd ?? effectiveEnd
     const resolvedEffectiveEnd = effectiveEnd ?? resolvedOriginalEnd
-    const duration = request.duration_days ??
+    const duration =
+      request.duration_days ??
       (resolvedOriginalEnd && resolvedOriginalEnd >= requestedStart
         ? Math.round(
             (Date.parse(`${resolvedOriginalEnd}T00:00:00Z`) -
@@ -223,6 +224,11 @@ export interface UpdateLeaveRequestStatusParams {
   rejectionReason?: string | null
   rejectedAt?: string | null
   durationDays?: number
+}
+
+export interface ForceFinishLeaveRequestParams {
+  id: string
+  effectiveEndDate: string
 }
 
 export interface CreateLeaveRequestData {
@@ -716,6 +722,7 @@ export interface DomainStore {
   getLeaveRequestById(id: string): Promise<LeaveRequest | null>
   listLeaveRequests(filter?: ListLeaveRequestsFilter): Promise<LeaveRequest[]>
   updateLeaveRequestStatus(params: UpdateLeaveRequestStatusParams): Promise<LeaveRequest>
+  forceFinishLeaveRequest(params: ForceFinishLeaveRequestParams): Promise<LeaveRequest>
   deleteLeaveRequest(id: string): Promise<void>
   validateAttendanceAction(params: {
     userId: string

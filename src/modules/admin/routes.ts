@@ -13,6 +13,7 @@ import {
   createAcademicPeriodSchema,
   createAdminLeaveRequestSchema,
   approveLeaveRequestSchema,
+  forceFinishLeaveRequestSchema,
   createCalendarExceptionSchema,
   createClassSchema,
   createLocationSchema,
@@ -47,6 +48,7 @@ import {
 import {
   acceptRosterReport,
   approveLeaveRequest,
+  forceFinishLeaveRequest,
   approveStudent,
   bootstrapSchool,
   correctStudentEmail,
@@ -1595,6 +1597,33 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
   router.patch('/leave-requests/:id/approve', handleApproveLeaveRequest)
   router.post('/permits/:id/approve', handleApproveLeaveRequest)
   router.patch('/permits/:id/approve', handleApproveLeaveRequest)
+
+  // POST /v1/admin/leave-requests/:id/force-finish
+  const handleForceFinishLeaveRequest = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json().catch(() => ({}))
+    const parsed = forceFinishLeaveRequestSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+    const effectiveEndDate =
+      parsed.data.effective_end_date ??
+      parsed.data.effectiveEndDate ??
+      parsed.data.last_excused_date ??
+      parsed.data.lastExcusedDate
+    const finished = await forceFinishLeaveRequest({
+      id: c.req.param('id'),
+      effectiveEndDate: effectiveEndDate!,
+      reason: parsed.data.reason,
+      actorRole: c.get('profileRole'),
+      actorId: c.get('userId'),
+      providers,
+    })
+    return successResponse(c, finished, 'Leave request force-finished successfully.')
+  }
+
+  router.post('/leave-requests/:id/force-finish', handleForceFinishLeaveRequest)
+  router.post('/permits/:id/force-finish', handleForceFinishLeaveRequest)
 
   // POST|PATCH /v1/admin/leave-requests/:id/reject & /v1/admin/permits/:id/reject
   const handleRejectLeaveRequest = async (c: any) => {

@@ -38,6 +38,7 @@ import {
   type EnrollStudentParams,
   type ExitStudentEnrollmentParams,
   type FaceEnrollmentRecord,
+  type ForceFinishLeaveRequestParams,
   type FileLifecycle,
   type FilePurpose,
   type FileRecord,
@@ -356,6 +357,31 @@ function isPhysicalAttendance(status: string, actionType?: string | null): boole
     status === 'Pulang' ||
     status === 'Datang'
   )
+}
+
+function effectiveLeavePeriod(permit: Permit) {
+  const start = permit.tanggal.slice(0, 10)
+  return {
+    start,
+    end: permit.effective_end_date ?? permit.original_end_date ?? start,
+  }
+}
+
+function assertAttendanceAllowed(permits: Permit[], userId: string, date: string): void {
+  const dateOnly = date.slice(0, 10)
+  const blocking = permits.find((permit) => {
+    if (permit.user_id !== userId || permit.approval_status !== 'approved') return false
+    const period = effectiveLeavePeriod(permit)
+    return dateOnly >= period.start && dateOnly <= period.end
+  })
+  if (!blocking) return
+  const period = effectiveLeavePeriod(blocking)
+  throw AppError.attendanceBlocked('Attendance is blocked by an approved Leave Period.', {
+    leave_request_id: blocking.id,
+    date: dateOnly,
+    effective_start_date: period.start,
+    effective_end_date: period.end,
+  })
 }
 
 export class MemoryDomainStore implements DomainStore {
@@ -1038,15 +1064,14 @@ export class MemoryDomainStore implements DomainStore {
     startISO: string,
     endISO: string,
   ): Promise<ActivePermitSummary[]> {
-    const start = new Date(startISO).getTime()
-    const end = new Date(endISO).getTime()
+    const start = startISO.slice(0, 10)
+    const end = endISO.slice(0, 10)
 
     return this.permits
       .filter((p) => {
-        if (p.user_id !== userId) return false
-        if (!['pending', 'approved'].includes(p.approval_status)) return false
-        const t = new Date(p.tanggal).getTime()
-        return t >= start && t <= end
+        if (p.user_id !== userId || p.approval_status !== 'approved') return false
+        const period = effectiveLeavePeriod(p)
+        return period.start <= end && period.end >= start
       })
       .map((p) => ({
         id: p.id,
@@ -1107,7 +1132,10 @@ export class MemoryDomainStore implements DomainStore {
     const requestedStart = data.date.slice(0, 10)
     const pending = this.permits
       .filter((permit) => permit.user_id === data.user_id && permit.approval_status === 'pending')
-      .sort((a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? '') || a.id.localeCompare(b.id))[0]
+      .sort(
+        (a, b) =>
+          (a.created_at ?? '').localeCompare(b.created_at ?? '') || a.id.localeCompare(b.id),
+      )[0]
     if (pending) {
       throw AppError.leaveRequestPending({
         pending_request_id: pending.id,
@@ -1322,9 +1350,7 @@ export class MemoryDomainStore implements DomainStore {
     if (params.approvalStatus === 'approved') {
       const durationDays = params.durationDays ?? 1
       const start = Date.parse(`${p.tanggal.slice(0, 10)}T00:00:00Z`)
-      const end = new Date(start + (durationDays - 1) * 86_400_000)
-        .toISOString()
-        .slice(0, 10)
+      const end = new Date(start + (durationDays - 1) * 86_400_000).toISOString().slice(0, 10)
       p.original_end_date = end
       p.effective_end_date = end
       p.duration_days = durationDays
@@ -1358,6 +1384,53 @@ export class MemoryDomainStore implements DomainStore {
         original_end_date: p.original_end_date,
         effective_end_date: p.effective_end_date,
         duration_days: p.duration_days,
+      }),
+    }
+  }
+
+  async forceFinishLeaveRequest(params: ForceFinishLeaveRequestParams): Promise<LeaveRequest> {
+    const permit = this.permits.find((item) => item.id === params.id)
+    if (!permit) throw AppError.notFound('Leave request')
+    if (permit.approval_status !== 'approved') {
+      throw AppError.conflict('Only an approved Leave Period can be force-finished.')
+    }
+
+    const period = effectiveLeavePeriod(permit)
+    const effectiveEndDate = params.effectiveEndDate.slice(0, 10)
+    if (effectiveEndDate < period.start) {
+      throw AppError.validationError('Effective end date cannot precede the Leave Period start.')
+    }
+    if (effectiveEndDate > period.end) {
+      throw AppError.conflict('Force-finish cannot extend an approved Leave Period.')
+    }
+
+    permit.original_end_date = permit.original_end_date ?? period.end
+    permit.effective_end_date = effectiveEndDate
+    permit.updated_at = new Date().toISOString()
+    const profile = this.profiles.get(permit.user_id)
+    return {
+      id: permit.id,
+      user_id: permit.user_id,
+      category: permit.kategori_izin,
+      description: permit.deskripsi,
+      status: permit.status,
+      attachment_url: permit.link_foto,
+      date: permit.tanggal,
+      approval_status: permit.approval_status,
+      rejection_reason: permit.rejection_reason ?? null,
+      rejected_at: permit.rejected_at ?? null,
+      created_at: permit.created_at,
+      updated_at: permit.updated_at,
+      student_name: profile?.full_name ?? null,
+      student_nis: profile?.nis ?? null,
+      student_class: profile?.class_name ?? null,
+      absence_number: profile?.absence_number ?? null,
+      ...getLeavePeriodFields({
+        date: permit.tanggal,
+        approval_status: permit.approval_status,
+        original_end_date: permit.original_end_date,
+        effective_end_date: permit.effective_end_date,
+        duration_days: permit.duration_days,
       }),
     }
   }
@@ -1461,6 +1534,7 @@ export class MemoryDomainStore implements DomainStore {
     longitude: number
   }): Promise<SaveAttendanceRecordRpcResponse> {
     const todayWIB = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    assertAttendanceAllowed(this.permits, params.userId, todayWIB)
     const status = params.actionType === 'check_in' ? 'Hadir' : 'Pulang'
     const record: AttendanceRecord = {
       id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -1529,6 +1603,7 @@ export class MemoryDomainStore implements DomainStore {
   async createManualAttendance(params: CreateManualAttendanceParams): Promise<AttendanceRecord> {
     const todayWIB =
       params.date ?? new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    assertAttendanceAllowed(this.permits, params.userId, todayWIB)
     const status: AttendanceStatus =
       params.status ?? (params.actionType === 'check_in' ? 'Hadir' : 'Pulang')
 

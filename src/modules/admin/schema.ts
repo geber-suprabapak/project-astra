@@ -783,6 +783,37 @@ export const approveLeaveRequestSchema = z.object({
   durationDays: z.number().int().min(1).max(30).optional(),
 })
 
+export const forceFinishLeaveRequestSchema = z
+  .object({
+    effective_end_date: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD required')
+      .optional(),
+    effectiveEndDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD required')
+      .optional(),
+    last_excused_date: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD required')
+      .optional(),
+    lastExcusedDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD required')
+      .optional(),
+    reason: z.string().trim().min(1).max(500),
+  })
+  .refine(
+    (data) =>
+      Boolean(
+        data.effective_end_date ||
+        data.effectiveEndDate ||
+        data.last_excused_date ||
+        data.lastExcusedDate,
+      ),
+    { message: 'Effective end date is required.', path: ['effective_end_date'] },
+  )
+
 export type RejectLeaveRequestInput = z.infer<typeof rejectLeaveRequestSchema>
 
 export const createAdminLeaveRequestSchema = z

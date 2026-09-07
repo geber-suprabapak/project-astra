@@ -43,6 +43,7 @@ import type {
   FileLifecycle,
   FilePurpose,
   FileRecord,
+  ForceFinishLeaveRequestParams,
   InsertAttendanceData,
   InsertPermitData,
   LeaveRequest,
@@ -313,9 +314,9 @@ export class PostgresDomainStore implements DomainStore {
         SELECT id, approval_status, category AS kategori_izin
         FROM leave_requests
         WHERE user_id = ${userId}
-          AND approval_status IN ('pending', 'approved')
-          AND date >= ${startISO}
-          AND date < ${endISO}
+          AND approval_status = 'approved'
+          AND (date AT TIME ZONE 'Asia/Jakarta')::date <= (${endISO.slice(0, 10)})::date
+          AND COALESCE(effective_end_date, original_end_date, (date AT TIME ZONE 'Asia/Jakarta')::date) >= (${startISO.slice(0, 10)})::date
       `
       return rows ?? []
     } catch (err) {
@@ -629,8 +630,7 @@ export class PostgresDomainStore implements DomainStore {
     }
 
     try {
-      const statusValue =
-        params.status !== undefined ? params.status : false
+      const statusValue = params.status !== undefined ? params.status : false
       const durationDays = params.durationDays ?? 1
       const rows = await this.sql<LeaveRequest[]>`
         UPDATE leave_requests
@@ -672,6 +672,81 @@ export class PostgresDomainStore implements DomainStore {
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, params }, 'Failed to update leave request status')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async forceFinishLeaveRequest(params: ForceFinishLeaveRequestParams): Promise<LeaveRequest> {
+    try {
+      const owner = await this.sql<{ user_id: string }[]>`
+        SELECT user_id FROM leave_requests WHERE id = ${params.id} LIMIT 1
+      `
+      if (!owner[0]) throw AppError.notFound('Leave request')
+
+      const updated = await this.sql.begin(async (sql) => {
+        await sql`SELECT pg_advisory_xact_lock(hashtextextended(${owner[0].user_id}, 0))`
+        const current = await sql<LeaveRequest[]>`
+          SELECT id, user_id, category, description, status,
+                 attachment_url, (date AT TIME ZONE 'Asia/Jakarta')::date::text AS date, approval_status,
+                 original_end_date::text, effective_end_date::text, duration_days,
+                 rejection_reason, rejected_at::text, created_at::text, updated_at::text
+          FROM leave_requests
+          WHERE id = ${params.id}
+          FOR UPDATE
+        `
+        if (!current[0]) throw AppError.notFound('Leave request')
+        if (current[0].approval_status !== 'approved') {
+          throw AppError.conflict('Only an approved Leave Period can be force-finished.')
+        }
+
+        const start = current[0].date.slice(0, 10)
+        const originalEnd = current[0].original_end_date?.slice(0, 10) ?? start
+        const effectiveEnd = current[0].effective_end_date?.slice(0, 10) ?? originalEnd
+        const target = params.effectiveEndDate.slice(0, 10)
+        if (target < start) {
+          throw AppError.validationError(
+            'Effective end date cannot precede the Leave Period start.',
+          )
+        }
+        if (target > effectiveEnd) {
+          throw AppError.conflict('Force-finish cannot extend an approved Leave Period.')
+        }
+
+        const rows = await sql<LeaveRequest[]>`
+          UPDATE leave_requests
+          SET original_end_date = COALESCE(original_end_date, (date AT TIME ZONE 'Asia/Jakarta')::date),
+              effective_end_date = (${target})::date,
+              updated_at = NOW()
+          WHERE id = ${params.id}
+          RETURNING id, user_id, category, description, status,
+                    attachment_url, (date AT TIME ZONE 'Asia/Jakarta')::date::text AS date, approval_status,
+                    original_end_date::text, effective_end_date::text, duration_days,
+                    rejection_reason, rejected_at::text, created_at::text, updated_at::text
+        `
+        if (!rows[0]) throw AppError.notFound('Leave request')
+        return rows[0]
+      })
+
+      const profile = await this.getUserProfile(updated.user_id).catch(() => null)
+      if (profile) {
+        updated.student_name = profile.full_name ?? null
+        updated.student_nis = profile.nis ?? null
+        updated.student_class = profile.class_name ?? null
+        updated.absence_number = profile.absence_number ?? null
+      }
+      return {
+        ...updated,
+        ...getLeavePeriodFields({
+          date: updated.date,
+          approval_status: updated.approval_status,
+          original_end_date: updated.original_end_date,
+          effective_end_date: updated.effective_end_date,
+          duration_days: updated.duration_days,
+        }),
+      }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to force-finish leave request')
       throw AppError.internal('An unexpected database error occurred.')
     }
   }
@@ -840,10 +915,39 @@ export class PostgresDomainStore implements DomainStore {
         }
       }
 
-      await this.sql`
-        INSERT INTO attendances (user_id, date, status, action_type, latitude, longitude, created_at)
-        VALUES (${params.userId}, ${todayWIB}, ${status}, ${params.actionType}, ${params.latitude}, ${params.longitude}, ${now.toISOString()})
-      `
+      await this.sql.begin(async (sql) => {
+        await sql`SELECT pg_advisory_xact_lock(hashtextextended(${params.userId}, 0))`
+        const blocking = await sql<
+          {
+            id: string
+            start_date: string
+            effective_end_date: string
+          }[]
+        >`
+          SELECT id,
+                 (date AT TIME ZONE 'Asia/Jakarta')::date::text AS start_date,
+                 COALESCE(effective_end_date, original_end_date, (date AT TIME ZONE 'Asia/Jakarta')::date)::text AS effective_end_date
+          FROM leave_requests
+          WHERE user_id = ${params.userId}
+            AND approval_status = 'approved'
+            AND (date AT TIME ZONE 'Asia/Jakarta')::date <= (${todayWIB})::date
+            AND COALESCE(effective_end_date, original_end_date, (date AT TIME ZONE 'Asia/Jakarta')::date) >= (${todayWIB})::date
+          ORDER BY start_date ASC, id ASC
+          LIMIT 1
+        `
+        if (blocking[0]) {
+          throw AppError.attendanceBlocked('Attendance is blocked by an approved Leave Period.', {
+            leave_request_id: blocking[0].id,
+            date: todayWIB,
+            effective_start_date: blocking[0].start_date,
+            effective_end_date: blocking[0].effective_end_date,
+          })
+        }
+        await sql`
+          INSERT INTO attendances (user_id, date, status, action_type, latitude, longitude, created_at)
+          VALUES (${params.userId}, ${todayWIB}, ${status}, ${params.actionType}, ${params.latitude}, ${params.longitude}, ${now.toISOString()})
+        `
+      })
 
       return { success: true }
     } catch (err) {
@@ -943,11 +1047,40 @@ export class PostgresDomainStore implements DomainStore {
         }
       }
 
-      const rows = await this.sql<AttendanceRecord[]>`
-        INSERT INTO attendances (user_id, date, status, action_type, latitude, longitude, created_at)
-        VALUES (${params.userId}, ${todayWIB}, ${status}, ${params.actionType}, ${params.latitude ?? null}, ${params.longitude ?? null}, ${now.toISOString()})
-        RETURNING id, user_id, date, status, action_type, latitude, longitude, created_at::text
-      `
+      const rows = await this.sql.begin(async (sql) => {
+        await sql`SELECT pg_advisory_xact_lock(hashtextextended(${params.userId}, 0))`
+        const blocking = await sql<
+          {
+            id: string
+            start_date: string
+            effective_end_date: string
+          }[]
+        >`
+          SELECT id,
+                 (date AT TIME ZONE 'Asia/Jakarta')::date::text AS start_date,
+                 COALESCE(effective_end_date, original_end_date, (date AT TIME ZONE 'Asia/Jakarta')::date)::text AS effective_end_date
+          FROM leave_requests
+          WHERE user_id = ${params.userId}
+            AND approval_status = 'approved'
+            AND (date AT TIME ZONE 'Asia/Jakarta')::date <= (${todayWIB})::date
+            AND COALESCE(effective_end_date, original_end_date, (date AT TIME ZONE 'Asia/Jakarta')::date) >= (${todayWIB})::date
+          ORDER BY start_date ASC, id ASC
+          LIMIT 1
+        `
+        if (blocking[0]) {
+          throw AppError.attendanceBlocked('Attendance is blocked by an approved Leave Period.', {
+            leave_request_id: blocking[0].id,
+            date: todayWIB,
+            effective_start_date: blocking[0].start_date,
+            effective_end_date: blocking[0].effective_end_date,
+          })
+        }
+        return sql<AttendanceRecord[]>`
+          INSERT INTO attendances (user_id, date, status, action_type, latitude, longitude, created_at)
+          VALUES (${params.userId}, ${todayWIB}, ${status}, ${params.actionType}, ${params.latitude ?? null}, ${params.longitude ?? null}, ${now.toISOString()})
+          RETURNING id, user_id, date, status, action_type, latitude, longitude, created_at::text
+        `
+      })
       if (!rows || rows.length === 0) {
         throw AppError.internal('Failed to create manual attendance record.')
       }

@@ -42,8 +42,11 @@ export class AppError extends Error {
     return new AppError(ErrorCode.VALIDATION_ERROR, 422, 'Validation failed.', details)
   }
 
-  static attendanceBlocked(reason = 'Attendance action is not allowed at this time.'): AppError {
-    return new AppError(ErrorCode.ATTENDANCE_BLOCKED, 409, reason)
+  static attendanceBlocked(
+    reason = 'Attendance action is not allowed at this time.',
+    details?: AppErrorDetails,
+  ): AppError {
+    return new AppError(ErrorCode.ATTENDANCE_BLOCKED, 409, reason, details)
   }
 
   static enrollmentRequired(): AppError {
