@@ -783,24 +783,20 @@ export const approveLeaveRequestSchema = z.object({
   durationDays: z.number().int().min(1).max(30).optional(),
 })
 
+const forceFinishDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD required')
+  .refine((value) => {
+    const date = new Date(`${value}T00:00:00.000Z`)
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
+  }, 'Date must be a valid calendar date.')
+
 export const forceFinishLeaveRequestSchema = z
   .object({
-    effective_end_date: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD required')
-      .optional(),
-    effectiveEndDate: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD required')
-      .optional(),
-    last_excused_date: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD required')
-      .optional(),
-    lastExcusedDate: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD required')
-      .optional(),
+    effective_end_date: forceFinishDateSchema.optional(),
+    effectiveEndDate: forceFinishDateSchema.optional(),
+    last_excused_date: forceFinishDateSchema.optional(),
+    lastExcusedDate: forceFinishDateSchema.optional(),
     reason: z.string().trim().min(1).max(500),
   })
   .refine(

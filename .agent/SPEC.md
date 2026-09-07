@@ -7,12 +7,14 @@ Implement ticket 06: gate every Attendance write on an approved effective Leave 
 - Approved effective periods block mobile precheck/submit and manual Attendance on every effective WIB date.
 - Pending and rejected requests never block Attendance.
 - Force-finish may only shorten an approved period; it preserves requested/original end and records effective end, actor, time, and reason.
+- Force-finish period mutation and its required audit record are one atomic provider operation in PostgreSQL and behaviorally equivalent in Memory.
 - The shared Astra error contract remains `ATTENDANCE_BLOCKED` with actionable details.
 - Legacy approved one-day requests continue to behave as one-day periods.
 
 # Acceptance Criteria
 
 - Astra HTTP tests cover mobile, manual, boundaries, roles, and audit fields.
+- Public force-finish validation rejects impossible calendar dates.
 - Mobile workflow maps a structured `ATTENDANCE_BLOCKED` submit response to a stable actionable outcome.
 - No attendance is deleted or rewritten.
 

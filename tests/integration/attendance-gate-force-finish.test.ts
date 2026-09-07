@@ -49,6 +49,12 @@ async function setup() {
     role: 'school_admin',
     lifecycle_status: 'approved',
   })
+  domainStore.profiles.set('teacher-1', {
+    user_id: 'teacher-1',
+    full_name: 'Teacher One',
+    role: 'teacher',
+    lifecycle_status: 'approved',
+  })
   const period = await domainStore.createAcademicPeriod({
     name: '2026/2027',
     startDate: '2026-01-01',
@@ -94,6 +100,13 @@ async function setup() {
     mfaVerified: true,
     mustChangePassword: false,
   })
+  identityProvider.users.set('teacher-1', {
+    userId: 'teacher-1',
+    roles: ['teacher'],
+    scopes: ['admin:read', 'admin:write'],
+    mfaVerified: true,
+    mustChangePassword: false,
+  })
   const providers = {
     domainStore,
     identityProvider,
@@ -104,7 +117,45 @@ async function setup() {
 }
 
 describe('attendance gate and leave force-finish', () => {
-  it('blocks manual attendance through an approved period, then opens the next WIB day after force-finish', async () => {
+  it('allows Attendance for pending and rejected Leave Requests', async () => {
+    for (const approvalStatus of ['pending', 'rejected'] as const) {
+      const { domainStore, app } = await setup()
+      const today = wibDate()
+      const leave = await domainStore.createLeaveRequest({
+        user_id: 'student-1',
+        category: 'sakit',
+        description: `${approvalStatus} leave`,
+        date: `${today}T00:00:00+07:00`,
+        approval_status: approvalStatus,
+      })
+      const adminToken = await token({
+        sub: 'school-admin-1',
+        roles: ['school_admin'],
+        scope: 'admin:read admin:write',
+        mfa_verified: true,
+        must_change_password: false,
+      })
+
+      const response = await app.request('/v1/admin/attendance/manual', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: 'student-1',
+          action_type: 'check_in',
+          date: today,
+          reason: `${approvalStatus} leave must not block attendance`,
+        }),
+      })
+
+      expect(response.status, approvalStatus).toBe(201)
+      expect(leave.approval_status).toBe(approvalStatus)
+    }
+  })
+
+  it('blocks mobile check-in/check-out and manual Attendance through the inclusive effective end, then opens the next WIB day after force-finish', async () => {
     const { domainStore, app } = await setup()
     const today = wibDate()
     const start = wibDate(-1)
@@ -119,7 +170,7 @@ describe('attendance gate and leave force-finish', () => {
     await domainStore.updateLeaveRequestStatus({
       id: leave.id,
       approvalStatus: 'approved',
-      durationDays: 3,
+      durationDays: 2,
     })
 
     const adminToken = await token({
@@ -150,18 +201,56 @@ describe('attendance gate and leave force-finish', () => {
     expect(precheckBlocked.status).toBe(200)
     expect((await precheckBlocked.json()).data).toMatchObject({ allowed: false })
 
-    const blocked = await app.request('/v1/admin/attendance/manual', {
+    for (const actionType of ['check_in', 'check_out'] as const) {
+      const mobileBlocked = await app.request('/v1/mobile/attendance/submit', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${studentToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action_type: actionType,
+          image_base64: 'data:image/jpeg;base64,dGVzdA==',
+          latitude: -6.2,
+          longitude: 106.816666,
+        }),
+      })
+      expect(mobileBlocked.status, actionType).toBe(409)
+      expect((await mobileBlocked.json()).error).toMatchObject({
+        code: 'ATTENDANCE_BLOCKED',
+      })
+    }
+
+    for (const actionType of ['check_in', 'check_out'] as const) {
+      const blocked = await app.request('/v1/admin/attendance/manual', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          user_id: 'student-1',
+          action_type: actionType,
+          date: today,
+          reason: 'Manual verification',
+        }),
+      })
+      expect(blocked.status, actionType).toBe(409)
+      expect((await blocked.json()).error).toMatchObject({ code: 'ATTENDANCE_BLOCKED' })
+    }
+    expect(await domainStore.listAttendances({ userId: 'student-1' })).toHaveLength(0)
+
+    const extension = await app.request(`/v1/admin/leave-requests/${leave.id}/force-finish`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        user_id: 'student-1',
-        action_type: 'check_in',
-        date: today,
-        reason: 'Manual verification',
-      }),
+      body: JSON.stringify({ effective_end_date: wibDate(1), reason: 'Invalid extension' }),
     })
-    expect(blocked.status).toBe(409)
-    expect((await blocked.json()).error).toMatchObject({ code: 'ATTENDANCE_BLOCKED' })
+    expect(extension.status).toBe(409)
+    expect((await extension.json()).error.message).toContain('cannot extend')
+
+    const invalidDate = await app.request(`/v1/admin/leave-requests/${leave.id}/force-finish`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ effective_end_date: '2026-02-30', reason: 'Invalid calendar date' }),
+    })
+    expect(invalidDate.status).toBe(422)
 
     const finished = await app.request(`/v1/admin/leave-requests/${leave.id}/force-finish`, {
       method: 'POST',
@@ -170,7 +259,7 @@ describe('attendance gate and leave force-finish', () => {
     })
     expect(finished.status).toBe(200)
     const finishedBody = await finished.json()
-    expect(finishedBody.data.original_end_date).toBe(wibDate(1))
+    expect(finishedBody.data.original_end_date).toBe(today)
     expect(finishedBody.data.effective_end_date).toBe(start)
 
     const allowed = await app.request('/v1/admin/attendance/manual', {
@@ -184,6 +273,7 @@ describe('attendance gate and leave force-finish', () => {
       }),
     })
     expect(allowed.status).toBe(201)
+    expect(await domainStore.listAttendances({ userId: 'student-1' })).toHaveLength(1)
 
     const audit = await domainStore.getAuditLogs('leave_request', leave.id)
     const forceFinish = audit.find((entry) => entry.action === 'force_finish_leave_request')
@@ -191,10 +281,50 @@ describe('attendance gate and leave force-finish', () => {
       actor_id: 'school-admin-1',
       details: {
         effective_end_date: start,
-        original_end_date: wibDate(1),
+        original_end_date: today,
         reason: 'Student returned early',
       },
     })
     expect(forceFinish?.created_at).toBeDefined()
+  })
+
+  it('rejects force-finish from a non-school-admin role', async () => {
+    const { domainStore, app } = await setup()
+    const today = wibDate()
+    const leave = await domainStore.insertPermit({
+      user_id: 'student-1',
+      kategori_izin: 'sakit',
+      deskripsi: 'Medical leave',
+      status: false,
+      link_foto: null,
+      tanggal: `${today}T00:00:00+07:00`,
+    })
+    await domainStore.updateLeaveRequestStatus({
+      id: leave.id,
+      approvalStatus: 'approved',
+      durationDays: 2,
+    })
+    const teacherToken = await token({
+      sub: 'teacher-1',
+      roles: ['teacher'],
+      scope: 'admin:read admin:write',
+      mfa_verified: true,
+      must_change_password: false,
+    })
+
+    const response = await app.request(`/v1/admin/leave-requests/${leave.id}/force-finish`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${teacherToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ effective_end_date: today, reason: 'Not allowed' }),
+    })
+
+    expect(response.status).toBe(403)
+    expect(await domainStore.getLeaveRequestById(leave.id)).toMatchObject({
+      original_end_date: wibDate(1),
+      effective_end_date: wibDate(1),
+    })
   })
 })

@@ -5,11 +5,12 @@
 - [x] Add failing gate/force-finish tests
 - [x] Implement shared provider gate and force-finish
 - [x] Verify focused and full suites
-- [ ] Commit Astra
+- [x] Harden atomic force-finish audit persistence and strict date validation
+- [x] Commit Astra
 
 # Current
 
-Implementation is complete and validated; only the worker commit and parent handoff remain.
+Hardening implementation is complete and validated; parent handoff remains.
 
 # Blocked
 

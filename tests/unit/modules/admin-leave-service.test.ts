@@ -3,6 +3,7 @@ import {
   approveLeaveRequest,
   createAdminLeaveRequest,
   deleteAdminLeaveRequest,
+  forceFinishLeaveRequest,
   getAdminLeaveRequest,
   listAdminLeaveRequests,
   rejectLeaveRequest,
@@ -92,6 +93,45 @@ function setupTestEnvironment() {
 }
 
 describe('Admin Leave Requests Service', () => {
+  it('does not shorten the Leave Period when its required audit insert fails', async () => {
+    const { domainStore, providers } = setupTestEnvironment()
+    const permit = await domainStore.createLeaveRequest({
+      user_id: 'student-1',
+      category: 'sakit',
+      description: 'Sakit demam',
+      date: '2026-08-21T00:00:00+07:00',
+      approval_status: 'approved',
+    })
+    await domainStore.updateLeaveRequestStatus({
+      id: permit.id,
+      approvalStatus: 'approved',
+      durationDays: 3,
+    })
+    const originalInsertAuditLog = domainStore.insertAuditLog.bind(domainStore)
+    domainStore.insertAuditLog = async () => {
+      throw new Error('audit database unavailable')
+    }
+
+    await expect(
+      forceFinishLeaveRequest({
+        id: permit.id,
+        effectiveEndDate: '2026-08-21',
+        reason: 'Student returned early',
+        actorRole: 'school_admin',
+        actorId: 'admin-1',
+        providers,
+      }),
+    ).rejects.toThrow('audit database unavailable')
+
+    const unchanged = await domainStore.getLeaveRequestById(permit.id)
+    expect(unchanged).toMatchObject({
+      original_end_date: '2026-08-23',
+      effective_end_date: '2026-08-23',
+    })
+    expect(await domainStore.getAuditLogs('leave_request', permit.id)).toHaveLength(0)
+    domainStore.insertAuditLog = originalInsertAuditLog
+  })
+
   it('lists leave requests with student profile enrichment and filters', async () => {
     const { domainStore, providers } = setupTestEnvironment()
 

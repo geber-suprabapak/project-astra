@@ -229,6 +229,8 @@ export interface UpdateLeaveRequestStatusParams {
 export interface ForceFinishLeaveRequestParams {
   id: string
   effectiveEndDate: string
+  actorId: string
+  reason: string
 }
 
 export interface CreateLeaveRequestData {

@@ -2192,30 +2192,11 @@ export async function forceFinishLeaveRequest(params: {
     throw AppError.forbidden()
   }
 
-  const current = await params.providers.domainStore.getLeaveRequestById(params.id)
-  if (!current) {
-    throw AppError.notFound('Leave request')
-  }
-
   const updated = await params.providers.domainStore.forceFinishLeaveRequest({
     id: params.id,
     effectiveEndDate: params.effectiveEndDate,
-  })
-
-  await params.providers.domainStore.insertAuditLog({
-    actor_id: params.actorId,
-    action: 'force_finish_leave_request',
-    entity_type: 'leave_request',
-    entity_id: params.id,
-    details: {
-      student_user_id: current.user_id,
-      category: current.category,
-      requested_start_date: updated.requested_start_date,
-      original_end_date: updated.original_end_date,
-      previous_effective_end_date: current.effective_end_date,
-      effective_end_date: updated.effective_end_date,
-      reason: params.reason,
-    },
+    actorId: params.actorId,
+    reason: params.reason,
   })
 
   return mapLeaveRequestWithAttachment(updated, params.providers)

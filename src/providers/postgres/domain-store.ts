@@ -724,6 +724,26 @@ export class PostgresDomainStore implements DomainStore {
                     rejection_reason, rejected_at::text, created_at::text, updated_at::text
         `
         if (!rows[0]) throw AppError.notFound('Leave request')
+        const auditRows = await sql<AuditLog[]>`
+          INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, details)
+          VALUES (
+            ${params.actorId},
+            'force_finish_leave_request',
+            'leave_request',
+            ${params.id},
+            ${JSON.stringify({
+              student_user_id: current[0].user_id,
+              category: current[0].category,
+              requested_start_date: start,
+              original_end_date: originalEnd,
+              previous_effective_end_date: current[0].effective_end_date,
+              effective_end_date: target,
+              reason: params.reason,
+            })}::jsonb
+          )
+          RETURNING id
+        `
+        if (!auditRows[0]) throw AppError.internal('Failed to return inserted audit log record.')
         return rows[0]
       })
 

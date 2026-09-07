@@ -1404,7 +1404,24 @@ export class MemoryDomainStore implements DomainStore {
       throw AppError.conflict('Force-finish cannot extend an approved Leave Period.')
     }
 
-    permit.original_end_date = permit.original_end_date ?? period.end
+    const originalEndDate = permit.original_end_date ?? period.end
+    const previousEffectiveEndDate = permit.effective_end_date ?? null
+    await this.insertAuditLog({
+      actor_id: params.actorId,
+      action: 'force_finish_leave_request',
+      entity_type: 'leave_request',
+      entity_id: params.id,
+      details: {
+        student_user_id: permit.user_id,
+        category: permit.kategori_izin,
+        requested_start_date: period.start,
+        original_end_date: originalEndDate,
+        previous_effective_end_date: previousEffectiveEndDate,
+        effective_end_date: effectiveEndDate,
+        reason: params.reason,
+      },
+    })
+    permit.original_end_date = originalEndDate
     permit.effective_end_date = effectiveEndDate
     permit.updated_at = new Date().toISOString()
     const profile = this.profiles.get(permit.user_id)
