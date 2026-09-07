@@ -1275,6 +1275,74 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
     return successResponse(c, attendance, 'Attendance retrieved successfully.')
   }
 
+  // GET /v1/admin/attendance/export & /v1/admin/attendances/export
+  //
+  // Chronos exports and aggregate views need a complete, stable snapshot.
+  // Returning one bounded server-side collection avoids making a client walk
+  // hundreds of 100-row pages through the per-user admin-session limiter.
+  const handleCollectAttendances = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const userId = c.req.query('user_id') ?? c.req.query('userId')
+    const date = c.req.query('date')
+    const startDate = c.req.query('start_date') ?? c.req.query('startDate')
+    const endDate = c.req.query('end_date') ?? c.req.query('endDate')
+    const status = c.req.query('status')
+    const actionType = c.req.query('action_type') ?? c.req.query('actionType')
+
+    const isValidIsoDate = (value: string): boolean => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+      const dateObj = new Date(`${value}T00:00:00.000Z`)
+      return !Number.isNaN(dateObj.getTime()) && dateObj.toISOString().slice(0, 10) === value
+    }
+
+    if (date !== undefined && !isValidIsoDate(date)) {
+      throw AppError.validationError('date must be in YYYY-MM-DD format.')
+    }
+    if (startDate !== undefined && !isValidIsoDate(startDate)) {
+      throw AppError.validationError('start_date must be in YYYY-MM-DD format.')
+    }
+    if (endDate !== undefined && !isValidIsoDate(endDate)) {
+      throw AppError.validationError('end_date must be in YYYY-MM-DD format.')
+    }
+    if (startDate !== undefined && endDate !== undefined && startDate > endDate) {
+      throw AppError.validationError('start_date cannot be after end_date.')
+    }
+
+    const maxRows = 50_000
+    const attendances = await listAttendances({
+      filter: {
+        userId,
+        date,
+        startDate,
+        endDate,
+        status,
+        actionType,
+        limit: maxRows,
+        offset: 0,
+      },
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+
+    if (attendances.length >= maxRows) {
+      throw AppError.validationError(
+        `Attendance collection exceeds the ${maxRows}-row safety limit.`,
+      )
+    }
+
+    return successResponse(
+      c,
+      attendances,
+      'Complete attendances collection retrieved successfully.',
+      200,
+      { pagination: { limit: attendances.length, offset: 0, has_more: false } },
+    )
+  }
+
+  // Keep these routes before /:id so "export" cannot be parsed as an id.
+  router.get('/attendance/export', handleCollectAttendances)
+  router.get('/attendances/export', handleCollectAttendances)
+
   // GET /v1/admin/attendance & /v1/admin/attendances
   const handleListAttendances = async (c: any) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders

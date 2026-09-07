@@ -806,7 +806,10 @@ export class PostgresDomainStore implements DomainStore {
     offset?: number
   }): Promise<AttendanceRecord[]> {
     try {
-      const limit = Math.min(Math.max(filter?.limit ?? 50, 1), 101)
+      // The public admin route caps requests at 100 rows. Internal
+      // server-authoritative collection routes may request a larger bounded
+      // batch so clients do not need hundreds of rate-limited page calls.
+      const limit = Math.min(Math.max(filter?.limit ?? 50, 1), 50_000)
       const offset = Math.max(filter?.offset ?? 0, 0)
       const rows = await this.sql<AttendanceRecord[]>`
         SELECT id, user_id, date, status, action_type, latitude, longitude, created_at::text

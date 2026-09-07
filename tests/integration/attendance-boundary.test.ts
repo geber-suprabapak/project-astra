@@ -358,6 +358,49 @@ describe('integration: Astra settlement boundaries', () => {
       expect(body2.meta.pagination.has_more).toBe(false)
     })
 
+    it('returns a complete bounded collection in one server-authoritative request', async () => {
+      const store = new MemoryDomainStore()
+      const count = 1_501
+      store.attendancesList = createAttendances(count)
+      const { app } = createTestApp(store)
+
+      const res = await app.request('/v1/admin/attendance/export', {
+        headers: adminHeaders,
+      })
+      expect(res.status).toBe(200)
+      // SAFETY: Complete collection response carries every row and explicit
+      // non-paginated metadata for Chronos/export consumers.
+      const body = (await res.json()) as {
+        data: AttendanceRecord[]
+        meta: { pagination: { limit: number; offset: number; has_more: boolean } }
+      }
+      expect(body.data).toHaveLength(count)
+      expect(body.meta.pagination.limit).toBe(count)
+      expect(body.meta.pagination.offset).toBe(0)
+      expect(body.meta.pagination.has_more).toBe(false)
+      expect(new Set(body.data.map((record) => record.id)).size).toBe(count)
+    })
+
+    it('supports date filters on complete attendance collections', async () => {
+      const store = new MemoryDomainStore()
+      store.attendancesList = [
+        ...createAttendances(2, '2026-09-01'),
+        ...createAttendances(3, '2026-09-02'),
+      ]
+      const { app } = createTestApp(store)
+
+      const res = await app.request(
+        '/v1/admin/attendance/export?start_date=2026-09-02&end_date=2026-09-02',
+        { headers: adminHeaders },
+      )
+      expect(res.status).toBe(200)
+      // SAFETY: A successful collection response always carries an attendance
+      // array under the documented `data` envelope.
+      const body = (await res.json()) as { data: AttendanceRecord[] }
+      expect(body.data).toHaveLength(3)
+      expect(body.data.every((record) => record.date === '2026-09-02')).toBe(true)
+    })
+
     it('validates limit and offset query parameters', async () => {
       const { app } = createTestApp()
 

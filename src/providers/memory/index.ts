@@ -1484,7 +1484,10 @@ export class MemoryDomainStore implements DomainStore {
       const createdAtOrder = b.created_at.localeCompare(a.created_at)
       return createdAtOrder || b.id.localeCompare(a.id)
     })
-    const limit = Math.min(Math.max(filter?.limit ?? 50, 1), 101)
+    // Keep the in-memory provider aligned with Postgres for the bounded
+    // server-authoritative collection route. Public HTTP validation remains
+    // capped at 100 rows.
+    const limit = Math.min(Math.max(filter?.limit ?? 50, 1), 50_000)
     const offset = Math.max(filter?.offset ?? 0, 0)
     return items.slice(offset, offset + limit).map((a) => normalizeAttendanceRecord(a))
   }
