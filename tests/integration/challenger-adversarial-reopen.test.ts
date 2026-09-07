@@ -110,7 +110,7 @@ async function setupTestEntities(ctx: ReturnType<typeof createTestContext>) {
 }
 
 describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-01)', () => {
-  it('Role Matrix: allows platform_admin and school_admin; strictly forbids teacher, student, and unauthenticated roles', async () => {
+  it('Role Matrix: allows only school_admin; strictly forbids platform_admin, teacher, student, and unauthenticated roles', async () => {
     const ctx = createTestContext()
     const {
       lr,
@@ -121,7 +121,7 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
       studentWithAdminScopeToken,
     } = await setupTestEntities(ctx)
 
-    // 1. Reject first as platform_admin
+    // 1. Platform administrators cannot perform leave transitions.
     const rejectRes = await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/reject`, {
       method: 'POST',
       headers: {
@@ -130,7 +130,18 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
       },
       body: JSON.stringify({ reason: 'Surat dokter buram.' }),
     })
-    expect(rejectRes.status).toBe(200)
+    expect(rejectRes.status).toBe(403)
+
+    // Establish a rejected request using the authorized role.
+    const schoolAdminReject = await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/reject`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${schoolAdminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ reason: 'Surat dokter buram.' }),
+    })
+    expect(schoolAdminReject.status).toBe(200)
 
     // 2. Attempt reopen as student (without admin scope) -> 403 Forbidden (Scope check)
     const studentReopen = await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/reopen`, {
@@ -185,33 +196,25 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
     })
     expect(schoolAdminReopen.status).toBe(200)
 
-    // 7. Reject again and reopen as platform_admin -> 200 OK
-    await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/reject`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${adminToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ reason: 'Alasan ketiga ditolak' }),
-    })
+    // 7. Platform administrator remains forbidden after a rejected transition.
     const platformAdminReopen = await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/reopen`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${adminToken}`,
       },
     })
-    expect(platformAdminReopen.status).toBe(200)
+    expect(platformAdminReopen.status).toBe(403)
   })
 
   it('Non-existent ID: returns 404 Resource Not Found', async () => {
     const ctx = createTestContext()
-    const { adminToken } = await setupTestEntities(ctx)
+    const { schoolAdminToken } = await setupTestEntities(ctx)
 
     const randomId = '00000000-0000-0000-0000-000000000099'
     const res = await ctx.app.request(`/v1/admin/leave-requests/${randomId}/reopen`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        Authorization: `Bearer ${schoolAdminToken}`,
       },
     })
     expect(res.status).toBe(404)
@@ -221,13 +224,13 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
 
   it('Already Approved Request: reopening approved request is rejected to preserve the Leave Period', async () => {
     const ctx = createTestContext()
-    const { lr, adminToken } = await setupTestEntities(ctx)
+    const { lr, schoolAdminToken } = await setupTestEntities(ctx)
 
     // Approve the request
     const approveRes = await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/approve`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        Authorization: `Bearer ${schoolAdminToken}`,
       },
     })
     expect(approveRes.status).toBe(200)
@@ -239,7 +242,7 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
     const reopenRes = await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/reopen`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        Authorization: `Bearer ${schoolAdminToken}`,
       },
     })
     expect(reopenRes.status).toBe(409)
@@ -249,13 +252,13 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
 
   it('Database & Notification State Resets: audit log and push notification outbox are recorded accurately', async () => {
     const ctx = createTestContext()
-    const { lr, adminToken } = await setupTestEntities(ctx)
+    const { lr, schoolAdminToken } = await setupTestEntities(ctx)
 
     // Reject first
     await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/reject`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        Authorization: `Bearer ${schoolAdminToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ reason: 'Dokumen kadaluarsa' }),
@@ -268,7 +271,7 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
     const reopenRes = await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/reopen`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        Authorization: `Bearer ${schoolAdminToken}`,
       },
     })
     expect(reopenRes.status).toBe(200)
@@ -279,7 +282,7 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
     )
     expect(auditLogs.length).toBeGreaterThanOrEqual(1)
     const latestAudit = auditLogs[auditLogs.length - 1]
-    expect(latestAudit.actor_id).toBe('admin-1')
+    expect(latestAudit.actor_id).toBe('school-admin-1')
     expect(latestAudit.details.previous_status).toBe('rejected')
     expect(latestAudit.details.student_user_id).toBe('student-1')
     expect(latestAudit.details.category).toBe('sakit')
@@ -295,13 +298,13 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
 
   it('Route Aliases & PATCH Compatibility: verifies /permits/:id/reopen and PATCH pending payloads', async () => {
     const ctx = createTestContext()
-    const { lr, adminToken } = await setupTestEntities(ctx)
+    const { lr, schoolAdminToken } = await setupTestEntities(ctx)
 
     // Test POST /v1/admin/permits/:id/reopen alias
     const permitsAliasRes = await ctx.app.request(`/v1/admin/permits/${lr.id}/reopen`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        Authorization: `Bearer ${schoolAdminToken}`,
       },
     })
     expect(permitsAliasRes.status).toBe(200)
@@ -310,7 +313,7 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
     const patchPendingRes = await ctx.app.request(`/v1/admin/leave-requests/${lr.id}`, {
       method: 'PATCH',
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        Authorization: `Bearer ${schoolAdminToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ approval_status: 'pending' }),
@@ -323,7 +326,7 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
     const patchInvalidRes = await ctx.app.request(`/v1/admin/leave-requests/${lr.id}`, {
       method: 'PATCH',
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        Authorization: `Bearer ${schoolAdminToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ approval_status: 'unknown_status' }),

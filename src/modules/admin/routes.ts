@@ -1492,7 +1492,7 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
 
     const userId = parsed.data.user_id ?? parsed.data.userId
     const fileId = parsed.data.file_id ?? parsed.data.fileId
-    const approvalStatus = parsed.data.approval_status ?? parsed.data.approvalStatus ?? 'approved'
+    const approvalStatus = parsed.data.approval_status ?? parsed.data.approvalStatus ?? 'pending'
 
     const created = await createAdminLeaveRequest({
       userId: userId!,

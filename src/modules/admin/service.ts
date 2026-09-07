@@ -2042,8 +2042,13 @@ export async function createAdminLeaveRequest(params: {
     storagePath = fileRecord.object_path
   }
 
-  const approvalStatus: LeaveRequestApprovalStatus = params.approvalStatus ?? 'approved'
-  const status = approvalStatus === 'approved'
+  const approvalStatus: LeaveRequestApprovalStatus = params.approvalStatus ?? 'pending'
+  if (approvalStatus !== 'pending') {
+    throw AppError.validationError(
+      'Admin-created leave requests must start pending; use the approval or rejection endpoint for status transitions.',
+    )
+  }
+  const status = false
   const dateValue = params.date.includes('T') ? params.date : `${params.date}T00:00:00+07:00`
 
   const created = await params.providers.domainStore.createLeaveRequest({
@@ -2117,10 +2122,7 @@ export async function approveLeaveRequest(params: {
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse> {
-  if (
-    !params.actorRole ||
-    !['platform_admin', 'school_admin'].includes(params.actorRole)
-  ) {
+  if (params.actorRole !== 'school_admin') {
     throw AppError.forbidden()
   }
 
@@ -2185,10 +2187,7 @@ export async function rejectLeaveRequest(params: {
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse> {
-  if (
-    !params.actorRole ||
-    !['platform_admin', 'school_admin'].includes(params.actorRole)
-  ) {
+  if (params.actorRole !== 'school_admin') {
     throw AppError.forbidden()
   }
 
@@ -2246,10 +2245,7 @@ export async function reopenLeaveRequest(params: {
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse> {
-  if (
-    !params.actorRole ||
-    !['platform_admin', 'school_admin'].includes(params.actorRole)
-  ) {
+  if (params.actorRole !== 'school_admin') {
     throw AppError.forbidden()
   }
 

@@ -478,7 +478,7 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     })
     const studentToken = tokenFor({ sub: 'student-1', roles: ['student'], scope: 'openid profile' })
 
-    // 1. Admin creates leave request for student-1 with default approval (approved)
+    // 1. Admin records a leave request for student-1; approval is a separate transition.
     const createRes = await app.request('/v1/admin/leave-requests', {
       method: 'POST',
       headers: {
@@ -500,8 +500,8 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     expect(createBody.data.user_id).toBe('student-1')
     expect(createBody.data.student_name).toBe('Budi Santoso')
     expect(createBody.data.category).toBe('sakit')
-    expect(createBody.data.approval_status).toBe('approved')
-    expect(createBody.data.status).toBe(true)
+    expect(createBody.data.approval_status).toBe('pending')
+    expect(createBody.data.status).toBe(false)
     const permitId = createBody.data.id
     expect(permitId).toBeDefined()
 

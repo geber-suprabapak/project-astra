@@ -450,8 +450,8 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
         const json = (await res.json()) as any
         expect(json.success).toBe(true)
         expect(json.data.category).toBe('sakit')
-        expect(json.data.approval_status).toBe('approved')
-        expect(json.data.status).toBe(true)
+        expect(json.data.approval_status).toBe('pending')
+        expect(json.data.status).toBe(false)
       }
     })
 

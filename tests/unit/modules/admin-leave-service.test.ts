@@ -257,27 +257,30 @@ describe('Admin Leave Requests Service', () => {
     expect(legacy.duration_days).toBe(1)
   })
 
-  it.each([0, 31])('rejects approval duration %s outside the inclusive boundary', async (durationDays) => {
-    const { domainStore, providers } = setupTestEnvironment()
-    const permit = await domainStore.insertPermit({
-      user_id: 'student-1',
-      kategori_izin: 'sakit',
-      deskripsi: 'Sakit demam',
-      status: false,
-      link_foto: null,
-      tanggal: '2026-08-21T00:00:00+07:00',
-    })
+  it.each([0, 31])(
+    'rejects approval duration %s outside the inclusive boundary',
+    async (durationDays) => {
+      const { domainStore, providers } = setupTestEnvironment()
+      const permit = await domainStore.insertPermit({
+        user_id: 'student-1',
+        kategori_izin: 'sakit',
+        deskripsi: 'Sakit demam',
+        status: false,
+        link_foto: null,
+        tanggal: '2026-08-21T00:00:00+07:00',
+      })
 
-    await expect(
-      approveLeaveRequest({
-        id: permit.id,
-        actorRole: 'school_admin',
-        actorId: 'admin-1',
-        durationDays,
-        providers,
-      }),
-    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
-  })
+      await expect(
+        approveLeaveRequest({
+          id: permit.id,
+          actorRole: 'school_admin',
+          actorId: 'admin-1',
+          durationDays,
+          providers,
+        }),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    },
+  )
 
   it('does not reopen an approved Leave Period', async () => {
     const { domainStore, providers } = setupTestEnvironment()
@@ -297,6 +300,47 @@ describe('Admin Leave Requests Service', () => {
         providers,
       }),
     ).rejects.toMatchObject({ code: 'CONFLICT' })
+  })
+
+  it('forbids platform administrators from approving, rejecting, or reopening Leave Requests', async () => {
+    const { domainStore, providers } = setupTestEnvironment()
+    const permit = await domainStore.insertPermit({
+      user_id: 'student-1',
+      kategori_izin: 'sakit',
+      deskripsi: 'Sakit demam',
+      status: false,
+      link_foto: null,
+      tanggal: '2026-08-21T00:00:00+07:00',
+    })
+
+    await expect(
+      approveLeaveRequest({
+        id: permit.id,
+        actorRole: 'platform_admin',
+        actorId: 'platform-admin-1',
+        durationDays: 1,
+        providers,
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+
+    await expect(
+      rejectLeaveRequest({
+        id: permit.id,
+        actorRole: 'platform_admin',
+        actorId: 'platform-admin-1',
+        reason: 'Tidak disetujui',
+        providers,
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+
+    await expect(
+      reopenLeaveRequest({
+        id: permit.id,
+        actorRole: 'platform_admin',
+        actorId: 'platform-admin-1',
+        providers,
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
   })
 
   it('rejects a leave request with reason and records an audit log', async () => {
@@ -514,7 +558,7 @@ describe('Admin Leave Requests Service', () => {
   })
 
   describe('createAdminLeaveRequest', () => {
-    it('creates leave request with default approved status and records audit log', async () => {
+    it('creates leave request with default pending status and records audit log', async () => {
       const { domainStore, providers } = setupTestEnvironment()
 
       const created = await createAdminLeaveRequest({
@@ -534,8 +578,8 @@ describe('Admin Leave Requests Service', () => {
       expect(created.student_class).toBe('XII RPL 1')
       expect(created.category).toBe('sakit')
       expect(created.description).toBe('Sakit tifus dicatat oleh wali kelas')
-      expect(created.approval_status).toBe('approved')
-      expect(created.status).toBe(true)
+      expect(created.approval_status).toBe('pending')
+      expect(created.status).toBe(false)
 
       // Verify audit log
       const logs = await domainStore.getAuditLogs('leave_request', created.id)
@@ -543,6 +587,26 @@ describe('Admin Leave Requests Service', () => {
       expect(logs[0].action).toBe('create_admin_leave_request')
       expect(logs[0].actor_id).toBe('teacher-1')
     })
+
+    it.each(['approved', 'rejected'] as const)(
+      'does not allow admin creation to start in %s status',
+      async (approvalStatus) => {
+        const { providers } = setupTestEnvironment()
+
+        await expect(
+          createAdminLeaveRequest({
+            userId: 'student-1',
+            category: 'sakit',
+            description: 'Status must transition through the reviewed endpoint',
+            date: '2026-08-28',
+            approvalStatus,
+            actorRole: 'teacher',
+            actorId: 'teacher-1',
+            providers,
+          }),
+        ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+      },
+    )
 
     it('creates leave request with explicit pending status and file_id attachment', async () => {
       const { domainStore, providers } = setupTestEnvironment()

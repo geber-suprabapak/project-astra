@@ -162,7 +162,7 @@ describe('createAdminLeaveRequestSchema', () => {
     })
     expect(result.success).toBe(true)
     if (result.success) {
-      expect(result.data.approval_status).toBe('approved')
+      expect(result.data.approval_status).toBe('pending')
     }
   })
 

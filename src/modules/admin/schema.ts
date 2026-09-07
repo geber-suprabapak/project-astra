@@ -794,7 +794,9 @@ export const createAdminLeaveRequestSchema = z
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD required'),
     file_id: z.string().uuid().optional().nullable(),
     fileId: z.string().uuid().optional().nullable(),
-    approval_status: leaveRequestApprovalStatusSchema.default('approved'),
+    // Administrative creation records the student's request only. Approval or
+    // rejection must go through the role-checked transition endpoints.
+    approval_status: leaveRequestApprovalStatusSchema.default('pending'),
     approvalStatus: leaveRequestApprovalStatusSchema.optional(),
   })
   .refine((data) => Boolean(data.user_id || data.userId), {
