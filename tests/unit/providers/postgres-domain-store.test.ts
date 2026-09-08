@@ -982,6 +982,49 @@ describe('PostgresDomainStore (Greenfield)', () => {
     expect(transfer.current.status).toBe('active')
   })
 
+  it('reads canonical and legacy enrollment identity fields from the shared roster query', async () => {
+    const queries: string[] = []
+    const mockSql = createMockSql((strings: TemplateStringsArray) => {
+      const query = strings.join('?')
+      queries.push(query)
+      if (query.includes('FROM class_enrollments')) {
+        return [
+          {
+            id: 'enroll-canonical',
+            student_id: 'student-record-1',
+            user_id: null,
+            class_id: 'class-1',
+            academic_period_id: 'period-1',
+            absence_number: '7',
+            status: 'active',
+            class_name: 'XII RPL 1',
+            student_name: 'Siti Aminah',
+            nis: '2001',
+            period_name: '2026/2027 Ganjil',
+          },
+        ]
+      }
+      return []
+    })
+
+    const store = new PostgresDomainStore({ sql: mockSql })
+    const rows = await store.listClassEnrollments({ classId: 'class-1' })
+    const active = await store.getActiveClassEnrollment('student-1', 'period-1')
+
+    expect(rows[0]).toMatchObject({
+      student_id: 'student-record-1',
+      user_id: null,
+      student_name: 'Siti Aminah',
+      nis: '2001',
+      absence_number: '7',
+    })
+    expect(active?.absence_number).toBe('7')
+    expect(queries.filter((query) => query.includes('FROM class_enrollments'))).toHaveLength(2)
+    expect(queries.every((query) => query.includes('ce.student_id'))).toBe(true)
+    expect(queries.every((query) => query.includes('ce.absence_number'))).toBe(true)
+    expect(queries.every((query) => query.includes('LEFT JOIN students'))).toBe(true)
+  })
+
   it('manages locations and calendar exceptions in postgres domain store', async () => {
     const mockSql = createMockSql((strings: TemplateStringsArray) => {
       const query = strings.join('?')

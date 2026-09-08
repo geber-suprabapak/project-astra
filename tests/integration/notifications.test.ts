@@ -164,7 +164,11 @@ describe('Ticket 11 — Notification Outbox & Worker Integration Tests', () => {
     // Admin approves leave request via API
     const approveRes = await app.request(`/v1/admin/leave-requests/${permit.id}/approve`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${adminToken}` },
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ duration_days: 1 }),
     })
     expect(approveRes.status).toBe(200)
 

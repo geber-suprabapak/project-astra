@@ -2088,16 +2088,13 @@ export async function createAdminLeaveRequest(params: {
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse> {
-  if (
-    !params.actorRole ||
-    !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)
-  ) {
-    throw AppError.forbidden()
+  if (params.actorRole !== 'student' || params.userId !== params.actorId) {
+    throw AppError.forbidden('Only students can submit their own leave requests.')
   }
 
   const targetProfile = await params.providers.domainStore.getUserProfile(params.userId)
-  if (!targetProfile) {
-    throw AppError.notFound('Target student profile')
+  if (targetProfile.role !== 'student' || targetProfile.lifecycle_status !== 'approved') {
+    throw AppError.forbidden('Only approved students can submit leave requests.')
   }
 
   let storagePath: string | null = null
@@ -2211,9 +2208,16 @@ export async function approveLeaveRequest(params: {
     throw AppError.conflict('Approved Leave Period cannot be edited or extended.')
   }
 
-  const durationDays = params.durationDays ?? 1
-  if (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > 30) {
-    throw AppError.validationError({ duration_days: ['Duration must be between 1 and 30 days.'] })
+  const durationDays = params.durationDays
+  if (
+    durationDays === undefined ||
+    !Number.isInteger(durationDays) ||
+    durationDays < 1 ||
+    durationDays > 30
+  ) {
+    throw AppError.validationError({
+      duration_days: ['Duration must be explicitly provided between 1 and 30 days.'],
+    })
   }
 
   const updated = await params.providers.domainStore.updateLeaveRequestStatus({

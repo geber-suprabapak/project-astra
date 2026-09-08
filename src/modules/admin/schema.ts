@@ -789,10 +789,15 @@ export const rejectLeaveRequestSchema = z.object({
   rejection_reason: z.string().min(1).optional(),
 })
 
-export const approveLeaveRequestSchema = z.object({
-  duration_days: z.number().int().min(1).max(30).optional(),
-  durationDays: z.number().int().min(1).max(30).optional(),
-})
+export const approveLeaveRequestSchema = z
+  .object({
+    duration_days: z.number().int().min(1).max(30).optional(),
+    durationDays: z.number().int().min(1).max(30).optional(),
+  })
+  .refine((data) => data.duration_days !== undefined || data.durationDays !== undefined, {
+    message: 'Duration is required when approving a leave request.',
+    path: ['duration_days'],
+  })
 
 const forceFinishDateSchema = z
   .string()

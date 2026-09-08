@@ -5,7 +5,10 @@ import {
   PrecheckBodySchema,
   SubmitBodySchema,
 } from '../../../src/modules/attendance/schema.js'
-import { createAdminLeaveRequestSchema } from '../../../src/modules/admin/schema.js'
+import {
+  approveLeaveRequestSchema,
+  createAdminLeaveRequestSchema,
+} from '../../../src/modules/admin/schema.js'
 import { base64ByteSize } from '../../../src/modules/attendance/mapper.js'
 
 describe('Attendance PrecheckBodySchema', () => {
@@ -184,5 +187,13 @@ describe('createAdminLeaveRequestSchema', () => {
       date: '2026-08-28',
     })
     expect(result.success).toBe(false)
+  })
+})
+
+describe('approveLeaveRequestSchema', () => {
+  it('requires an explicit duration', () => {
+    expect(approveLeaveRequestSchema.safeParse({}).success).toBe(false)
+    expect(approveLeaveRequestSchema.safeParse({ duration_days: 2 }).success).toBe(true)
+    expect(approveLeaveRequestSchema.safeParse({ durationDays: 2 }).success).toBe(true)
   })
 })

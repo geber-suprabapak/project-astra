@@ -231,7 +231,9 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
       method: 'POST',
       headers: {
         Authorization: `Bearer ${schoolAdminToken}`,
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({ duration_days: 1 }),
     })
     expect(approveRes.status).toBe(200)
     const approvedData = await approveRes.json()

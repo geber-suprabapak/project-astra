@@ -924,6 +924,7 @@ export class MemoryDomainStore implements DomainStore {
         class_name: cls?.name ?? null,
         student_name: student?.full_name ?? prof?.full_name ?? null,
         nis: student?.nis ?? prof?.nis ?? null,
+        absence_number: e.absence_number ?? prof?.absence_number ?? null,
         period_name: period?.name ?? null,
       }
     })
@@ -948,6 +949,7 @@ export class MemoryDomainStore implements DomainStore {
       class_name: cls?.name ?? null,
       student_name: student?.full_name ?? prof?.full_name ?? null,
       nis: student?.nis ?? prof?.nis ?? null,
+      absence_number: enrollment.absence_number ?? prof?.absence_number ?? null,
       period_name: period?.name ?? null,
     }
   }
@@ -1206,9 +1208,7 @@ export class MemoryDomainStore implements DomainStore {
       .filter((permit) => {
         if (permit.user_id !== data.user_id || permit.approval_status !== 'approved') return false
         const period = effectiveLeavePeriod(permit)
-        const start = period.start
-        const end = period.end
-        return requestedStart >= start && requestedStart <= end
+        return requestedStart <= period.end && requestedStart >= period.start
       })
       .sort((a, b) => a.tanggal.localeCompare(b.tanggal) || a.id.localeCompare(b.id))[0]
     if (overlapping) {
@@ -1365,6 +1365,29 @@ export class MemoryDomainStore implements DomainStore {
       const durationDays = params.durationDays ?? 1
       const start = toWibDate(p.tanggal)
       const end = addCalendarDays(start, durationDays - 1)
+      const overlapping = this.permits
+        .filter((permit) => {
+          if (
+            permit.id === p.id ||
+            permit.user_id !== p.user_id ||
+            permit.approval_status !== 'approved'
+          ) {
+            return false
+          }
+          const period = effectiveLeavePeriod(permit)
+          return start <= period.end && end >= period.start
+        })
+        .sort((a, b) => a.tanggal.localeCompare(b.tanggal) || a.id.localeCompare(b.id))[0]
+      if (overlapping) {
+        const period = effectiveLeavePeriod(overlapping)
+        throw AppError.leavePeriodOverlap({
+          overlapping_request_id: overlapping.id,
+          overlapping_start_date: period.start,
+          overlapping_end_date: period.end,
+          requested_start_date: start,
+          requested_end_date: end,
+        })
+      }
       const conflictDates = new Set<string>()
       for (const attendance of this.attendancesList) {
         if (

@@ -264,6 +264,43 @@ describe('Admin Leave Requests Service', () => {
     expect(logs[0].actor_id).toBe('admin-1')
   })
 
+  it('rejects approval when its duration intersects another approved Leave Period', async () => {
+    const { domainStore, providers } = setupTestEnvironment()
+    const existing = await domainStore.createLeaveRequest({
+      user_id: 'student-1',
+      category: 'sakit',
+      description: 'Sakit pada tanggal yang sudah disetujui',
+      date: '2026-08-23T00:00:00+07:00',
+      approval_status: 'approved',
+    })
+    const candidate = await domainStore.createLeaveRequest({
+      user_id: 'student-1',
+      category: 'pergi',
+      description: 'Pengajuan dimulai sebelum periode yang sudah disetujui',
+      date: '2026-08-21T00:00:00+07:00',
+      approval_status: 'pending',
+    })
+
+    await expect(
+      approveLeaveRequest({
+        id: candidate.id,
+        actorRole: 'school_admin',
+        actorId: 'admin-1',
+        durationDays: 3,
+        providers,
+      }),
+    ).rejects.toMatchObject({
+      code: 'LEAVE_PERIOD_OVERLAP',
+      details: {
+        overlapping_request_id: existing.id,
+        requested_start_date: '2026-08-21',
+        requested_end_date: '2026-08-23',
+      },
+    })
+
+    expect((await domainStore.getLeaveRequestById(candidate.id))?.approval_status).toBe('pending')
+  })
+
   it('rejects teacher approval while preserving a one-day legacy period on read', async () => {
     const { domainStore, providers } = setupTestEnvironment()
 
@@ -321,6 +358,28 @@ describe('Admin Leave Requests Service', () => {
       ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
     },
   )
+
+  it('requires an explicit approval duration', async () => {
+    const { domainStore, providers } = setupTestEnvironment()
+    const permit = await domainStore.insertPermit({
+      user_id: 'student-1',
+      kategori_izin: 'sakit',
+      deskripsi: 'Sakit demam',
+      status: false,
+      link_foto: null,
+      tanggal: '2026-08-21T00:00:00+07:00',
+    })
+
+    await expect(
+      approveLeaveRequest({
+        id: permit.id,
+        actorRole: 'school_admin',
+        actorId: 'admin-1',
+        providers,
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    expect((await domainStore.getLeaveRequestById(permit.id))?.approval_status).toBe('pending')
+  })
 
   it('does not reopen an approved Leave Period', async () => {
     const { domainStore, providers } = setupTestEnvironment()
@@ -598,6 +657,23 @@ describe('Admin Leave Requests Service', () => {
   })
 
   describe('createAdminLeaveRequest', () => {
+    it('rejects staff actors from submitting a request for another student', async () => {
+      const { domainStore, providers } = setupTestEnvironment()
+
+      await expect(
+        createAdminLeaveRequest({
+          userId: 'student-1',
+          category: 'sakit',
+          description: 'Pengajuan tidak boleh dibuat oleh guru',
+          date: '2026-08-28',
+          actorRole: 'teacher',
+          actorId: 'teacher-1',
+          providers,
+        }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+      expect(await domainStore.listLeaveRequests({ userId: 'student-1' })).toHaveLength(0)
+    })
+
     it('creates leave request with default pending status and records audit log', async () => {
       const { domainStore, providers } = setupTestEnvironment()
 
@@ -606,8 +682,8 @@ describe('Admin Leave Requests Service', () => {
         category: 'sakit',
         description: 'Sakit tifus dicatat oleh wali kelas',
         date: '2026-08-28',
-        actorRole: 'teacher',
-        actorId: 'teacher-1',
+        actorRole: 'student',
+        actorId: 'student-1',
         providers,
       })
 
@@ -625,7 +701,7 @@ describe('Admin Leave Requests Service', () => {
       const logs = await domainStore.getAuditLogs('leave_request', created.id)
       expect(logs).toHaveLength(1)
       expect(logs[0].action).toBe('create_admin_leave_request')
-      expect(logs[0].actor_id).toBe('teacher-1')
+      expect(logs[0].actor_id).toBe('student-1')
     })
 
     it.each(['approved', 'rejected'] as const)(
@@ -640,8 +716,8 @@ describe('Admin Leave Requests Service', () => {
             description: 'Status must transition through the reviewed endpoint',
             date: '2026-08-28',
             approvalStatus,
-            actorRole: 'teacher',
-            actorId: 'teacher-1',
+            actorRole: 'student',
+            actorId: 'student-1',
             providers,
           }),
         ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
@@ -666,8 +742,8 @@ describe('Admin Leave Requests Service', () => {
         date: '2026-08-29',
         fileId: file.id,
         approvalStatus: 'pending',
-        actorRole: 'school_admin',
-        actorId: 'admin-1',
+        actorRole: 'student',
+        actorId: 'student-1',
         providers,
       })
 
@@ -690,8 +766,8 @@ describe('Admin Leave Requests Service', () => {
           category: 'sakit',
           description: 'Sakit',
           date: '2026-08-28',
-          actorRole: 'school_admin',
-          actorId: 'admin-1',
+          actorRole: 'student',
+          actorId: 'non-existent-student',
           providers,
         }),
       ).rejects.toMatchObject({
@@ -709,8 +785,8 @@ describe('Admin Leave Requests Service', () => {
           description: 'Sakit',
           date: '2026-08-28',
           fileId: '00000000-0000-0000-0000-000000000000',
-          actorRole: 'school_admin',
-          actorId: 'admin-1',
+          actorRole: 'student',
+          actorId: 'student-1',
           providers,
         }),
       ).rejects.toMatchObject({
@@ -736,8 +812,8 @@ describe('Admin Leave Requests Service', () => {
           description: 'Sakit',
           date: '2026-08-28',
           fileId: file.id,
-          actorRole: 'school_admin',
-          actorId: 'admin-1',
+          actorRole: 'student',
+          actorId: 'student-1',
           providers,
         }),
       ).rejects.toMatchObject({

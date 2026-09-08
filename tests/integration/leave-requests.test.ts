@@ -473,7 +473,7 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     expect(adminDeleteRes.status).toBe(200)
   })
 
-  it('School administrator creates leave request on behalf of student via POST /v1/admin/leave-requests and updates via PATCH', async () => {
+  it('Student submits a leave request and administrator updates it via PATCH', async () => {
     const { domainStore, identityProvider, app } = createIntegrationEnvironment()
     await setupTestUsers(domainStore, identityProvider)
 
@@ -486,15 +486,14 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     })
     const studentToken = tokenFor({ sub: 'student-1', roles: ['student'], scope: 'openid profile' })
 
-    // 1. Admin records a leave request for student-1; approval is a separate transition.
-    const createRes = await app.request('/v1/admin/leave-requests', {
+    // 1. Student submits a leave request; approval is a separate transition.
+    const createRes = await app.request('/v1/mobile/leave-requests', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        Authorization: `Bearer ${studentToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        user_id: 'student-1',
         category: 'sakit',
         description: 'Sakit demam berdarah dicatat oleh tata usaha',
         date: '2026-08-28',
@@ -505,11 +504,8 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     const createBody = await createRes.json()
     expect(createBody.success).toBe(true)
     expect(createBody.data.id).toBeDefined()
-    expect(createBody.data.user_id).toBe('student-1')
-    expect(createBody.data.student_name).toBe('Budi Santoso')
     expect(createBody.data.category).toBe('sakit')
     expect(createBody.data.approval_status).toBe('pending')
-    expect(createBody.data.status).toBe(false)
     const permitId = createBody.data.id
     expect(permitId).toBeDefined()
 
@@ -536,25 +532,27 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     expect(attendanceBody.data.status).toBe('Hadir')
 
     // 2. Admin creates leave request with explicit pending status
-    const pendingCreateRes = await app.request('/v1/admin/leave-requests', {
+    const student2Token = tokenFor({
+      sub: 'student-2',
+      roles: ['student'],
+      scope: 'openid profile',
+    })
+    const pendingCreateRes = await app.request('/v1/mobile/leave-requests', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        Authorization: `Bearer ${student2Token}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        user_id: 'student-2',
         category: 'dispensasi',
         description: 'Dispensasi olimpiade sains',
         date: '2026-08-29',
-        approval_status: 'pending',
       }),
     })
 
     expect(pendingCreateRes.status).toBe(201)
     const pendingBody = await pendingCreateRes.json()
     expect(pendingBody.data.approval_status).toBe('pending')
-    expect(pendingBody.data.status).toBe(false)
     const pendingPermitId = pendingBody.data.id
 
     // 3. Admin updates pending permit via PATCH /v1/admin/leave-requests/:id
@@ -566,6 +564,7 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
       },
       body: JSON.stringify({
         approval_status: 'approved',
+        duration_days: 1,
       }),
     })
 
@@ -590,11 +589,11 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     })
     expect(forbiddenRes.status).toBe(403)
 
-    // 5. Validation error when missing required fields
+    // 5. The privileged admin route rejects a student before validating its payload
     const invalidRes = await app.request('/v1/admin/leave-requests', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        Authorization: `Bearer ${studentToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -603,7 +602,7 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
         date: 'not-a-date',
       }),
     })
-    expect(invalidRes.status).toBe(422)
+    expect(invalidRes.status).toBe(403)
   })
 
   it('School administrator reopens a rejected leave request via PATCH and dedicated POST /reopen endpoints', async () => {
@@ -769,21 +768,6 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
         }),
       })
 
-    const createAdmin = (date: string) =>
-      app.request('/v1/admin/leave-requests', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          user_id: 'student-1',
-          category: 'sakit',
-          description: `Permohonan sakit ${date}`,
-          date,
-        }),
-      })
-
     const first = await create('2026-08-20')
     expect(first.status).toBe(201)
     const firstBody = await first.json()
@@ -855,11 +839,15 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
       action_type: 'check_out',
     })
 
-    const conflictRequest = await createAdmin('2026-08-24')
-    expect(conflictRequest.status).toBe(201)
-    const conflictBody = await conflictRequest.json()
+    const conflictBody = await domainStore.createLeaveRequest({
+      user_id: 'student-1',
+      category: 'sakit',
+      description: 'Permohonan sakit 2026-08-24',
+      date: '2026-08-24T00:00:00+07:00',
+      approval_status: 'pending',
+    })
     const conflictApprove = await app.request(
-      `/v1/admin/leave-requests/${conflictBody.data.id}/approve`,
+      `/v1/admin/leave-requests/${conflictBody.id}/approve`,
       {
         method: 'POST',
         headers: {
@@ -874,7 +862,7 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     expect(conflictError.error.code).toBe('LEAVE_APPROVAL_CONFLICT')
     expect(conflictError.error.details.conflicting_dates).toEqual(['2026-08-24', '2026-08-26'])
 
-    const unchanged = await app.request(`/v1/admin/leave-requests/${conflictBody.data.id}`, {
+    const unchanged = await app.request(`/v1/admin/leave-requests/${conflictBody.id}`, {
       headers: { Authorization: `Bearer ${adminToken}` },
     })
     const unchangedBody = await unchanged.json()

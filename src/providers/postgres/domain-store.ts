@@ -497,8 +497,8 @@ export class PostgresDomainStore implements DomainStore {
           FROM leave_requests
           WHERE user_id = ${data.user_id}
             AND approval_status = 'approved'
-            AND ${dateOnly}::date BETWEEN (date AT TIME ZONE 'Asia/Jakarta')::date
-              AND COALESCE(effective_end_date, original_end_date, (date AT TIME ZONE 'Asia/Jakarta')::date)
+            AND (date AT TIME ZONE 'Asia/Jakarta')::date <= ${dateOnly}::date
+            AND COALESCE(effective_end_date, original_end_date, (date AT TIME ZONE 'Asia/Jakarta')::date) >= ${dateOnly}::date
           ORDER BY start_date ASC, id ASC
           LIMIT 1
         `
@@ -652,6 +652,34 @@ export class PostgresDomainStore implements DomainStore {
           if (!current[0]) throw AppError.notFound('Leave request')
 
           const durationDays = params.durationDays ?? 1
+          const requestedStartDate = current[0].date.slice(0, 10)
+          const requestedEndDate = new Date(
+            Date.parse(`${requestedStartDate}T00:00:00Z`) + (durationDays - 1) * 86_400_000,
+          )
+            .toISOString()
+            .slice(0, 10)
+          const overlapping = await sql<{ id: string; start_date: string; end_date: string }[]>`
+            SELECT id,
+                   (date AT TIME ZONE 'Asia/Jakarta')::date::text AS start_date,
+                   COALESCE(effective_end_date, original_end_date, (date AT TIME ZONE 'Asia/Jakarta')::date)::text AS end_date
+            FROM leave_requests
+            WHERE user_id = ${current[0].user_id}
+              AND approval_status = 'approved'
+              AND id <> ${params.id}
+              AND (date AT TIME ZONE 'Asia/Jakarta')::date <= ${requestedEndDate}::date
+              AND COALESCE(effective_end_date, original_end_date, (date AT TIME ZONE 'Asia/Jakarta')::date) >= ${requestedStartDate}::date
+            ORDER BY start_date ASC, id ASC
+            LIMIT 1
+          `
+          if (overlapping[0] && overlapping[0].id !== params.id) {
+            throw AppError.leavePeriodOverlap({
+              overlapping_request_id: overlapping[0].id,
+              overlapping_start_date: overlapping[0].start_date,
+              overlapping_end_date: overlapping[0].end_date,
+              requested_start_date: requestedStartDate,
+              requested_end_date: requestedEndDate,
+            })
+          }
           const conflicts = await sql<{ date: string }[]>`
             SELECT DISTINCT a.date::date::text AS date
             FROM attendances a
@@ -664,13 +692,8 @@ export class PostgresDomainStore implements DomainStore {
           if (conflicts.length > 0) {
             throw AppError.leaveApprovalConflict({
               conflicting_dates: conflicts.map((row) => row.date),
-              requested_start_date: current[0].date.slice(0, 10),
-              requested_end_date: new Date(
-                Date.parse(`${current[0].date.slice(0, 10)}T00:00:00Z`) +
-                  (durationDays - 1) * 86_400_000,
-              )
-                .toISOString()
-                .slice(0, 10),
+              requested_start_date: requestedStartDate,
+              requested_end_date: requestedEndDate,
             })
           }
 
@@ -1633,12 +1656,15 @@ export class PostgresDomainStore implements DomainStore {
   }): Promise<ClassEnrollment[]> {
     try {
       const rows = await this.sql<ClassEnrollment[]>`
-        SELECT ce.id, ce.user_id, ce.class_id, ce.academic_period_id, ce.status,
-               ce.created_at::text, ce.updated_at::text,
-               c.name AS class_name, p.full_name AS student_name, p.nis,
+        SELECT ce.id, ce.student_id, ce.user_id, ce.class_id, ce.academic_period_id,
+               COALESCE(ce.absence_number, p.absence_number) AS absence_number,
+               ce.status, ce.created_at::text, ce.updated_at::text,
+               c.name AS class_name, COALESCE(s.full_name, p.full_name) AS student_name,
+               COALESCE(s.nis, p.nis) AS nis,
                ap.name AS period_name
         FROM class_enrollments ce
         LEFT JOIN classes c ON c.id = ce.class_id
+        LEFT JOIN students s ON s.id = ce.student_id
         LEFT JOIN profiles p ON p.user_id = ce.user_id
         LEFT JOIN academic_periods ap ON ap.id = ce.academic_period_id
         WHERE (${filter?.userId ?? null}::text IS NULL OR ce.user_id = ${filter?.userId ?? null})
@@ -1668,12 +1694,15 @@ export class PostgresDomainStore implements DomainStore {
       }
 
       const rows = await this.sql<ClassEnrollment[]>`
-        SELECT ce.id, ce.user_id, ce.class_id, ce.academic_period_id, ce.status,
-               ce.created_at::text, ce.updated_at::text,
-               c.name AS class_name, p.full_name AS student_name, p.nis,
+        SELECT ce.id, ce.student_id, ce.user_id, ce.class_id, ce.academic_period_id,
+               COALESCE(ce.absence_number, p.absence_number) AS absence_number,
+               ce.status, ce.created_at::text, ce.updated_at::text,
+               c.name AS class_name, COALESCE(s.full_name, p.full_name) AS student_name,
+               COALESCE(s.nis, p.nis) AS nis,
                ap.name AS period_name
         FROM class_enrollments ce
         LEFT JOIN classes c ON c.id = ce.class_id
+        LEFT JOIN students s ON s.id = ce.student_id
         LEFT JOIN profiles p ON p.user_id = ce.user_id
         LEFT JOIN academic_periods ap ON ap.id = ce.academic_period_id
         WHERE ce.user_id = ${userId}
