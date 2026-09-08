@@ -65,8 +65,6 @@ CREATE TABLE IF NOT EXISTS students (
     CONSTRAINT students_gender_check CHECK (gender IN ('L', 'P'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_students_nis ON students(nis);
-
 -- ----------------------------------------------------------------------------
 -- Table: profiles
 -- Description: Identity-bound Student, Staff, and Administrator profiles
