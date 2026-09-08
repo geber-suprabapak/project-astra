@@ -7,11 +7,7 @@
     "path": "contracts/astra-v1.json"
   },
   "request": {
-    "required_headers": [
-      "Authorization",
-      "X-Request-ID",
-      "X-Astra-Contract-Version"
-    ],
+    "required_headers": ["Authorization", "X-Request-ID", "X-Astra-Contract-Version"],
     "contract_header": {
       "name": "X-Astra-Contract-Version",
       "value": "v1"
@@ -97,10 +93,7 @@
     }
   },
   "attendance_collection": {
-    "routes": [
-      "GET /v1/admin/attendance/export",
-      "GET /v1/admin/attendances/export"
-    ],
+    "routes": ["GET /v1/admin/attendance/export", "GET /v1/admin/attendances/export"],
     "purpose": "Return a complete server-authoritative attendance snapshot for trusted clients and exports without requiring unbounded client pagination.",
     "parameters": {
       "date": "string YYYY-MM-DD optional",
@@ -268,12 +261,7 @@
     },
     "acceptance": {
       "creates": ["Student", "Class Enrollment"],
-      "does_not_create": [
-        "User",
-        "Profile",
-        "Logto identity",
-        "Student Binding"
-      ],
+      "does_not_create": ["User", "Profile", "Logto identity", "Student Binding"],
       "absence_number_owner": "Class Enrollment",
       "atomic": true,
       "add_only": true,
