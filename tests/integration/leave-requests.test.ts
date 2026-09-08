@@ -387,7 +387,11 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     const leave1 = (await create1Res.json()).data
 
     // Student creates leave request 2
-    const student2Token = tokenFor({ sub: 'student-2', roles: ['student'], scope: 'openid profile' })
+    const student2Token = tokenFor({
+      sub: 'student-2',
+      roles: ['student'],
+      scope: 'openid profile',
+    })
     const create2Res = await app.request('/v1/mobile/leave-requests', {
       method: 'POST',
       headers: {
@@ -410,7 +414,9 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     expect(adminListRes.status).toBe(200)
     const adminListBody = await adminListRes.json()
     expect(adminListBody.data).toHaveLength(2)
-    const budi = adminListBody.data.find((item: { user_id: string }) => item.user_id === 'student-1')
+    const budi = adminListBody.data.find(
+      (item: { user_id: string }) => item.user_id === 'student-1',
+    )
     expect(budi.student_name).toBe('Budi Santoso')
     expect(budi.student_nis).toBe('1001')
     expect(budi.student_class).toBe('XII RPL 1')
@@ -823,14 +829,17 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     const future = await create('2026-08-23')
     expect(future.status).toBe(201)
     const futureBody = await future.json()
-    const rejectFuture = await app.request(`/v1/admin/leave-requests/${futureBody.data.id}/reject`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${adminToken}`,
-        'Content-Type': 'application/json',
+    const rejectFuture = await app.request(
+      `/v1/admin/leave-requests/${futureBody.data.id}/reject`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ reason: 'Disiapkan ulang untuk pengujian konflik kehadiran.' }),
       },
-      body: JSON.stringify({ reason: 'Disiapkan ulang untuk pengujian konflik kehadiran.' }),
-    })
+    )
     expect(rejectFuture.status).toBe(200)
 
     await domainStore.insertAttendance({
@@ -872,12 +881,12 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     expect(unchangedBody.data.approval_status).toBe('pending')
     expect(unchangedBody.data.original_end_date).toBeNull()
     expect(unchangedBody.data.effective_end_date).toBeNull()
-    expect((await domainStore.getTodayAbsences('student-1', '2026-08-24')).map((row) => row.date)).toEqual([
-      '2026-08-24',
-    ])
-    expect((await domainStore.getTodayAbsences('student-1', '2026-08-26')).map((row) => row.date)).toEqual([
-      '2026-08-26',
-    ])
+    expect(
+      (await domainStore.getTodayAbsences('student-1', '2026-08-24')).map((row) => row.date),
+    ).toEqual(['2026-08-24'])
+    expect(
+      (await domainStore.getTodayAbsences('student-1', '2026-08-26')).map((row) => row.date),
+    ).toEqual(['2026-08-26'])
   })
 
   it('allows only one concurrent pending request for a student', async () => {
