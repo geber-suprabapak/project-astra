@@ -7,7 +7,11 @@
     "path": "contracts/astra-v1.json"
   },
   "request": {
-    "required_headers": ["Authorization", "X-Request-ID", "X-Astra-Contract-Version"],
+    "required_headers": [
+      "Authorization",
+      "X-Request-ID",
+      "X-Astra-Contract-Version"
+    ],
     "contract_header": {
       "name": "X-Astra-Contract-Version",
       "value": "v1"
@@ -93,7 +97,10 @@
     }
   },
   "attendance_collection": {
-    "routes": ["GET /v1/admin/attendance/export", "GET /v1/admin/attendances/export"],
+    "routes": [
+      "GET /v1/admin/attendance/export",
+      "GET /v1/admin/attendances/export"
+    ],
     "purpose": "Return a complete server-authoritative attendance snapshot for trusted clients and exports without requiring unbounded client pagination.",
     "parameters": {
       "date": "string YYYY-MM-DD optional",
@@ -111,6 +118,26 @@
         "has_more": false
       }
     }
+  },
+  "monthly_attendance_sources": {
+    "routes": [
+      "GET /v1/admin/academic-periods",
+      "GET /v1/admin/students",
+      "GET /v1/admin/classes",
+      "GET /v1/admin/enrollments",
+      "GET /v1/admin/schedules",
+      "GET /v1/admin/calendar-exceptions",
+      "GET /v1/admin/leave-requests"
+    ],
+    "purpose": "Return the existing academic, enrollment, schedule, calendar-exception, student, and leave sources required to build a complete Monthly Attendance Recap.",
+    "query": {
+      "academic_period_id": "string optional",
+      "start_date": "string YYYY-MM-DD optional",
+      "end_date": "string YYYY-MM-DD optional",
+      "limit": "integer 1..100 optional",
+      "offset": "integer >= 0 optional"
+    },
+    "response": "Versioned success envelope; list resources return complete arrays or valid offset pagination metadata."
   },
   "backup_audit": {
     "routes": ["POST /v1/admin/backups", "GET /v1/admin/backups/status"],
@@ -185,6 +212,7 @@
     "GET /v1/admin/staff",
     "GET /v1/admin/staff/{user_id}",
     "GET /v1/admin/classes",
+    "GET /v1/admin/enrollments",
     "GET /v1/admin/locations",
     "POST /v1/admin/locations",
     "PUT /v1/admin/locations/{id}",
@@ -195,6 +223,7 @@
     "PUT /v1/admin/schedules/{id}",
     "PATCH /v1/admin/schedules/{id}",
     "DELETE /v1/admin/schedules/{id}",
+    "GET /v1/admin/calendar-exceptions",
     "GET /v1/admin/leave-requests",
     "POST /v1/admin/leave-requests",
     "GET /v1/admin/leave-requests/{id}",
