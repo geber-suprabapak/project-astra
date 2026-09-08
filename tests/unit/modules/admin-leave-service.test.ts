@@ -100,7 +100,7 @@ describe('Admin Leave Requests Service', () => {
       category: 'sakit',
       description: 'Sakit demam',
       date: '2026-08-21T00:00:00+07:00',
-      approval_status: 'approved',
+      approval_status: 'pending',
     })
     await domainStore.updateLeaveRequestStatus({
       id: permit.id,
@@ -757,6 +757,34 @@ describe('Admin Leave Requests Service', () => {
       expect(updatedFile?.lifecycle).toBe('available')
     })
 
+    it('rejects an attachment owned by another student before lifecycle promotion', async () => {
+      const { domainStore, providers } = setupTestEnvironment()
+
+      const file = await domainStore.createFileRecord({
+        userId: 'student-2',
+        purpose: 'permit_attachment',
+        objectPath: 'student-2/surat_dokter.pdf',
+        contentType: 'application/pdf',
+        lifecycle: 'pending_upload',
+      })
+
+      await expect(
+        createAdminLeaveRequest({
+          userId: 'student-1',
+          category: 'sakit',
+          description: 'Tidak boleh memakai lampiran siswa lain',
+          date: '2026-08-29',
+          fileId: file.id,
+          actorRole: 'student',
+          actorId: 'student-1',
+          providers,
+        }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+
+      expect((await domainStore.getFileRecord(file.id))?.lifecycle).toBe('pending_upload')
+      expect(await domainStore.listLeaveRequests()).toHaveLength(0)
+    })
+
     it('throws notFound when target student profile does not exist', async () => {
       const { providers } = setupTestEnvironment()
 
@@ -838,5 +866,57 @@ describe('Admin Leave Requests Service', () => {
         code: 'FORBIDDEN',
       })
     })
+  })
+
+  it('allows only one concurrent approval and records one set of side effects', async () => {
+    const { domainStore, providers } = setupTestEnvironment()
+    const permit = await domainStore.insertPermit({
+      user_id: 'student-1',
+      kategori_izin: 'sakit',
+      deskripsi: 'Sakit demam',
+      status: false,
+      link_foto: null,
+      tanggal: '2026-08-21T00:00:00+07:00',
+    })
+
+    const originalGetLeaveRequestById = domainStore.getLeaveRequestById.bind(domainStore)
+    let reads = 0
+    let releaseReads!: () => void
+    const bothReadsComplete = new Promise<void>((resolve) => {
+      releaseReads = resolve
+    })
+    domainStore.getLeaveRequestById = async (id) => {
+      const request = await originalGetLeaveRequestById(id)
+      reads += 1
+      if (reads === 2) releaseReads()
+      await bothReadsComplete
+      return request
+    }
+
+    const results = await Promise.allSettled([
+      approveLeaveRequest({
+        id: permit.id,
+        actorRole: 'school_admin',
+        actorId: 'admin-1',
+        durationDays: 1,
+        providers,
+      }),
+      approveLeaveRequest({
+        id: permit.id,
+        actorRole: 'school_admin',
+        actorId: 'admin-1',
+        durationDays: 1,
+        providers,
+      }),
+    ])
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    const rejected = results.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    )
+    expect(rejected?.reason).toMatchObject({ code: 'CONFLICT' })
+    expect((await domainStore.getLeaveRequestById(permit.id))?.approval_status).toBe('approved')
+    expect(await domainStore.getAuditLogs('leave_request', permit.id)).toHaveLength(1)
+    expect(await domainStore.listNotifications({ userId: 'student-1' })).toHaveLength(1)
   })
 })

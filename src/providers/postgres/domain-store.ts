@@ -650,6 +650,9 @@ export class PostgresDomainStore implements DomainStore {
             FOR UPDATE
           `
           if (!current[0]) throw AppError.notFound('Leave request')
+          if (current[0].approval_status !== 'pending') {
+            throw AppError.conflict('Leave request is no longer pending.')
+          }
 
           const durationDays = params.durationDays ?? 1
           const requestedStartDate = current[0].date.slice(0, 10)

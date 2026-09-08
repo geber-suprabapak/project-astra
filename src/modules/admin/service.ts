@@ -2103,6 +2103,9 @@ export async function createAdminLeaveRequest(params: {
     if (!fileRecord) {
       throw AppError.notFound('Attachment file')
     }
+    if (fileRecord.user_id !== params.actorId) {
+      throw AppError.forbidden('Cannot attach a file owned by another user.')
+    }
     if (fileRecord.purpose !== 'permit_attachment') {
       throw AppError.validationError('File purpose must be permit_attachment.')
     }

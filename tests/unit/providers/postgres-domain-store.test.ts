@@ -1525,6 +1525,45 @@ describe('PostgresDomainStore (Greenfield)', () => {
     ).toBe(true)
   })
 
+  it('rejects approval when the locked leave request is no longer pending', async () => {
+    const queries: string[] = []
+    const mockSql = createMockSql((strings: TemplateStringsArray) => {
+      const query = strings.join('?')
+      queries.push(query)
+      if (query.includes('SELECT user_id FROM leave_requests')) {
+        return [{ user_id: 'student-1' }]
+      }
+      if (query.includes('FOR UPDATE')) {
+        return [
+          {
+            id: 'leave-processed',
+            user_id: 'student-1',
+            category: 'sakit',
+            description: 'Sakit demam',
+            status: true,
+            attachment_url: null,
+            date: '2026-08-21',
+            approval_status: 'approved',
+          },
+        ]
+      }
+      return []
+    })
+
+    const store = new PostgresDomainStore({ sql: mockSql })
+
+    await expect(
+      store.updateLeaveRequestStatus({
+        id: 'leave-processed',
+        approvalStatus: 'approved',
+        status: true,
+        durationDays: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect(queries.some((query) => query.includes('FOR UPDATE'))).toBe(true)
+    expect(queries.some((query) => query.includes('UPDATE leave_requests'))).toBe(false)
+  })
+
   it('handles notification outbox operations: enqueue, get, list, claim, updateStatus, and delete', async () => {
     const mockSql = createMockSql((strings: TemplateStringsArray) => {
       const query = strings.join('?')

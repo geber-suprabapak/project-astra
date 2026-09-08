@@ -1362,6 +1362,9 @@ export class MemoryDomainStore implements DomainStore {
     }
 
     if (params.approvalStatus === 'approved') {
+      if (p.approval_status !== 'pending') {
+        throw AppError.conflict('Leave request is no longer pending.')
+      }
       const durationDays = params.durationDays ?? 1
       const start = toWibDate(p.tanggal)
       const end = addCalendarDays(start, durationDays - 1)

@@ -20,9 +20,9 @@
 **Rule:** A submitted action must remain consistent with server eligibility/window checks.
 **Evidence:** `src/modules/attendance/service.ts`, `src/providers/postgres/domain-store.ts`.
 
-## INV-ASTRA-005 — Reopening resets the leave decision and records side effects
+## INV-ASTRA-005 — Reopening rejected leave requests resets the decision
 
-**Rule:** Reopening a leave request returns it to pending with `status=false` and cleared rejection metadata, while preserving its audit-log and notification-outbox side effects.
+**Rule:** Reopening a rejected leave request returns it to pending with `status=false` and cleared rejection metadata, while preserving its audit-log and notification-outbox side effects. An approved Leave Period is immutable and cannot be reopened or extended.
 **Evidence:** `src/modules/admin/service.ts`, `tests/integration/leave-requests.test.ts`, `tests/integration/challenger-adversarial-reopen.test.ts`.
 
 ## INV-ASTRA-006 — Delivery failures remain visible in the outbox
