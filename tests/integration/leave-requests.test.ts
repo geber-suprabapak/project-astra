@@ -899,4 +899,66 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     const items = await domainStore.listLeaveRequests({ userId: 'student-1' })
     expect(items).toHaveLength(1)
   })
+
+  it('lists leave periods that overlap the inclusive range in WIB', async () => {
+    const { domainStore, identityProvider, app } = createIntegrationEnvironment()
+    await setupTestUsers(domainStore, identityProvider)
+
+    const crossMonth = await domainStore.createLeaveRequest({
+      user_id: 'student-1',
+      category: 'sakit',
+      description: 'Sakit lintas bulan',
+      date: '2026-08-25',
+      approval_status: 'pending',
+    })
+    await domainStore.updateLeaveRequestStatus({
+      id: crossMonth.id,
+      approvalStatus: 'approved',
+      durationDays: 12,
+    })
+
+    const wibBoundary = await domainStore.createLeaveRequest({
+      user_id: 'student-2',
+      category: 'pergi',
+      description: 'Izin mulai 1 September WIB',
+      date: '2026-08-31T17:00:00.000Z',
+      approval_status: 'approved',
+    })
+    const afterRange = await domainStore.createLeaveRequest({
+      user_id: 'student-2',
+      category: 'pergi',
+      description: 'Izin setelah rentang',
+      date: '2026-10-01',
+      approval_status: 'approved',
+    })
+
+    domainStore.permits.push({
+      id: 'legacy-one-day',
+      user_id: 'student-1',
+      kategori_izin: 'lainnya',
+      deskripsi: 'Legacy one-day leave',
+      status: true,
+      link_foto: null,
+      tanggal: '2026-09-15',
+      approval_status: 'approved',
+      created_at: '2026-09-15T00:00:00.000Z',
+    })
+
+    const adminToken = tokenFor({
+      sub: 'admin-1',
+      roles: ['school_admin'],
+      scope: 'openid profile admin:read leave:read',
+      mfa_verified: true,
+      must_change_password: false,
+    })
+    const response = await app.request(
+      '/v1/admin/leave-requests?start_date=2026-09-01&end_date=2026-09-30',
+      { headers: { Authorization: `Bearer ${adminToken}` } },
+    )
+
+    expect(response.status).toBe(200)
+    const ids = (await response.json()).data.map((item: { id: string }) => item.id)
+    expect(ids).toEqual(expect.arrayContaining([crossMonth.id, wibBoundary.id, 'legacy-one-day']))
+    expect(ids).not.toContain(afterRange.id)
+  })
 })

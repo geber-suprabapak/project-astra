@@ -50,6 +50,7 @@ import {
   type InsertPermitData,
   type LeaveRequest,
   getLeavePeriodFields,
+  toWibDate,
   type ListLeaveRequestsFilter,
   type ListNotificationsFilter,
   type Location,
@@ -364,10 +365,10 @@ function isPhysicalAttendance(status: string, actionType?: string | null): boole
 }
 
 function effectiveLeavePeriod(permit: Permit) {
-  const start = permit.tanggal.slice(0, 10)
+  const start = toWibDate(permit.tanggal)
   return {
     start,
-    end: permit.effective_end_date ?? permit.original_end_date ?? start,
+    end: toWibDate(permit.effective_end_date ?? permit.original_end_date ?? start),
   }
 }
 
@@ -1187,7 +1188,7 @@ export class MemoryDomainStore implements DomainStore {
   async createLeaveRequest(data: CreateLeaveRequestData): Promise<LeaveRequest> {
     const approvalStatus = data.approval_status ?? 'approved'
     const status = data.status !== undefined ? data.status : approvalStatus === 'approved'
-    const requestedStart = data.date.slice(0, 10)
+    const requestedStart = toWibDate(data.date)
     const pending = this.permits
       .filter((permit) => permit.user_id === data.user_id && permit.approval_status === 'pending')
       .sort(
@@ -1204,14 +1205,16 @@ export class MemoryDomainStore implements DomainStore {
     const overlapping = this.permits
       .filter((permit) => {
         if (permit.user_id !== data.user_id || permit.approval_status !== 'approved') return false
-        const start = permit.tanggal.slice(0, 10)
-        const end = permit.effective_end_date ?? permit.original_end_date ?? start
+        const period = effectiveLeavePeriod(permit)
+        const start = period.start
+        const end = period.end
         return requestedStart >= start && requestedStart <= end
       })
       .sort((a, b) => a.tanggal.localeCompare(b.tanggal) || a.id.localeCompare(b.id))[0]
     if (overlapping) {
-      const start = overlapping.tanggal.slice(0, 10)
-      const end = overlapping.effective_end_date ?? overlapping.original_end_date ?? start
+      const period = effectiveLeavePeriod(overlapping)
+      const start = period.start
+      const end = period.end
       throw AppError.leavePeriodOverlap({
         overlapping_request_id: overlapping.id,
         overlapping_start_date: start,
@@ -1306,11 +1309,14 @@ export class MemoryDomainStore implements DomainStore {
     if (filter?.category) {
       items = items.filter((p) => p.kategori_izin === filter.category)
     }
-    if (filter?.startDate) {
-      items = items.filter((p) => p.tanggal >= filter.startDate!)
-    }
-    if (filter?.endDate) {
-      items = items.filter((p) => p.tanggal <= filter.endDate!)
+    if (filter?.startDate || filter?.endDate) {
+      items = items.filter((p) => {
+        const period = effectiveLeavePeriod(p)
+        return (
+          (!filter.startDate || period.end >= filter.startDate) &&
+          (!filter.endDate || period.start <= filter.endDate)
+        )
+      })
     }
     items.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
     if (filter?.offset) {
@@ -1328,7 +1334,7 @@ export class MemoryDomainStore implements DomainStore {
         description: p.deskripsi,
         status: p.status,
         attachment_url: p.link_foto,
-        date: p.tanggal,
+        date: toWibDate(p.tanggal),
         approval_status: p.approval_status,
         rejection_reason: p.rejection_reason ?? null,
         rejected_at: p.rejected_at ?? null,
@@ -1357,7 +1363,7 @@ export class MemoryDomainStore implements DomainStore {
 
     if (params.approvalStatus === 'approved') {
       const durationDays = params.durationDays ?? 1
-      const start = p.tanggal.slice(0, 10)
+      const start = toWibDate(p.tanggal)
       const end = addCalendarDays(start, durationDays - 1)
       const conflictDates = new Set<string>()
       for (const attendance of this.attendancesList) {

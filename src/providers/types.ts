@@ -174,6 +174,14 @@ export interface LeavePeriodFields {
   duration_days: number | null
 }
 
+export function toWibDate(value: string): string {
+  const candidate = value.trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(candidate)) return candidate
+  const parsed = new Date(candidate)
+  if (Number.isNaN(parsed.getTime())) return candidate.slice(0, 10)
+  return new Date(parsed.getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
+}
+
 export function getLeavePeriodFields(request: {
   date: string
   approval_status: LeaveRequestApprovalStatus
@@ -181,9 +189,9 @@ export function getLeavePeriodFields(request: {
   effective_end_date?: string | null
   duration_days?: number | null
 }): LeavePeriodFields {
-  const requestedStart = request.date.slice(0, 10)
-  const originalEnd = request.original_end_date?.slice(0, 10) ?? null
-  const effectiveEnd = request.effective_end_date?.slice(0, 10) ?? null
+  const requestedStart = toWibDate(request.date)
+  const originalEnd = request.original_end_date ? toWibDate(request.original_end_date) : null
+  const effectiveEnd = request.effective_end_date ? toWibDate(request.effective_end_date) : null
 
   if (request.approval_status !== 'approved') {
     return {

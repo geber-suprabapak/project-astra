@@ -598,8 +598,17 @@ export class PostgresDomainStore implements DomainStore {
           ${filter?.userId ? this.sql`AND lr.user_id = ${filter.userId}` : this.sql``}
           ${filter?.approvalStatus ? this.sql`AND lr.approval_status = ${filter.approvalStatus}` : this.sql``}
           ${filter?.category ? this.sql`AND lr.category = ${filter.category}` : this.sql``}
-          ${filter?.startDate ? this.sql`AND lr.date >= ${filter.startDate}` : this.sql``}
-          ${filter?.endDate ? this.sql`AND lr.date <= ${filter.endDate}` : this.sql``}
+          ${
+            filter?.endDate
+              ? this.sql`AND (lr.date AT TIME ZONE 'Asia/Jakarta')::date <= ${filter.endDate}::date`
+              : this.sql``
+          }
+          ${
+            filter?.startDate
+              ? this
+                  .sql`AND COALESCE(lr.effective_end_date, lr.original_end_date, (lr.date AT TIME ZONE 'Asia/Jakarta')::date) >= ${filter.startDate}::date`
+              : this.sql``
+          }
         ORDER BY lr.created_at DESC
         ${filter?.limit ? this.sql`LIMIT ${filter.limit}` : this.sql``}
         ${filter?.offset ? this.sql`OFFSET ${filter.offset}` : this.sql``}

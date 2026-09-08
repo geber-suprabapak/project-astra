@@ -1438,6 +1438,50 @@ describe('PostgresDomainStore (Greenfield)', () => {
     await expect(store.deleteLeaveRequest('leave-123')).resolves.toBeUndefined()
   })
 
+  it('lists leave periods by inclusive overlap using WIB date boundaries', async () => {
+    const calls: { query: string; values: readonly unknown[] }[] = []
+    const mockSql = createMockSql((strings: TemplateStringsArray, ...queryValues) => {
+      calls.push({ query: strings.join('?'), values: queryValues })
+      return [
+        {
+          id: 'leave-cross-month',
+          user_id: 'student-1',
+          category: 'sakit',
+          description: 'Sakit lintas bulan',
+          status: true,
+          attachment_url: null,
+          date: '2026-08-25',
+          approval_status: 'approved',
+          original_end_date: '2026-09-05',
+          effective_end_date: '2026-09-05',
+          duration_days: 12,
+        },
+      ]
+    })
+
+    const store = new PostgresDomainStore({ sql: mockSql })
+    const rows = await store.listLeaveRequests({
+      startDate: '2026-09-01',
+      endDate: '2026-09-30',
+    })
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0].requested_start_date).toBe('2026-08-25')
+    const endBound = calls.find(({ query }) =>
+      query.includes("(lr.date AT TIME ZONE 'Asia/Jakarta')::date <= ?::date"),
+    )
+    const startBound = calls.find(({ query }) =>
+      query.includes(
+        "COALESCE(lr.effective_end_date, lr.original_end_date, (lr.date AT TIME ZONE 'Asia/Jakarta')::date) >= ?::date",
+      ),
+    )
+    expect(endBound?.values).toEqual(['2026-09-30'])
+    expect(startBound?.values).toEqual(['2026-09-01'])
+    expect(
+      calls.every(({ query }) => !query.includes('lr.date >=') && !query.includes('lr.date <=')),
+    ).toBe(true)
+  })
+
   it('handles notification outbox operations: enqueue, get, list, claim, updateStatus, and delete', async () => {
     const mockSql = createMockSql((strings: TemplateStringsArray) => {
       const query = strings.join('?')
