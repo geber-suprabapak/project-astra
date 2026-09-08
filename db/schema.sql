@@ -117,7 +117,9 @@ CREATE TABLE IF NOT EXISTS class_enrollments (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT class_enrollments_status_check CHECK (status IN ('active', 'transferred', 'promoted', 'graduated', 'archived')),
-    CONSTRAINT class_enrollments_owner_check CHECK (student_id IS NOT NULL OR user_id IS NOT NULL)
+    CONSTRAINT class_enrollments_owner_check CHECK (student_id IS NOT NULL OR user_id IS NOT NULL),
+    CONSTRAINT class_enrollments_absence_number_check
+        CHECK (absence_number IS NULL OR absence_number ~ '^[1-9][0-9]*$')
 );
 
 -- Additive compatibility for databases created before canonical Students.
@@ -125,6 +127,22 @@ CREATE TABLE IF NOT EXISTS class_enrollments (
 ALTER TABLE class_enrollments ADD COLUMN IF NOT EXISTS student_id UUID REFERENCES students(id) ON DELETE CASCADE;
 ALTER TABLE class_enrollments ADD COLUMN IF NOT EXISTS absence_number TEXT;
 ALTER TABLE class_enrollments ALTER COLUMN user_id DROP NOT NULL;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'class_enrollments'::regclass
+          AND conname = 'class_enrollments_absence_number_check'
+    ) THEN
+        -- NOT VALID preserves historical anomalies while enforcing canonical
+        -- positive values on every new or updated enrollment.
+        ALTER TABLE class_enrollments
+            ADD CONSTRAINT class_enrollments_absence_number_check
+            CHECK (absence_number IS NULL OR absence_number ~ '^[1-9][0-9]*$')
+            NOT VALID;
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_class_enrollments_user_period ON class_enrollments(user_id, academic_period_id);
 CREATE INDEX IF NOT EXISTS idx_class_enrollments_student_period ON class_enrollments(student_id, academic_period_id);

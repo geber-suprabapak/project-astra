@@ -14,7 +14,7 @@ import {
   MemoryObjectStorage,
 } from '../../../src/providers/memory/index.js'
 import type { RobinClient } from '../../../src/clients/robin/client.js'
-import type { AppProviders } from '../../../src/providers/types.js'
+import type { AppProviders, CreateStudentParams, Student } from '../../../src/providers/types.js'
 import { AppError } from '../../../src/lib/errors/app-error.js'
 
 const mockRobinClient: RobinClient = {
@@ -235,6 +235,70 @@ describe('admin bootstrap service unit tests', () => {
     expect(report.rejected_items[5].reason).toContain('Class name cannot be empty')
   })
 
+  it('rejects an existing canonical Student NIS without mutating its records', async () => {
+    const { providers, domainStore } = createTestProviders()
+    const school = await bootstrapSchool({
+      name: 'SMK Negeri 2 Banjarmasin',
+      slug: 'smkn2bjm',
+      actorId: 'platform-admin-1',
+      actorRole: 'platform_admin',
+      providers,
+    })
+    const period = await domainStore.getActiveAcademicPeriod()
+    const classes = await domainStore.getClasses(school.id, period?.id)
+    const existingStudent = await domainStore.createStudent({
+      nis: '1001',
+      fullName: 'Existing Canonical Student',
+      gender: 'L',
+    })
+    domainStore.classEnrollments.push({
+      id: 'existing-enrollment',
+      student_id: existingStudent.id,
+      user_id: 'existing-user',
+      class_id: classes[0]!.id,
+      academic_period_id: period!.id,
+      absence_number: '7',
+      status: 'active',
+    })
+    domainStore.profiles.set('existing-user', {
+      user_id: 'existing-user',
+      nis: '1001',
+      full_name: 'Existing Canonical Student',
+      role: 'student',
+      lifecycle_status: 'approved',
+    })
+    await domainStore.bindStudentToUser({ studentId: existingStudent.id, userId: 'existing-user' })
+
+    const beforeStudent = await domainStore.getStudentByNis('1001')
+    const beforeEnrollment = { ...domainStore.classEnrollments[0] }
+    const beforeProfile = { ...domainStore.profiles.get('existing-user')! }
+    const beforeBinding = { ...domainStore.studentBindings.get(existingStudent.id)! }
+
+    const report = await validateAndStageRoster({
+      rows: [
+        {
+          nis: '1001',
+          full_name: 'Different Name',
+          class_name: classes[0]!.name,
+          class_id: classes[0]!.id,
+          gender: 'P',
+          absence_number: 8,
+        },
+      ],
+      academicPeriodId: period!.id,
+      actorId: 'school-admin-1',
+      actorRole: 'school_admin',
+      providers,
+    })
+
+    expect(report.status).toBe('rejected')
+    expect(report.rejected_items[0]?.reason).toContain('already exists in the student roster')
+    expect(await domainStore.getStudentByNis('1001')).toEqual(beforeStudent)
+    expect(domainStore.classEnrollments[0]).toEqual(beforeEnrollment)
+    expect(domainStore.profiles.get('existing-user')).toEqual(beforeProfile)
+    expect(domainStore.studentBindings.get(existingStudent.id)).toEqual(beforeBinding)
+  })
+
   it('validateAndStageRoster rejects invalid class references when classes are registered', async () => {
     const { providers, domainStore } = createTestProviders()
 
@@ -348,6 +412,73 @@ describe('admin bootstrap service unit tests', () => {
 
     // Check class enrollment created
     expect(domainStore.classEnrollments.length).toBe(2)
+  })
+
+  it('rolls back the entire Memory acceptance when a later row fails', async () => {
+    const { providers, domainStore } = createTestProviders()
+
+    await bootstrapSchool({
+      name: 'SMK Negeri 2 Banjarmasin',
+      slug: 'smkn2bjm',
+      actorId: 'platform-admin-1',
+      actorRole: 'platform_admin',
+      providers,
+    })
+    const period = await domainStore.getActiveAcademicPeriod()
+    const classes = await domainStore.getClasses(domainStore.schools[0]!.id, period?.id)
+    const staged = await validateAndStageRoster({
+      rows: [
+        {
+          nis: '1001',
+          full_name: 'First Student',
+          class_name: classes[0]!.name,
+          class_id: classes[0]!.id,
+          gender: 'L',
+          absence_number: 1,
+        },
+        {
+          nis: '1002',
+          full_name: 'Second Student',
+          class_name: classes[0]!.name,
+          class_id: classes[0]!.id,
+          gender: 'P',
+          absence_number: 2,
+        },
+      ],
+      academicPeriodId: period!.id,
+      actorId: 'school-admin-1',
+      actorRole: 'school_admin',
+      providers,
+    })
+    const auditCountBeforeAccept = domainStore.auditLogs.length
+    const reportBeforeAccept = structuredClone(staged)
+    const auditBeforeAccept = structuredClone(domainStore.auditLogs)
+    const originalCreateStudent = domainStore.createStudent.bind(domainStore)
+    let createCount = 0
+    domainStore.createStudent = async (params: CreateStudentParams): Promise<Student> => {
+      createCount += 1
+      if (createCount === 2) throw AppError.internal('Injected acceptance failure')
+      return originalCreateStudent(params)
+    }
+
+    await expect(
+      acceptRosterReport({
+        id: staged.id,
+        actorId: 'school-admin-1',
+        actorRole: 'school_admin',
+        providers,
+      }),
+    ).rejects.toThrow('Injected acceptance failure')
+
+    expect(domainStore.students.size).toBe(0)
+    expect(domainStore.classEnrollments).toHaveLength(0)
+    expect(domainStore.studentBindings.size).toBe(0)
+    expect(domainStore.profiles.size).toBe(0)
+    // SAFETY: The test provider is created by createTestProviders above.
+    expect((providers.identityProvider as MemoryIdentityProvider).users.size).toBe(0)
+    expect(domainStore.auditLogs).toHaveLength(auditCountBeforeAccept)
+    expect(domainStore.auditLogs).toEqual(auditBeforeAccept)
+    expect(await domainStore.getRosterReport(staged.id)).toEqual(reportBeforeAccept)
   })
 
   it('acceptRosterReport denies platform_admin (requires school_admin)', async () => {

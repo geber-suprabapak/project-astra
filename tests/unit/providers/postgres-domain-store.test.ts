@@ -12,11 +12,16 @@ type MockSqlTarget = MockQueryHandler & {
   begin?: <T>(cb: (sql: Sql) => Promise<T>) => Promise<T>
 }
 
-function createMockSql(handler: MockQueryHandler): Sql {
+function createMockSql(handler: MockQueryHandler, onTransaction?: (active: boolean) => void): Sql {
   let proxyInstance: Sql
   const targetHandler: MockSqlTarget = Object.assign(handler, {
     begin: async <T>(cb: (sql: Sql) => Promise<T>): Promise<T> => {
-      return cb(proxyInstance)
+      onTransaction?.(true)
+      try {
+        return await cb(proxyInstance)
+      } finally {
+        onTransaction?.(false)
+      }
     },
   })
   const proxy = new Proxy(targetHandler, {
@@ -427,6 +432,75 @@ describe('PostgresDomainStore (Greenfield)', () => {
 
     const fetched = await store.getRosterReport('report-1')
     expect(fetched?.id).toBe('report-1')
+  })
+
+  it('acceptRosterReport performs its writes inside one SQL transaction', async () => {
+    let beginCalls = 0
+    let inTransaction = false
+    let writesOutsideTransaction = 0
+    let reportStatus = 'staged'
+    let acceptedBy: string | null = null
+    const report = {
+      id: 'report-1',
+      school_id: 'school-1',
+      academic_period_id: 'period-1',
+      total_rows: 1,
+      valid_rows: 1,
+      rejected_rows: 0,
+      review_state: 'pending',
+      rows: [
+        {
+          nis: '1001',
+          full_name: 'Student',
+          class_name: 'XII RPL 1',
+          class_id: 'class-1',
+          gender: 'L',
+          absence_number: '1',
+        },
+      ],
+      rejected_items: [],
+      accepted_at: null,
+      accepted_by: null,
+      created_at: '2026-08-21T00:00:00Z',
+      updated_at: '2026-08-21T00:00:00Z',
+    }
+    const mockSql = createMockSql(
+      (strings: TemplateStringsArray) => {
+        const query = strings.join('?')
+        if (/\b(INSERT|UPDATE|DELETE)\b/i.test(query) && !inTransaction) {
+          writesOutsideTransaction += 1
+        }
+        if (query.includes('FROM roster_reports')) {
+          return [{ ...report, status: reportStatus, accepted_by: acceptedBy }]
+        }
+        if (query.includes('FROM schools')) {
+          return [{ id: 'school-1', name: 'SMKN 2', slug: 'smkn2', timezone: 'Asia/Jakarta' }]
+        }
+        if (query.includes('FROM academic_periods')) {
+          return [{ id: 'period-1', school_id: 'school-1', name: '2026/2027 Ganjil' }]
+        }
+        if (query.includes('SELECT id FROM classes')) return [{ id: 'class-1' }]
+        if (query.includes('INSERT INTO students')) return [{ id: 'student-1' }]
+        if (query.includes('UPDATE roster_reports')) {
+          reportStatus = 'accepted'
+          acceptedBy = 'school-admin-1'
+          return []
+        }
+        return []
+      },
+      (active) => {
+        inTransaction = active
+        if (active) beginCalls += 1
+      },
+    )
+
+    const store = new PostgresDomainStore({ sql: mockSql })
+    const accepted = await store.acceptRosterReport('report-1', 'school-admin-1')
+
+    expect(beginCalls).toBe(1)
+    expect(writesOutsideTransaction).toBe(0)
+    expect(accepted.status).toBe('accepted')
+    expect(accepted.accepted_by).toBe('school-admin-1')
   })
 
   it('openSignup and getBootstrapStatus return proper status', async () => {
