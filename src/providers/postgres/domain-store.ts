@@ -34,6 +34,7 @@ import type {
   CreateRoleParams,
   CreateScheduleParams,
   CreateSchoolParams,
+  CreateStudentParams,
   CreateStaffParams,
   DomainStore,
   EnqueueNotificationParams,
@@ -67,6 +68,9 @@ import type {
   SaveFaceEnrollmentParams,
   Schedule,
   School,
+  Student,
+  StudentBinding,
+  StudentRosterRow,
   StageRosterParams,
   TransferStudentEnrollmentParams,
   UpdateAcademicPeriodParams,
@@ -205,6 +209,82 @@ export class PostgresDomainStore implements DomainStore {
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, nis }, 'Failed to query profile by NIS')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getStudentByNis(nis: string): Promise<Student | null> {
+    try {
+      const rows = await this.sql<Student[]>`
+        SELECT id, nis, full_name, gender, created_at::text, updated_at::text
+        FROM students
+        WHERE nis = ${nis}
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, nis }, 'Failed to query canonical student by NIS')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async createStudent(params: CreateStudentParams): Promise<Student> {
+    try {
+      const rows = await this.sql<Student[]>`
+        INSERT INTO students (nis, full_name, gender)
+        VALUES (${params.nis}, ${params.fullName}, ${params.gender})
+        RETURNING id, nis, full_name, gender, created_at::text, updated_at::text
+      `
+      if (!rows[0]) throw AppError.internal('Failed to create student.')
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      // SAFETY: postgres driver errors expose SQLSTATE as an optional string code.
+      if ((err as { code?: string }).code === '23505') {
+        throw AppError.conflict(`NIS "${params.nis}" already exists in the student roster.`)
+      }
+      logger.error({ err, params }, 'Failed to create canonical student')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async bindStudentToUser(params: { studentId: string; userId: string }): Promise<StudentBinding> {
+    try {
+      return await this.sql.begin(async (sql) => {
+        const student = await sql<{ id: string }[]>`
+          SELECT id FROM students WHERE id = ${params.studentId}::uuid LIMIT 1
+        `
+        if (!student[0]) throw AppError.notFound('Student')
+        const existingBinding = await sql<{ user_id: string }[]>`
+          SELECT user_id FROM student_bindings
+          WHERE student_id = ${params.studentId}::uuid
+          LIMIT 1
+        `
+        if (existingBinding[0] && existingBinding[0].user_id !== params.userId) {
+          throw AppError.conflict('Student is already bound to another user.')
+        }
+        const rows = await sql<StudentBinding[]>`
+          INSERT INTO student_bindings (student_id, user_id)
+          VALUES (${params.studentId}::uuid, ${params.userId})
+          ON CONFLICT (student_id) DO UPDATE SET user_id = EXCLUDED.user_id, updated_at = NOW()
+          RETURNING student_id, user_id, created_at::text, updated_at::text
+        `
+        await sql`
+          UPDATE class_enrollments
+          SET user_id = ${params.userId}, updated_at = NOW()
+          WHERE student_id = ${params.studentId}::uuid
+        `
+        if (!rows[0]) throw AppError.internal('Failed to bind student to user.')
+        return rows[0]
+      })
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      // SAFETY: postgres driver errors expose SQLSTATE as an optional string code.
+      if ((err as { code?: string }).code === '23505') {
+        throw AppError.conflict('Student is already bound to another user.')
+      }
+      logger.error({ err, params }, 'Failed to bind student to user')
       throw AppError.internal('An unexpected database error occurred.')
     }
   }
@@ -2127,9 +2207,9 @@ export class PostgresDomainStore implements DomainStore {
       const rowsJson = JSON.stringify(params.rows)
       const rejectedJson = JSON.stringify(params.rejectedItems)
       const rows = await this.sql<RosterReport[]>`
-        INSERT INTO roster_reports (school_id, total_rows, valid_rows, rejected_rows, status, review_state, rows, rejected_items)
-        VALUES (${params.schoolId ?? null}, ${params.totalRows}, ${params.validRows}, ${params.rejectedRows}, ${params.status}, ${params.reviewState}, ${rowsJson}::jsonb, ${rejectedJson}::jsonb)
-        RETURNING id, school_id, total_rows, valid_rows, rejected_rows, status, review_state, rows, rejected_items, accepted_at::text, accepted_by, created_at::text, updated_at::text
+        INSERT INTO roster_reports (school_id, academic_period_id, total_rows, valid_rows, rejected_rows, status, review_state, rows, rejected_items)
+        VALUES (${params.schoolId ?? null}, ${params.academicPeriodId ?? null}, ${params.totalRows}, ${params.validRows}, ${params.rejectedRows}, ${params.status}, ${params.reviewState}, ${rowsJson}::jsonb, ${rejectedJson}::jsonb)
+        RETURNING id, school_id, academic_period_id, total_rows, valid_rows, rejected_rows, status, review_state, rows, rejected_items, accepted_at::text, accepted_by, created_at::text, updated_at::text
       `
       if (!rows || rows.length === 0) {
         throw AppError.internal('Failed to stage roster report.')
@@ -2145,7 +2225,7 @@ export class PostgresDomainStore implements DomainStore {
   async getRosterReport(id: string): Promise<RosterReport | null> {
     try {
       const rows = await this.sql<RosterReport[]>`
-        SELECT id, school_id, total_rows, valid_rows, rejected_rows, status, review_state, rows, rejected_items, accepted_at::text, accepted_by, created_at::text, updated_at::text
+        SELECT id, school_id, academic_period_id, total_rows, valid_rows, rejected_rows, status, review_state, rows, rejected_items, accepted_at::text, accepted_by, created_at::text, updated_at::text
         FROM roster_reports
         WHERE id = ${id}
         LIMIT 1
@@ -2164,46 +2244,49 @@ export class PostgresDomainStore implements DomainStore {
       if (!report) {
         throw AppError.notFound('Roster report')
       }
+      if (report.status === 'accepted') return report
       if (report.rejected_rows > 0 || (report.rejected_items && report.rejected_items.length > 0)) {
         throw AppError.validationError('Cannot accept a roster report with rejected rows.')
       }
 
       const school = await this.getSchool()
-      const period = await this.getActiveAcademicPeriod()
+      const period = report.academic_period_id
+        ? await this.getAcademicPeriod(report.academic_period_id)
+        : null
+      if (!school || !period || period.school_id !== school.id) {
+        throw AppError.validationError('Academic period is required for roster acceptance.')
+      }
 
       await this.sql.begin(async (sql) => {
         for (const row of report.rows) {
-          let classId: string | null = null
-          if (school) {
-            const classRows = await sql<{ id: string }[]>`
-              SELECT id FROM classes WHERE school_id = ${school.id} AND LOWER(name) = LOWER(${row.class_name}) LIMIT 1
-            `
-            if (classRows.length > 0) {
-              classId = classRows[0].id
-            } else {
-              const newClassRows = await sql<{ id: string }[]>`
-                INSERT INTO classes (school_id, academic_period_id, name, grade)
-                VALUES (${school.id}, ${period?.id ?? null}, ${row.class_name}, ${row.grade ?? null})
-                RETURNING id
+          const classRows = row.class_id
+            ? await sql<{ id: string }[]>`
+                SELECT id FROM classes
+                WHERE id = ${row.class_id}::uuid AND school_id = ${school.id}::uuid
+                  AND academic_period_id = ${period.id}::uuid
+                LIMIT 1
               `
-              classId = newClassRows[0].id
-            }
+            : await sql<{ id: string }[]>`
+                SELECT id FROM classes
+                WHERE school_id = ${school.id}::uuid AND academic_period_id = ${period.id}::uuid
+                  AND LOWER(name) = LOWER(${row.class_name})
+                LIMIT 1
+              `
+          if (!classRows[0])
+            throw AppError.validationError(`Class "${row.class_name}" does not exist.`)
+          if (row.gender !== 'L' && row.gender !== 'P') {
+            throw AppError.validationError('Gender must be L or P.')
           }
-
-          const studentUserId = `student-${row.nis}`
-          await sql`
-            INSERT INTO profiles (user_id, full_name, nis, class_name, role, lifecycle_status)
-            VALUES (${studentUserId}, ${row.full_name}, ${row.nis}, ${row.class_name}, 'student', 'approved')
-            ON CONFLICT (user_id) DO UPDATE
-            SET full_name = EXCLUDED.full_name, nis = EXCLUDED.nis, class_name = EXCLUDED.class_name, updated_at = NOW()
+          const studentRows = await sql<{ id: string }[]>`
+            INSERT INTO students (nis, full_name, gender)
+            VALUES (${row.nis}, ${row.full_name}, ${row.gender})
+            RETURNING id
           `
-
-          if (classId && period) {
-            await sql`
-              INSERT INTO class_enrollments (user_id, class_id, academic_period_id, status)
-              VALUES (${studentUserId}, ${classId}, ${period.id}, 'active')
-            `
-          }
+          if (!studentRows[0]) throw AppError.internal('Failed to create canonical student.')
+          await sql`
+            INSERT INTO class_enrollments (student_id, user_id, class_id, academic_period_id, absence_number, status)
+            VALUES (${studentRows[0].id}::uuid, NULL, ${classRows[0].id}::uuid, ${period.id}::uuid, ${String(row.absence_number ?? '').trim()}, 'active')
+          `
         }
 
         await sql`
@@ -2220,6 +2303,12 @@ export class PostgresDomainStore implements DomainStore {
       return updated
     } catch (err) {
       if (err instanceof AppError) throw err
+      // SAFETY: postgres driver errors expose SQLSTATE as an optional string code.
+      if ((err as { code?: string }).code === '23505') {
+        throw AppError.conflict(
+          'Roster acceptance conflicts with an existing student or enrollment.',
+        )
+      }
       logger.error({ err, id, acceptedBy }, 'Failed to accept roster report')
       throw AppError.internal('An unexpected database error occurred.')
     }
@@ -2259,7 +2348,7 @@ export class PostgresDomainStore implements DomainStore {
       const hasSchoolAdmin = Number(schoolAdminRows[0]?.count ?? 0) > 0
 
       const reportRows = await this.sql<RosterReport[]>`
-        SELECT id, school_id, total_rows, valid_rows, rejected_rows, status, review_state, rows, rejected_items, accepted_at::text, accepted_by, created_at::text, updated_at::text
+        SELECT id, school_id, academic_period_id, total_rows, valid_rows, rejected_rows, status, review_state, rows, rejected_items, accepted_at::text, accepted_by, created_at::text, updated_at::text
         FROM roster_reports
         ORDER BY created_at DESC
         LIMIT 1
@@ -2797,6 +2886,39 @@ export class PostgresDomainStore implements DomainStore {
 
   async getRosterStudentByNis(nis: string): Promise<RosterStudent | null> {
     try {
+      const canonicalRows = await this.sql<
+        (Omit<Student, 'id'> & {
+          student_id: string
+          class_name?: string | null
+          academic_period_id?: string | null
+          absence_number?: string | null
+          user_id?: string | null
+        })[]
+      >`
+        SELECT s.id AS student_id, s.nis, s.full_name, s.gender,
+               ce.class_id, c.name AS class_name, ce.academic_period_id,
+               ce.absence_number, sb.user_id
+        FROM students s
+        LEFT JOIN student_bindings sb ON sb.student_id = s.id
+        LEFT JOIN class_enrollments ce ON ce.student_id = s.id AND ce.status = 'active'
+        LEFT JOIN classes c ON c.id = ce.class_id
+        WHERE s.nis = ${nis}
+        ORDER BY ce.created_at DESC NULLS LAST
+        LIMIT 1
+      `
+      if (canonicalRows[0]) {
+        const row = canonicalRows[0]
+        return {
+          student_id: row.student_id,
+          user_id: row.user_id ?? null,
+          nis: row.nis,
+          full_name: row.full_name,
+          gender: row.gender,
+          class_name: row.class_name ?? '',
+          academic_period_id: row.academic_period_id ?? null,
+          absence_number: row.absence_number ?? null,
+        }
+      }
       const reports = await this.sql<RosterReport[]>`
         SELECT rows FROM roster_reports WHERE status = 'accepted' ORDER BY accepted_at DESC
       `
@@ -2805,6 +2927,7 @@ export class PostgresDomainStore implements DomainStore {
         const row = rows.find((candidate) => candidate.nis === nis)
         if (row) {
           return {
+            student_id: null,
             nis: row.nis,
             full_name: row.full_name,
             class_name: row.class_name,
@@ -2833,21 +2956,32 @@ export class PostgresDomainStore implements DomainStore {
 
   async listStudentProfiles(filter?: {
     lifecycle_status?: ProfileLifecycleStatus
-  }): Promise<UserProfile[]> {
+  }): Promise<StudentRosterRow[]> {
     try {
-      const rows = filter?.lifecycle_status
-        ? await this.sql<UserProfile[]>`
-            SELECT user_id, full_name, email, nis, class_name, absence_number, avatar_url, role, lifecycle_status, gender
-            FROM profiles
-            WHERE role = 'student' AND lifecycle_status = ${filter.lifecycle_status}
-            ORDER BY created_at DESC
-          `
-        : await this.sql<UserProfile[]>`
-            SELECT user_id, full_name, email, nis, class_name, absence_number, avatar_url, role, lifecycle_status, gender
-            FROM profiles
-            WHERE role = 'student'
-            ORDER BY created_at DESC
-          `
+      const lifecycle = filter?.lifecycle_status ?? null
+      const rows = await this.sql<StudentRosterRow[]>`
+        SELECT s.id AS student_id, sb.user_id, s.full_name, p.email, s.nis,
+               c.id AS class_id, c.name AS class_name, ce.absence_number,
+               p.avatar_url, p.role, p.lifecycle_status, s.gender,
+               ce.academic_period_id, ap.name AS period_name
+        FROM students s
+        LEFT JOIN student_bindings sb ON sb.student_id = s.id
+        LEFT JOIN profiles p ON p.user_id = sb.user_id
+        LEFT JOIN class_enrollments ce ON ce.student_id = s.id AND ce.status = 'active'
+        LEFT JOIN classes c ON c.id = ce.class_id
+        LEFT JOIN academic_periods ap ON ap.id = ce.academic_period_id
+        WHERE (${lifecycle}::text IS NULL OR p.lifecycle_status = ${lifecycle})
+        UNION ALL
+        SELECT NULL::uuid AS student_id, p.user_id, p.full_name, p.email, p.nis,
+               NULL::uuid AS class_id, p.class_name, p.absence_number,
+               p.avatar_url, p.role, p.lifecycle_status, p.gender,
+               NULL::uuid AS academic_period_id, NULL::text AS period_name
+        FROM profiles p
+        LEFT JOIN students s ON s.nis = p.nis
+        WHERE p.role = 'student' AND s.id IS NULL
+          AND (${lifecycle}::text IS NULL OR p.lifecycle_status = ${lifecycle})
+        ORDER BY nis ASC NULLS LAST, full_name ASC NULLS LAST
+      `
       return rows ?? []
     } catch (err) {
       if (err instanceof AppError) throw err

@@ -28,6 +28,7 @@ import {
   type CreateManualAttendanceParams,
   type CreatePasswordResetCodeParams,
   type CreateStudentIdentityParams,
+  type CreateStudentParams,
   type CreatePermissionParams,
   type CreateRoleParams,
   type CreateScheduleParams,
@@ -68,6 +69,9 @@ import {
   type SaveFaceEnrollmentParams,
   type Schedule,
   type School,
+  type Student,
+  type StudentBinding,
+  type StudentRosterRow,
   type StageRosterParams,
   type TransferStudentEnrollmentParams,
   type UpdateAcademicPeriodParams,
@@ -386,6 +390,8 @@ function assertAttendanceAllowed(permits: Permit[], userId: string, date: string
 
 export class MemoryDomainStore implements DomainStore {
   public profiles = new Map<string, UserProfile>()
+  public students = new Map<string, Student>()
+  public studentBindings = new Map<string, StudentBinding>()
   public absences: Absence[] = []
   public schedules = new Map<string, Schedule>()
   public locations = new Map<string, Location>()
@@ -455,6 +461,56 @@ export class MemoryDomainStore implements DomainStore {
       placeholder ??= profile
     }
     return placeholder ? { ...placeholder } : null
+  }
+
+  async getStudentByNis(nis: string): Promise<Student | null> {
+    for (const student of this.students.values()) {
+      if (student.nis === nis) return { ...student }
+    }
+    return null
+  }
+
+  async createStudent(params: CreateStudentParams): Promise<Student> {
+    const existing = await this.getStudentByNis(params.nis)
+    if (existing)
+      throw AppError.conflict(`NIS "${params.nis}" already exists in the student roster.`)
+    const now = new Date().toISOString()
+    const student: Student = {
+      id: `student-${params.nis}`,
+      nis: params.nis,
+      full_name: params.fullName,
+      gender: params.gender,
+      created_at: now,
+      updated_at: now,
+    }
+    this.students.set(student.id, student)
+    return { ...student }
+  }
+
+  async bindStudentToUser(params: { studentId: string; userId: string }): Promise<StudentBinding> {
+    if (!this.students.has(params.studentId)) throw AppError.notFound('Student')
+    const current = this.studentBindings.get(params.studentId)
+    if (current && current.user_id !== params.userId) {
+      throw AppError.conflict('Student is already bound to another user.')
+    }
+    const existingUserBinding = [...this.studentBindings.values()].find(
+      (binding) => binding.user_id === params.userId && binding.student_id !== params.studentId,
+    )
+    if (existingUserBinding) throw AppError.conflict('User is already bound to another student.')
+    const now = new Date().toISOString()
+    const binding: StudentBinding = current ?? {
+      student_id: params.studentId,
+      user_id: params.userId,
+      created_at: now,
+      updated_at: now,
+    }
+    binding.user_id = params.userId
+    binding.updated_at = now
+    this.studentBindings.set(params.studentId, binding)
+    for (const enrollment of this.classEnrollments) {
+      if (enrollment.student_id === params.studentId) enrollment.user_id = params.userId
+    }
+    return { ...binding }
   }
 
   async getTodayAbsences(userId: string, dateWIB: string): Promise<Absence[]> {
@@ -859,13 +915,14 @@ export class MemoryDomainStore implements DomainStore {
 
     return list.map((e) => {
       const cls = this.classes.find((c) => c.id === e.class_id)
-      const prof = this.profiles.get(e.user_id)
+      const prof = e.user_id ? this.profiles.get(e.user_id) : null
+      const student = e.student_id ? this.students.get(e.student_id) : null
       const period = this.academicPeriods.find((p) => p.id === e.academic_period_id)
       return {
         ...e,
         class_name: cls?.name ?? null,
-        student_name: prof?.full_name ?? null,
-        nis: prof?.nis ?? null,
+        student_name: student?.full_name ?? prof?.full_name ?? null,
+        nis: student?.nis ?? prof?.nis ?? null,
         period_name: period?.name ?? null,
       }
     })
@@ -882,13 +939,14 @@ export class MemoryDomainStore implements DomainStore {
     )
     if (!enrollment) return null
     const cls = this.classes.find((c) => c.id === enrollment.class_id)
-    const prof = this.profiles.get(enrollment.user_id)
+    const prof = enrollment.user_id ? this.profiles.get(enrollment.user_id) : null
+    const student = enrollment.student_id ? this.students.get(enrollment.student_id) : null
     const period = this.academicPeriods.find((p) => p.id === enrollment.academic_period_id)
     return {
       ...enrollment,
       class_name: cls?.name ?? null,
-      student_name: prof?.full_name ?? null,
-      nis: prof?.nis ?? null,
+      student_name: student?.full_name ?? prof?.full_name ?? null,
+      nis: student?.nis ?? prof?.nis ?? null,
       period_name: period?.name ?? null,
     }
   }
@@ -1809,6 +1867,7 @@ export class MemoryDomainStore implements DomainStore {
     const report: RosterReport = {
       id,
       school_id: params.schoolId ?? null,
+      academic_period_id: params.academicPeriodId ?? null,
       total_rows: params.totalRows,
       valid_rows: params.validRows,
       rejected_rows: params.rejectedRows,
@@ -1836,52 +1895,88 @@ export class MemoryDomainStore implements DomainStore {
     if (!report) {
       throw AppError.notFound('Roster report')
     }
+    if (report.status === 'accepted') return { ...report }
     if (report.rejected_rows > 0 || report.rejected_items.length > 0) {
       throw AppError.validationError('Cannot accept a roster report with rejected rows.')
     }
 
-    const school = this.schools[0]
-    const period = this.academicPeriods.find((p) => p.is_active)
+    const period = report.academic_period_id
+      ? this.academicPeriods.find((p) => p.id === report.academic_period_id)
+      : null
+    if (!period) throw AppError.validationError('Academic period is required.')
     const now = new Date().toISOString()
 
-    for (const row of report.rows) {
-      let cls = this.classes.find((c) => c.name.toLowerCase() === row.class_name.toLowerCase())
-      if (!cls && school) {
-        cls = {
-          id: `class-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          school_id: school.id,
-          academic_period_id: period?.id ?? null,
-          name: row.class_name,
-          grade: row.grade ?? null,
-          created_at: now,
-          updated_at: now,
-        }
-        this.classes.push(cls)
+    const rows = report.rows.map((row) => {
+      const cls = row.class_id
+        ? this.classes.find(
+            (candidate) =>
+              candidate.id === row.class_id && candidate.academic_period_id === period.id,
+          )
+        : this.classes.find(
+            (candidate) =>
+              candidate.academic_period_id === period.id &&
+              candidate.name.trim().toLowerCase() === row.class_name.trim().toLowerCase(),
+          )
+      if (!cls) throw AppError.validationError(`Class "${row.class_name}" does not exist.`)
+      if (row.gender !== 'L' && row.gender !== 'P') {
+        throw AppError.validationError('Gender must be L or P.')
       }
-
-      const studentUserId = `student-${row.nis}`
-      const studentProfile: UserProfile = {
-        user_id: studentUserId,
-        nis: row.nis,
-        full_name: row.full_name,
-        class_name: row.class_name,
-        role: 'student',
-        lifecycle_status: 'approved',
-        gender: null,
+      const absenceText = String(row.absence_number ?? '').trim()
+      const absenceNumber = Number(absenceText)
+      if (!/^\d+$/.test(absenceText) || !Number.isInteger(absenceNumber) || absenceNumber <= 0) {
+        throw AppError.validationError('Absence number must be a positive integer.')
       }
-      this.profiles.set(studentUserId, studentProfile)
+      if ([...this.students.values()].some((student) => student.nis === row.nis)) {
+        throw AppError.conflict(`NIS "${row.nis}" already exists in the student roster.`)
+      }
+      if (
+        this.classEnrollments.some(
+          (enrollment) =>
+            enrollment.status === 'active' &&
+            enrollment.class_id === cls.id &&
+            enrollment.academic_period_id === period.id &&
+            Number(enrollment.absence_number) === absenceNumber,
+        )
+      ) {
+        throw AppError.conflict('Absence number is already used in this class and academic period.')
+      }
+      return { row, cls, absenceText }
+    })
+    const batchAbsences = new Set<string>()
+    for (const { cls, absenceText } of rows) {
+      const key = `${cls.id}:${Number(absenceText)}`
+      if (batchAbsences.has(key)) {
+        throw AppError.conflict('Absence number is duplicated in this class and academic period.')
+      }
+      batchAbsences.add(key)
+    }
 
-      if (cls && period) {
+    const previousStudents = new Map(this.students)
+    const previousEnrollments = [...this.classEnrollments]
+    try {
+      for (const { row, cls, absenceText } of rows) {
+        const student = await this.createStudent({
+          nis: row.nis,
+          fullName: row.full_name,
+          // SAFETY: roster validation above rejects every gender except L and P.
+          gender: row.gender as 'L' | 'P',
+        })
         this.classEnrollments.push({
           id: `enrollment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          user_id: studentUserId,
+          student_id: student.id,
+          user_id: null,
           class_id: cls.id,
           academic_period_id: period.id,
+          absence_number: absenceText,
           status: 'active',
           created_at: now,
           updated_at: now,
         })
       }
+    } catch (err) {
+      this.students = previousStudents
+      this.classEnrollments = previousEnrollments
+      throw err
     }
 
     report.status = 'accepted'
@@ -2174,11 +2269,32 @@ export class MemoryDomainStore implements DomainStore {
   }
 
   async getRosterStudentByNis(nis: string): Promise<RosterStudent | null> {
+    const student = await this.getStudentByNis(nis)
+    if (student) {
+      const enrollment = this.classEnrollments
+        .filter((candidate) => candidate.student_id === student.id && candidate.status === 'active')
+        .sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))[0]
+      const cls = enrollment
+        ? this.classes.find((candidate) => candidate.id === enrollment.class_id)
+        : null
+      const binding = this.studentBindings.get(student.id)
+      return {
+        student_id: student.id,
+        user_id: binding?.user_id ?? null,
+        nis: student.nis,
+        full_name: student.full_name,
+        gender: student.gender,
+        class_name: cls?.name ?? '',
+        academic_period_id: enrollment?.academic_period_id ?? null,
+        absence_number: enrollment?.absence_number ?? null,
+      }
+    }
     for (const report of this.rosterReports.values()) {
       if (report.status === 'accepted') {
         const row = report.rows.find((candidate) => candidate.nis === nis)
         if (row) {
           return {
+            student_id: null,
             nis: row.nis,
             full_name: row.full_name,
             class_name: row.class_name,
@@ -2201,14 +2317,50 @@ export class MemoryDomainStore implements DomainStore {
 
   async listStudentProfiles(filter?: {
     lifecycle_status?: ProfileLifecycleStatus
-  }): Promise<UserProfile[]> {
-    return Array.from(this.profiles.values())
-      .filter(
-        (profile) =>
-          profile.role === 'student' &&
-          (!filter?.lifecycle_status || profile.lifecycle_status === filter.lifecycle_status),
+  }): Promise<StudentRosterRow[]> {
+    const rows: StudentRosterRow[] = []
+    const boundUsers = new Set<string>()
+    for (const student of this.students.values()) {
+      const binding = this.studentBindings.get(student.id)
+      const profile = binding ? this.profiles.get(binding.user_id) : null
+      if (profile) boundUsers.add(profile.user_id)
+      if (filter?.lifecycle_status && profile?.lifecycle_status !== filter.lifecycle_status)
+        continue
+      const enrollments = this.classEnrollments.filter(
+        (enrollment) => enrollment.student_id === student.id && enrollment.status === 'active',
       )
-      .map((profile) => ({ ...profile }))
+      const entries = enrollments.length > 0 ? enrollments : [null]
+      for (const enrollment of entries) {
+        const cls = enrollment
+          ? this.classes.find((candidate) => candidate.id === enrollment.class_id)
+          : null
+        const period = enrollment
+          ? this.academicPeriods.find((candidate) => candidate.id === enrollment.academic_period_id)
+          : null
+        rows.push({
+          user_id: profile?.user_id ?? null,
+          student_id: student.id,
+          full_name: student.full_name,
+          email: profile?.email ?? null,
+          nis: student.nis,
+          class_name: cls?.name ?? null,
+          class_id: cls?.id ?? null,
+          absence_number: enrollment?.absence_number ?? profile?.absence_number ?? null,
+          avatar_url: profile?.avatar_url ?? null,
+          role: profile?.role ?? null,
+          lifecycle_status: profile?.lifecycle_status ?? null,
+          gender: student.gender,
+          academic_period_id: enrollment?.academic_period_id ?? null,
+          period_name: period?.name ?? null,
+        })
+      }
+    }
+    for (const profile of this.profiles.values()) {
+      if (profile.role !== 'student' || boundUsers.has(profile.user_id)) continue
+      if (filter?.lifecycle_status && profile.lifecycle_status !== filter.lifecycle_status) continue
+      rows.push({ ...profile, user_id: profile.user_id, student_id: null })
+    }
+    return rows
   }
 
   async createPendingStudentProfile(params: {

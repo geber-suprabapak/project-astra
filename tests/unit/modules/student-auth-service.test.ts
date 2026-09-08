@@ -86,12 +86,23 @@ describe('unit: student auth service', () => {
 
     domainStore.signupOpen = true
     await domainStore.stageRosterReport({
+      academicPeriodId: 'b0000000-0000-0000-0000-000000000001',
       totalRows: 1,
       validRows: 1,
       rejectedRows: 0,
       status: 'staged',
       reviewState: 'pending',
-      rows: [{ nis: '1001', full_name: 'Budi Santoso', class_name: 'XII RPL 1', grade: 12 }],
+      rows: [
+        {
+          nis: '1001',
+          full_name: 'Budi Santoso',
+          class_name: 'XII RPL 1',
+          grade: 12,
+          gender: 'L',
+          absence_number: 1,
+          class_id: 'c0000000-0000-0000-0000-000000000001',
+        },
+      ],
       rejectedItems: [],
     })
     const report = Array.from(domainStore.rosterReports.values())[0]
@@ -126,12 +137,22 @@ describe('unit: student auth service', () => {
 
     domainStore.signupOpen = true
     await domainStore.stageRosterReport({
+      academicPeriodId: 'b0000000-0000-0000-0000-000000000001',
       totalRows: 1,
       validRows: 1,
       rejectedRows: 0,
       status: 'staged',
       reviewState: 'pending',
-      rows: [{ nis: '1001', full_name: 'Budi Santoso', class_name: 'XII RPL 1' }],
+      rows: [
+        {
+          nis: '1001',
+          full_name: 'Budi Santoso',
+          class_name: 'XII RPL 1',
+          gender: 'L',
+          absence_number: 1,
+          class_id: 'c0000000-0000-0000-0000-000000000001',
+        },
+      ],
       rejectedItems: [],
     })
     const report = Array.from(domainStore.rosterReports.values())[0]

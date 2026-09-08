@@ -50,10 +50,15 @@ export const rosterRowSchema = z.object({
   nis: z.string(),
   full_name: z.string(),
   class_name: z.string(),
+  class_id: z.string().min(1).nullable().optional(),
+  academic_period_id: z.string().min(1).nullable().optional(),
+  gender: z.string().nullable().optional(),
+  absence_number: z.union([z.string(), z.number()]).nullable().optional(),
   grade: z.number().int().positive().nullable().optional(),
 })
 
 export const stageRosterSchema = z.object({
+  academic_period_id: z.string().min(1, 'Academic period is required.'),
   rows: z.array(rosterRowSchema).min(1, 'Roster must contain at least one row.'),
 })
 
@@ -62,17 +67,23 @@ export type StageRosterInput = z.infer<typeof stageRosterSchema>
 export const rosterReportResponseSchema = z.object({
   id: z.string(),
   school_id: z.string().nullable().optional(),
+  academic_period_id: z.string().nullable().optional(),
   total_rows: z.number(),
   valid_rows: z.number(),
   rejected_rows: z.number(),
   status: z.enum(['staged', 'accepted', 'rejected']),
   review_state: z.enum(['pending', 'accepted', 'rejected']),
+  rows: z.array(rosterRowSchema),
   rejected_items: z.array(
     z.object({
       row_index: z.number(),
       nis: z.string().nullable().optional(),
       full_name: z.string().nullable().optional(),
       class_name: z.string().nullable().optional(),
+      class_id: z.string().nullable().optional(),
+      academic_period_id: z.string().nullable().optional(),
+      gender: z.string().nullable().optional(),
+      absence_number: z.union([z.string(), z.number()]).nullable().optional(),
       grade: z.number().nullable().optional(),
       reason: z.string(),
     }),

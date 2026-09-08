@@ -27,6 +27,22 @@ export interface UserProfile {
   gender?: string | null
 }
 
+export interface Student {
+  id: string
+  nis: string
+  full_name: string
+  gender: 'L' | 'P'
+  created_at?: string
+  updated_at?: string
+}
+
+export interface StudentBinding {
+  student_id: string
+  user_id: string
+  created_at?: string
+  updated_at?: string
+}
+
 export interface IdentityUser {
   userId: string
   authSource?: 'logto' | 'legacy_supabase'
@@ -429,9 +445,11 @@ export type ClassEnrollmentStatus = z.infer<typeof classEnrollmentStatusSchema>
 
 export interface ClassEnrollment {
   id: string
-  user_id: string
+  student_id?: string | null
+  user_id: string | null
   class_id: string
   academic_period_id: string
+  absence_number?: string | null
   status: ClassEnrollmentStatus
   created_at?: string
   updated_at?: string
@@ -445,6 +463,12 @@ export interface EnrollStudentParams {
   userId: string
   classId: string
   academicPeriodId: string
+}
+
+export interface CreateStudentParams {
+  nis: string
+  fullName: string
+  gender: 'L' | 'P'
 }
 
 export interface TransferStudentEnrollmentParams {
@@ -556,6 +580,10 @@ export interface RosterRowInput {
   nis: string
   full_name: string
   class_name: string
+  gender?: string | null
+  absence_number?: string | number | null
+  class_id?: string | null
+  academic_period_id?: string | null
   grade?: number | null
 }
 
@@ -564,6 +592,10 @@ export interface RejectedRosterRow {
   nis?: string | null
   full_name?: string | null
   class_name?: string | null
+  class_id?: string | null
+  academic_period_id?: string | null
+  gender?: string | null
+  absence_number?: string | number | null
   grade?: number | null
   reason: string
 }
@@ -574,6 +606,7 @@ export type RosterReviewState = 'pending' | 'accepted' | 'rejected'
 export interface RosterReport {
   id: string
   school_id?: string | null
+  academic_period_id?: string | null
   total_rows: number
   valid_rows: number
   rejected_rows: number
@@ -589,6 +622,7 @@ export interface RosterReport {
 
 export interface StageRosterParams {
   schoolId?: string | null
+  academicPeriodId?: string | null
   totalRows: number
   validRows: number
   rejectedRows: number
@@ -838,6 +872,9 @@ export interface DomainStore {
   deleteLocation(id: string): Promise<void>
 
   // Bootstrap & Roster domain methods
+  getStudentByNis(nis: string): Promise<Student | null>
+  createStudent(params: CreateStudentParams): Promise<Student>
+  bindStudentToUser(params: { studentId: string; userId: string }): Promise<StudentBinding>
   getSchool(): Promise<School | null>
   getSchoolBySlug(slug: string): Promise<School | null>
   createSchool(params: CreateSchoolParams): Promise<School>
@@ -884,7 +921,7 @@ export interface DomainStore {
   getRosterStudentByNis(nis: string): Promise<RosterStudent | null>
   listStudentProfiles(filter?: {
     lifecycle_status?: ProfileLifecycleStatus
-  }): Promise<UserProfile[]>
+  }): Promise<StudentRosterRow[]>
   createPendingStudentProfile(params: {
     userId: string
     nis: string
@@ -973,10 +1010,33 @@ export interface SaveFaceEnrollmentParams {
 }
 
 export interface RosterStudent {
+  student_id?: string | null
   nis: string
   full_name: string
   class_name: string
   grade?: number | null
+  gender?: string | null
+  user_id?: string | null
+  academic_period_id?: string | null
+  absence_number?: string | null
+}
+
+export interface StudentRosterRow {
+  student_id: string | null
+  user_id: string | null
+  full_name: string | null
+  email?: string | null
+  nis?: string | null
+  role?: IdentityRole | null
+  lifecycle_status: ProfileLifecycleStatus | null
+  gender?: string | null
+  avatar_url?: string | null
+  notification_token?: string | null
+  class_name?: string | null
+  class_id?: string | null
+  academic_period_id?: string | null
+  period_name?: string | null
+  absence_number?: string | null
 }
 
 export interface PasswordResetCode {

@@ -168,16 +168,53 @@ describe('admin bootstrap service unit tests', () => {
 
     const report = await validateAndStageRoster({
       rows: [
-        { nis: '1000', full_name: 'Valid Student 0', class_name: 'XII RPL 1' },
-        { nis: '', full_name: 'Empty NIS', class_name: 'XII RPL 1' },
-        { nis: '1001', full_name: 'Valid Student 1', class_name: 'XII RPL 1' },
-        { nis: '1001', full_name: 'Duplicate Batch NIS', class_name: 'XII RPL 1' },
-        { nis: '9999', full_name: 'Canonical Duplicate NIS', class_name: 'XII RPL 1' },
-        { nis: '1002', full_name: '', class_name: 'XII RPL 1' },
-        { nis: '1003', full_name: 'Valid Student 2', class_name: '' },
+        {
+          nis: '1000',
+          full_name: 'Valid Student 0',
+          class_name: 'XII RPL 1',
+          gender: 'L',
+          absence_number: 1,
+        },
+        {
+          nis: '',
+          full_name: 'Empty NIS',
+          class_name: 'XII RPL 1',
+          gender: 'L',
+          absence_number: 2,
+        },
+        {
+          nis: '1001',
+          full_name: 'Valid Student 1',
+          class_name: 'XII RPL 1',
+          gender: 'L',
+          absence_number: 3,
+        },
+        {
+          nis: '1001',
+          full_name: 'Duplicate Batch NIS',
+          class_name: 'XII RPL 1',
+          gender: 'L',
+          absence_number: 4,
+        },
+        {
+          nis: '9999',
+          full_name: 'Canonical Duplicate NIS',
+          class_name: 'XII RPL 1',
+          gender: 'L',
+          absence_number: 5,
+        },
+        { nis: '1002', full_name: '', class_name: 'XII RPL 1', gender: 'L', absence_number: 6 },
+        {
+          nis: '1003',
+          full_name: 'Valid Student 2',
+          class_name: '',
+          gender: 'L',
+          absence_number: 7,
+        },
       ],
-      actorId: 'platform-admin-1',
-      actorRole: 'platform_admin',
+      academicPeriodId: 'b0000000-0000-0000-0000-000000000001',
+      actorId: 'school-admin-1',
+      actorRole: 'school_admin',
       providers,
     })
 
@@ -192,7 +229,7 @@ describe('admin bootstrap service unit tests', () => {
     expect(report.rejected_items[1].reason).toContain('Duplicate NIS "1001" in roster batch')
     expect(report.rejected_items[2].reason).toContain('Duplicate NIS "1001" in roster batch')
     expect(report.rejected_items[3].reason).toContain(
-      'NIS "9999" already exists in student profiles',
+      'NIS "9999" already exists in the student roster',
     )
     expect(report.rejected_items[4].reason).toContain('Full name cannot be empty')
     expect(report.rejected_items[5].reason).toContain('Class name cannot be empty')
@@ -212,17 +249,31 @@ describe('admin bootstrap service unit tests', () => {
     // Register a valid class
     await domainStore.createClass({
       schoolId: school.id,
+      academicPeriodId: 'b0000000-0000-0000-0000-000000000001',
       name: 'XII RPL 1',
       grade: 12,
     })
 
     const report = await validateAndStageRoster({
       rows: [
-        { nis: '1001', full_name: 'Student One', class_name: 'XII RPL 1' },
-        { nis: '1002', full_name: 'Student Two', class_name: 'NonExistentClass' },
+        {
+          nis: '1001',
+          full_name: 'Student One',
+          class_name: 'XII RPL 1',
+          gender: 'L',
+          absence_number: 1,
+        },
+        {
+          nis: '1002',
+          full_name: 'Student Two',
+          class_name: 'NonExistentClass',
+          gender: 'L',
+          absence_number: 2,
+        },
       ],
-      actorId: 'platform-admin-1',
-      actorRole: 'platform_admin',
+      academicPeriodId: 'b0000000-0000-0000-0000-000000000001',
+      actorId: 'school-admin-1',
+      actorRole: 'school_admin',
       providers,
     })
 
@@ -246,11 +297,26 @@ describe('admin bootstrap service unit tests', () => {
 
     const staged = await validateAndStageRoster({
       rows: [
-        { nis: '1001', full_name: 'Ahmad Fauzi', class_name: 'XII RPL 1', grade: 12 },
-        { nis: '1002', full_name: 'Budi Utomo', class_name: 'XII RPL 1', grade: 12 },
+        {
+          nis: '1001',
+          full_name: 'Ahmad Fauzi',
+          class_name: 'XII RPL 1',
+          grade: 12,
+          gender: 'L',
+          absence_number: 1,
+        },
+        {
+          nis: '1002',
+          full_name: 'Budi Utomo',
+          class_name: 'XII RPL 1',
+          grade: 12,
+          gender: 'L',
+          absence_number: 2,
+        },
       ],
-      actorId: 'platform-admin-1',
-      actorRole: 'platform_admin',
+      academicPeriodId: 'b0000000-0000-0000-0000-000000000001',
+      actorId: 'school-admin-1',
+      actorRole: 'school_admin',
       providers,
     })
 
@@ -270,13 +336,13 @@ describe('admin bootstrap service unit tests', () => {
     expect(accepted.review_state).toBe('accepted')
     expect(accepted.accepted_by).toBe('school-admin-1')
 
-    // Check canonical student profiles created
-    const student1 = await domainStore.getProfileByNis('1001')
+    // Check canonical students created without identity profiles
+    const student1 = await domainStore.getStudentByNis('1001')
     expect(student1).not.toBeNull()
     expect(student1?.full_name).toBe('Ahmad Fauzi')
-    expect(student1?.role).toBe('student')
+    expect(await domainStore.getProfileByNis('1001')).toBeNull()
 
-    const student2 = await domainStore.getProfileByNis('1002')
+    const student2 = await domainStore.getStudentByNis('1002')
     expect(student2).not.toBeNull()
     expect(student2?.full_name).toBe('Budi Utomo')
 
@@ -296,9 +362,18 @@ describe('admin bootstrap service unit tests', () => {
     })
 
     const staged = await validateAndStageRoster({
-      rows: [{ nis: '1001', full_name: 'Ahmad Fauzi', class_name: 'XII RPL 1' }],
-      actorId: 'platform-admin-1',
-      actorRole: 'platform_admin',
+      rows: [
+        {
+          nis: '1001',
+          full_name: 'Ahmad Fauzi',
+          class_name: 'XII RPL 1',
+          gender: 'L',
+          absence_number: 1,
+        },
+      ],
+      academicPeriodId: 'b0000000-0000-0000-0000-000000000001',
+      actorId: 'school-admin-1',
+      actorRole: 'school_admin',
       providers,
     })
 
@@ -324,9 +399,18 @@ describe('admin bootstrap service unit tests', () => {
     })
 
     const staged = await validateAndStageRoster({
-      rows: [{ nis: '', full_name: 'Ahmad Fauzi', class_name: 'XII RPL 1' }],
-      actorId: 'platform-admin-1',
-      actorRole: 'platform_admin',
+      rows: [
+        {
+          nis: '',
+          full_name: 'Ahmad Fauzi',
+          class_name: 'XII RPL 1',
+          gender: 'L',
+          absence_number: 1,
+        },
+      ],
+      academicPeriodId: 'b0000000-0000-0000-0000-000000000001',
+      actorId: 'school-admin-1',
+      actorRole: 'school_admin',
       providers,
     })
 
@@ -378,9 +462,18 @@ describe('admin bootstrap service unit tests', () => {
 
     // Stage and accept roster
     const staged = await validateAndStageRoster({
-      rows: [{ nis: '1001', full_name: 'Ahmad Fauzi', class_name: 'XII RPL 1' }],
-      actorId: 'platform-admin-1',
-      actorRole: 'platform_admin',
+      rows: [
+        {
+          nis: '1001',
+          full_name: 'Ahmad Fauzi',
+          class_name: 'XII RPL 1',
+          gender: 'L',
+          absence_number: 1,
+        },
+      ],
+      academicPeriodId: 'b0000000-0000-0000-0000-000000000001',
+      actorId: 'school-admin-1',
+      actorRole: 'school_admin',
       providers,
     })
 
@@ -431,15 +524,24 @@ describe('admin bootstrap service unit tests', () => {
     })
 
     const staged = await validateAndStageRoster({
-      rows: [{ nis: '1001', full_name: 'Ahmad Fauzi', class_name: 'XII RPL 1' }],
-      actorId: 'platform-admin-1',
-      actorRole: 'platform_admin',
+      rows: [
+        {
+          nis: '1001',
+          full_name: 'Ahmad Fauzi',
+          class_name: 'XII RPL 1',
+          gender: 'L',
+          absence_number: 1,
+        },
+      ],
+      academicPeriodId: 'b0000000-0000-0000-0000-000000000001',
+      actorId: 'school-admin-1',
+      actorRole: 'school_admin',
       providers,
     })
 
     const found = await getRosterReport({
       id: staged.id,
-      actorRole: 'platform_admin',
+      actorRole: 'school_admin',
       providers,
     })
     expect(found.id).toBe(staged.id)
@@ -447,7 +549,7 @@ describe('admin bootstrap service unit tests', () => {
     await expect(
       getRosterReport({
         id: 'non-existent-report-id',
-        actorRole: 'platform_admin',
+        actorRole: 'school_admin',
         providers,
       }),
     ).rejects.toThrow('Roster report not found.')

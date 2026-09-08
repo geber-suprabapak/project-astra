@@ -52,8 +52,24 @@ CREATE TABLE IF NOT EXISTS classes (
 );
 
 -- ----------------------------------------------------------------------------
+-- Table: students
+-- Description: Canonical roster students, independent of authentication
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS students (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    nis TEXT NOT NULL UNIQUE,
+    full_name TEXT NOT NULL,
+    gender TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT students_gender_check CHECK (gender IN ('L', 'P'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_students_nis ON students(nis);
+
+-- ----------------------------------------------------------------------------
 -- Table: profiles
--- Description: Student, Staff, and Administrator profiles
+-- Description: Identity-bound Student, Staff, and Administrator profiles
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS profiles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -92,19 +108,43 @@ CREATE INDEX IF NOT EXISTS idx_profiles_role ON profiles(role);
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS class_enrollments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id TEXT NOT NULL REFERENCES profiles(user_id) ON DELETE CASCADE,
+    student_id UUID REFERENCES students(id) ON DELETE CASCADE,
+    user_id TEXT REFERENCES profiles(user_id) ON DELETE CASCADE,
     class_id UUID REFERENCES classes(id) ON DELETE CASCADE,
     academic_period_id UUID REFERENCES academic_periods(id) ON DELETE CASCADE,
+    absence_number TEXT,
     status TEXT NOT NULL DEFAULT 'active',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT class_enrollments_status_check CHECK (status IN ('active', 'transferred', 'promoted', 'graduated', 'archived'))
+    CONSTRAINT class_enrollments_status_check CHECK (status IN ('active', 'transferred', 'promoted', 'graduated', 'archived')),
+    CONSTRAINT class_enrollments_owner_check CHECK (student_id IS NOT NULL OR user_id IS NOT NULL)
 );
 
+-- Additive compatibility for databases created before canonical Students.
+-- These columns must exist before the indexes below are created.
+ALTER TABLE class_enrollments ADD COLUMN IF NOT EXISTS student_id UUID REFERENCES students(id) ON DELETE CASCADE;
+ALTER TABLE class_enrollments ADD COLUMN IF NOT EXISTS absence_number TEXT;
+ALTER TABLE class_enrollments ALTER COLUMN user_id DROP NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_class_enrollments_user_period ON class_enrollments(user_id, academic_period_id);
+CREATE INDEX IF NOT EXISTS idx_class_enrollments_student_period ON class_enrollments(student_id, academic_period_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_active_class_enrollment ON class_enrollments(user_id, academic_period_id) WHERE status = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_active_student_class_enrollment ON class_enrollments(student_id, academic_period_id) WHERE status = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_active_class_absence_number ON class_enrollments(class_id, academic_period_id, absence_number)
+    WHERE status = 'active' AND absence_number IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_class_enrollments_class ON class_enrollments(class_id);
 CREATE INDEX IF NOT EXISTS idx_class_enrollments_status ON class_enrollments(status);
+
+-- ----------------------------------------------------------------------------
+-- Table: student_bindings
+-- Description: Optional audited binding between a Student and an identity
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS student_bindings (
+    student_id UUID PRIMARY KEY REFERENCES students(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL UNIQUE REFERENCES profiles(user_id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 -- ----------------------------------------------------------------------------
 -- Table: roster_reports
@@ -113,6 +153,7 @@ CREATE INDEX IF NOT EXISTS idx_class_enrollments_status ON class_enrollments(sta
 CREATE TABLE IF NOT EXISTS roster_reports (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     school_id UUID REFERENCES schools(id) ON DELETE CASCADE,
+    academic_period_id UUID REFERENCES academic_periods(id) ON DELETE RESTRICT,
     total_rows INTEGER NOT NULL DEFAULT 0,
     valid_rows INTEGER NOT NULL DEFAULT 0,
     rejected_rows INTEGER NOT NULL DEFAULT 0,
@@ -127,6 +168,8 @@ CREATE TABLE IF NOT EXISTS roster_reports (
     CONSTRAINT roster_reports_status_check CHECK (status IN ('staged', 'accepted', 'rejected')),
     CONSTRAINT roster_reports_review_state_check CHECK (review_state IN ('pending', 'accepted', 'rejected'))
 );
+
+ALTER TABLE roster_reports ADD COLUMN IF NOT EXISTS academic_period_id UUID REFERENCES academic_periods(id) ON DELETE RESTRICT;
 
 CREATE INDEX IF NOT EXISTS idx_roster_reports_school ON roster_reports(school_id);
 CREATE INDEX IF NOT EXISTS idx_roster_reports_status ON roster_reports(status);

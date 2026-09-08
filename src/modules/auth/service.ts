@@ -55,6 +55,13 @@ export async function registerStudent(
     className: rosterStudent.class_name,
   })
 
+  if (rosterStudent.student_id) {
+    await providers.domainStore.bindStudentToUser({
+      studentId: rosterStudent.student_id,
+      userId: identity.userId,
+    })
+  }
+
   // 6. Audit log
   await providers.domainStore.insertAuditLog({
     actor_id: identity.userId,
@@ -66,6 +73,7 @@ export async function registerStudent(
       email: input.email,
       full_name: fullName,
       class_name: rosterStudent.class_name,
+      student_id: rosterStudent.student_id ?? null,
     },
   })
 

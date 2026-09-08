@@ -108,6 +108,88 @@ const schoolAdminToken = tokenFor({
 })
 
 describe('integration: bootstrap school and validate student roster (Ticket 04)', () => {
+  it('admits identity-free students with enrollment-owned absence numbers and binds on signup', async () => {
+    const domainStore = new MemoryDomainStore()
+    const identityProvider = new MemoryIdentityProvider()
+    const app = createBootstrapApp(domainStore, identityProvider)
+
+    await app.request('/v1/admin/bootstrap/school', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${platformAdminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name: 'School 1', slug: 'school-1' }),
+    })
+
+    const stagedResponse = await app.request('/v1/admin/bootstrap/roster', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${schoolAdminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        academic_period_id: 'b0000000-0000-0000-0000-000000000001',
+        rows: [
+          {
+            nis: '2001',
+            full_name: '  Siti   Aminah  ',
+            gender: 'P',
+            class_id: 'c0000000-0000-0000-0000-000000000001',
+            class_name: 'XII RPL 1',
+            absence_number: 7,
+          },
+        ],
+      }),
+    })
+    expect(stagedResponse.status).toBe(201)
+    // SAFETY: successful staging responses use the standard typed data envelope.
+    const stagedBody = (await stagedResponse.json()) as {
+      data: { id: string; status: string; valid_rows: number }
+    }
+    expect(stagedBody.data.status).toBe('staged')
+    expect(stagedBody.data.valid_rows).toBe(1)
+
+    const acceptedResponse = await app.request(
+      `/v1/admin/bootstrap/roster/${stagedBody.data.id}/accept`,
+      { method: 'POST', headers: { Authorization: `Bearer ${schoolAdminToken}` } },
+    )
+    expect(acceptedResponse.status).toBe(200)
+    const repeatedAcceptedResponse = await app.request(
+      `/v1/admin/bootstrap/roster/${stagedBody.data.id}/accept`,
+      { method: 'POST', headers: { Authorization: `Bearer ${schoolAdminToken}` } },
+    )
+    expect(repeatedAcceptedResponse.status).toBe(200)
+    expect(identityProvider.users.size).toBe(0)
+    expect(domainStore.profiles.has('student-2001')).toBe(false)
+    const student = await domainStore.getStudentByNis('2001')
+    expect(student?.gender).toBe('P')
+    expect(domainStore.classEnrollments).toHaveLength(1)
+    expect(domainStore.classEnrollments[0]?.student_id).toBe(student?.id)
+    expect(domainStore.classEnrollments[0]?.user_id).toBeNull()
+    expect(domainStore.classEnrollments[0]?.absence_number).toBe('7')
+
+    await app.request('/v1/admin/bootstrap/signup/open', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${schoolAdminToken}` },
+    })
+    const signupResponse = await app.request('/v1/auth/student/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nis: '2001',
+        email: 'siti@school.sch.id',
+        password: 'Password123!',
+      }),
+    })
+    expect(signupResponse.status).toBe(201)
+    expect(identityProvider.users.size).toBe(1)
+    expect(domainStore.classEnrollments[0]?.user_id).not.toBeNull()
+    expect(domainStore.studentBindings.get(student!.id)?.user_id).toBe(
+      domainStore.classEnrollments[0]?.user_id,
+    )
+  })
+
   it('walks through complete bootstrap sequence from empty state to open student signup', async () => {
     const domainStore = new MemoryDomainStore()
     const app = createBootstrapApp(domainStore)
@@ -184,17 +266,32 @@ describe('integration: bootstrap school and validate student roster (Ticket 04)'
     expect(schoolAdminBody.data.role).toBe('school_admin')
     expect(schoolAdminBody.data.lifecycle_status).toBe('approved')
 
-    // 4. Platform Admin stages a roster batch with stage-only validation
+    // 4. School Admin stages a roster batch with stage-only validation
     const rosterRes = await app.request('/v1/admin/bootstrap/roster', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${platformAdminToken}`,
+        Authorization: `Bearer ${schoolAdminToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
+        academic_period_id: 'b0000000-0000-0000-0000-000000000001',
         rows: [
-          { nis: '1001', full_name: 'Ahmad Fauzi', class_name: 'XII RPL 1', grade: 12 },
-          { nis: '1002', full_name: 'Budi Utomo', class_name: 'XII RPL 1', grade: 12 },
+          {
+            nis: '1001',
+            full_name: 'Ahmad Fauzi',
+            class_name: 'XII RPL 1',
+            grade: 12,
+            gender: 'L',
+            absence_number: 1,
+          },
+          {
+            nis: '1002',
+            full_name: 'Budi Utomo',
+            class_name: 'XII RPL 1',
+            grade: 12,
+            gender: 'L',
+            absence_number: 2,
+          },
         ],
       }),
     })
@@ -254,10 +351,11 @@ describe('integration: bootstrap school and validate student roster (Ticket 04)'
     expect(acceptBody.data.review_state).toBe('accepted')
     expect(acceptBody.data.accepted_by).toBe('school-admin-1')
 
-    // Verify canonical student records committed
-    const student1 = await domainStore.getProfileByNis('1001')
+    // Verify canonical student records committed without identity profiles
+    const student1 = await domainStore.getStudentByNis('1001')
     expect(student1).not.toBeNull()
     expect(student1?.full_name).toBe('Ahmad Fauzi')
+    expect(await domainStore.getProfileByNis('1001')).toBeNull()
 
     // 7. School Admin opens Student Signup
     const openSignupRes = await app.request('/v1/admin/bootstrap/signup/open', {
@@ -313,17 +411,42 @@ describe('integration: bootstrap school and validate student roster (Ticket 04)'
     const invalidRosterRes = await app.request('/v1/admin/bootstrap/roster', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${platformAdminToken}`,
+        Authorization: `Bearer ${schoolAdminToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
+        academic_period_id: 'b0000000-0000-0000-0000-000000000001',
         rows: [
-          { nis: '1000', full_name: 'Valid Student', class_name: 'XII RPL 1' },
-          { nis: '', full_name: 'Empty NIS', class_name: 'XII RPL 1' },
-          { nis: '1001', full_name: 'Student 1', class_name: 'XII RPL 1' },
-          { nis: '1001', full_name: 'Duplicate NIS', class_name: 'XII RPL 1' },
-          { nis: '1002', full_name: '', class_name: 'XII RPL 1' },
-          { nis: '1003', full_name: 'Student 3', class_name: '' },
+          {
+            nis: '1000',
+            full_name: 'Valid Student',
+            class_name: 'XII RPL 1',
+            gender: 'L',
+            absence_number: 1,
+          },
+          {
+            nis: '',
+            full_name: 'Empty NIS',
+            class_name: 'XII RPL 1',
+            gender: 'L',
+            absence_number: 2,
+          },
+          {
+            nis: '1001',
+            full_name: 'Student 1',
+            class_name: 'XII RPL 1',
+            gender: 'L',
+            absence_number: 3,
+          },
+          {
+            nis: '1001',
+            full_name: 'Duplicate NIS',
+            class_name: 'XII RPL 1',
+            gender: 'L',
+            absence_number: 4,
+          },
+          { nis: '1002', full_name: '', class_name: 'XII RPL 1', gender: 'L', absence_number: 5 },
+          { nis: '1003', full_name: 'Student 3', class_name: '', gender: 'L', absence_number: 6 },
         ],
       }),
     })
@@ -405,11 +528,20 @@ describe('integration: bootstrap school and validate student roster (Ticket 04)'
     const rosterRes = await app.request('/v1/admin/bootstrap/roster', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${platformAdminToken}`,
+        Authorization: `Bearer ${schoolAdminToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        rows: [{ nis: '1001', full_name: 'Student 1', class_name: 'XII RPL 1' }],
+        academic_period_id: 'b0000000-0000-0000-0000-000000000001',
+        rows: [
+          {
+            nis: '1001',
+            full_name: 'Student 1',
+            class_name: 'XII RPL 1',
+            gender: 'L',
+            absence_number: 1,
+          },
+        ],
       }),
     })
     // SAFETY: Response JSON has standard envelope format

@@ -222,6 +222,7 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
 
     const report = await validateAndStageRoster({
       rows: parsed.data.rows,
+      academicPeriodId: parsed.data.academic_period_id,
       actorId: c.get('userId'),
       actorRole: c.get('profileRole'),
       providers,

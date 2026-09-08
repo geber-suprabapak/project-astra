@@ -112,14 +112,31 @@ describe('integration: student onboarding, approval, and recovery (Ticket 06)', 
       timezone: 'Asia/Jakarta',
     })
     const stagedReport = await domainStore.stageRosterReport({
+      academicPeriodId: 'b0000000-0000-0000-0000-000000000001',
       totalRows: 2,
       validRows: 2,
       rejectedRows: 0,
       status: 'staged',
       reviewState: 'pending',
       rows: [
-        { nis: '5001', full_name: 'Rian Pratama', class_name: 'XII RPL 1', grade: 12 },
-        { nis: '5002', full_name: 'Siti Rahma', class_name: 'XII RPL 1', grade: 12 },
+        {
+          nis: '5001',
+          full_name: 'Rian Pratama',
+          class_name: 'XII RPL 1',
+          grade: 12,
+          gender: 'L',
+          absence_number: 1,
+          class_id: 'c0000000-0000-0000-0000-000000000001',
+        },
+        {
+          nis: '5002',
+          full_name: 'Siti Rahma',
+          class_name: 'XII RPL 1',
+          grade: 12,
+          gender: 'P',
+          absence_number: 2,
+          class_id: 'c0000000-0000-0000-0000-000000000001',
+        },
       ],
       rejectedItems: [],
     })

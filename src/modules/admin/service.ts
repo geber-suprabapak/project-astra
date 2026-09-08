@@ -31,6 +31,7 @@ import type {
   RosterRowInput,
   Schedule,
   School,
+  StudentRosterRow,
   UserProfile,
 } from '../../providers/types.js'
 import {
@@ -137,12 +138,17 @@ export async function createSchoolAdmin(params: {
 
 export async function validateAndStageRoster(params: {
   rows: RosterRowInput[]
+  academicPeriodId?: string | null
   actorId: string
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<RosterReport> {
-  if (params.actorRole !== 'platform_admin' && params.actorRole !== 'school_admin') {
+  if (params.actorRole !== 'school_admin') {
     throw AppError.forbidden()
+  }
+
+  if (!params.academicPeriodId) {
+    throw AppError.validationError('Academic period is required.')
   }
 
   const school = await params.providers.domainStore.getSchool()
@@ -150,12 +156,27 @@ export async function validateAndStageRoster(params: {
     throw AppError.conflict('School must be bootstrapped before staging a roster.')
   }
 
-  const existingClasses = await params.providers.domainStore.getClasses(school.id)
-  const knownClasses = new Set(existingClasses.map((c) => c.name.trim().toLowerCase()))
+  const period = await params.providers.domainStore.getAcademicPeriod(params.academicPeriodId)
+  if (!period || period.school_id !== school.id) {
+    throw AppError.validationError('Academic period does not belong to the configured school.')
+  }
+
+  const existingClasses = await params.providers.domainStore.getClasses(
+    school.id,
+    params.academicPeriodId,
+  )
+  const normalizeText = (value: string) => value.trim().replace(/\s+/g, ' ')
+  const knownClasses = new Map(existingClasses.map((c) => [normalizeText(c.name).toLowerCase(), c]))
+  const activeEnrollments = await params.providers.domainStore.listClassEnrollments({
+    academicPeriodId: params.academicPeriodId,
+    status: 'active',
+  })
 
   const rejectedItems: RejectedRosterRow[] = []
+  const normalizedRows: RosterRowInput[] = []
   const seenNisBatch = new Set<string>()
   const duplicateNisBatch = new Set<string>()
+  const seenAbsenceBatch = new Set<string>()
 
   for (const row of params.rows) {
     const rawNis = row.nis ? row.nis.trim() : ''
@@ -171,19 +192,27 @@ export async function validateAndStageRoster(params: {
   for (let i = 0; i < params.rows.length; i++) {
     const row = params.rows[i]
     const nis = row.nis ? row.nis.trim() : ''
-    const fullName = row.full_name ? row.full_name.trim() : ''
-    const className = row.class_name ? row.class_name.trim() : ''
+    const fullName = row.full_name ? normalizeText(row.full_name) : ''
+    const className = row.class_name ? normalizeText(row.class_name) : ''
+    const gender = row.gender ? row.gender.trim().toUpperCase() : ''
+    const absenceRaw = row.absence_number
+    const absenceText =
+      absenceRaw === null || absenceRaw === undefined ? '' : String(absenceRaw).trim()
+    const absenceNumber = /^\d+$/.test(absenceText) ? Number(absenceText) : NaN
 
     const reasons: string[] = []
 
     if (!nis) {
       reasons.push('NIS cannot be empty.')
+    } else if (!/^\d+$/.test(nis)) {
+      reasons.push('NIS must contain only digits.')
     } else if (duplicateNisBatch.has(nis)) {
       reasons.push(`Duplicate NIS "${nis}" in roster batch.`)
     } else {
       const existingProfile = await params.providers.domainStore.getProfileByNis(nis)
-      if (existingProfile) {
-        reasons.push(`NIS "${nis}" already exists in student profiles.`)
+      const existingStudent = await params.providers.domainStore.getStudentByNis(nis)
+      if (existingProfile || existingStudent) {
+        reasons.push(`NIS "${nis}" already exists in the student roster.`)
       }
     }
 
@@ -191,11 +220,52 @@ export async function validateAndStageRoster(params: {
       reasons.push('Full name cannot be empty.')
     }
 
-    if (!className) {
+    const cls = row.class_id
+      ? existingClasses.find((candidate) => candidate.id === row.class_id)
+      : knownClasses.get(className.toLowerCase())
+    if (!className && !row.class_id) {
       reasons.push('Class name cannot be empty.')
-    } else if (existingClasses.length > 0 && !knownClasses.has(className.toLowerCase())) {
+    } else if (!cls) {
       reasons.push(`Invalid class reference: "${row.class_name}" is not a recognized class.`)
     }
+
+    if (!gender || (gender !== 'L' && gender !== 'P')) {
+      reasons.push('Gender must be L or P.')
+    }
+
+    if (!absenceText || !Number.isInteger(absenceNumber) || absenceNumber <= 0) {
+      reasons.push('Absence number must be a positive integer.')
+    } else if (cls) {
+      const absenceKey = `${cls.id}:${absenceNumber}`
+      if (seenAbsenceBatch.has(absenceKey)) {
+        reasons.push(`Duplicate absence number "${absenceText}" in class and academic period.`)
+      }
+      if (
+        activeEnrollments.some(
+          (enrollment) =>
+            enrollment.class_id === cls.id &&
+            enrollment.absence_number !== null &&
+            enrollment.absence_number !== undefined &&
+            Number(enrollment.absence_number) === absenceNumber,
+        )
+      ) {
+        reasons.push(
+          `Absence number "${absenceText}" is already used in this class and academic period.`,
+        )
+      }
+      seenAbsenceBatch.add(absenceKey)
+    }
+
+    normalizedRows.push({
+      ...row,
+      nis,
+      full_name: fullName,
+      class_name: cls?.name ?? className,
+      class_id: cls?.id ?? row.class_id ?? null,
+      academic_period_id: params.academicPeriodId,
+      gender,
+      absence_number: absenceText || null,
+    })
 
     if (reasons.length > 0) {
       rejectedItems.push({
@@ -203,6 +273,10 @@ export async function validateAndStageRoster(params: {
         nis: row.nis || null,
         full_name: row.full_name || null,
         class_name: row.class_name || null,
+        class_id: row.class_id ?? null,
+        academic_period_id: params.academicPeriodId,
+        gender: row.gender ?? null,
+        absence_number: row.absence_number ?? null,
         grade: row.grade ?? null,
         reason: reasons.join(' '),
       })
@@ -222,7 +296,8 @@ export async function validateAndStageRoster(params: {
     rejectedRows,
     status,
     reviewState,
-    rows: params.rows,
+    academicPeriodId: params.academicPeriodId,
+    rows: normalizedRows,
     rejectedItems,
   })
 
@@ -247,7 +322,7 @@ export async function getRosterReport(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<RosterReport> {
-  if (params.actorRole !== 'platform_admin' && params.actorRole !== 'school_admin') {
+  if (params.actorRole !== 'school_admin') {
     throw AppError.forbidden()
   }
 
@@ -277,6 +352,7 @@ export async function acceptRosterReport(params: {
   if (report.rejected_rows > 0 || (report.rejected_items && report.rejected_items.length > 0)) {
     throw AppError.validationError('Cannot accept a roster report with rejected rows.')
   }
+  if (report.status === 'accepted') return report
 
   const accepted = await params.providers.domainStore.acceptRosterReport(params.id, params.actorId)
 
@@ -731,7 +807,7 @@ export async function listStudents(params: {
   status?: ProfileLifecycleStatus
   actorRole: IdentityRole | null
   providers: AppProviders
-}): Promise<UserProfile[]> {
+}): Promise<StudentRosterRow[]> {
   if (
     !params.actorRole ||
     !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
