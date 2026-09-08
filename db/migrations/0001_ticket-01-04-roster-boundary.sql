@@ -9,6 +9,7 @@
 
 SET lock_timeout = '5s';
 SET statement_timeout = '10min';
+SET search_path TO public, pg_catalog;
 
 BEGIN;
 
@@ -45,7 +46,7 @@ BEGIN
 
     IF EXISTS (
         SELECT 1
-        FROM class_enrollments
+        FROM public.class_enrollments
         WHERE status = 'active'
           AND (user_id IS NULL OR class_id IS NULL OR academic_period_id IS NULL)
     ) THEN
@@ -55,7 +56,7 @@ BEGIN
 
     IF EXISTS (
         SELECT 1
-        FROM class_enrollments
+        FROM public.class_enrollments
         WHERE status = 'active'
         GROUP BY user_id, academic_period_id
         HAVING count(*) > 1
@@ -182,6 +183,67 @@ BEGIN
         ) THEN
             RAISE EXCEPTION 'Existing public.student_bindings has an incompatible column contract';
         END IF;
+
+        IF EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_constraint c
+            WHERE c.conrelid = 'public.student_bindings'::regclass
+              AND c.contype = 'f'
+              AND NOT (
+                  c.conname = 'student_bindings_student_id_fkey'
+                  AND c.conkey = ARRAY[(
+                      SELECT a.attnum
+                      FROM pg_catalog.pg_attribute a
+                      WHERE a.attrelid = c.conrelid
+                        AND a.attname = 'student_id'
+                        AND NOT a.attisdropped
+                  )]::smallint[]
+                  AND c.confrelid = to_regclass('public.students')
+                  AND c.confkey = ARRAY[(
+                      SELECT a.attnum
+                      FROM pg_catalog.pg_attribute a
+                      WHERE a.attrelid = c.confrelid
+                        AND a.attname = 'id'
+                        AND NOT a.attisdropped
+                  )]::smallint[]
+                  AND c.confdeltype = 'c'
+                  AND c.confupdtype = 'a'
+                  AND c.confmatchtype = 's'
+                  AND NOT c.condeferrable
+                  AND NOT c.condeferred
+              )
+              AND NOT (
+                  c.conname = 'student_bindings_user_id_fkey'
+                  AND c.conkey = ARRAY[(
+                      SELECT a.attnum
+                      FROM pg_catalog.pg_attribute a
+                      WHERE a.attrelid = c.conrelid
+                        AND a.attname = 'user_id'
+                        AND NOT a.attisdropped
+                  )]::smallint[]
+                  AND c.confrelid = to_regclass('public.profiles')
+                  AND c.confkey = ARRAY[(
+                      SELECT a.attnum
+                      FROM pg_catalog.pg_attribute a
+                      WHERE a.attrelid = c.confrelid
+                        AND a.attname = 'user_id'
+                        AND NOT a.attisdropped
+                  )]::smallint[]
+                  AND c.confdeltype = 'c'
+                  AND c.confupdtype = 'a'
+                  AND c.confmatchtype = 's'
+                  AND NOT c.condeferrable
+                  AND NOT c.condeferred
+              )
+        ) OR EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_constraint c
+            WHERE c.conrelid = 'public.student_bindings'::regclass
+              AND c.contype <> 'f'
+              AND c.conname IN ('student_bindings_student_id_fkey', 'student_bindings_user_id_fkey')
+        ) THEN
+            RAISE EXCEPTION 'Existing public.student_bindings has an incompatible foreign-key contract';
+        END IF;
     END IF;
 
     IF EXISTS (
@@ -212,7 +274,7 @@ BEGIN
           AND conname = 'class_enrollments_student_id_fkey'
           AND (
               contype <> 'f'
-              OR pg_get_constraintdef(oid) NOT ILIKE '%FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE%'
+              OR pg_get_constraintdef(oid) NOT ILIKE '%FOREIGN KEY (student_id) REFERENCES %students(id) ON DELETE CASCADE%'
           )
     ) OR EXISTS (
         SELECT 1
@@ -221,7 +283,7 @@ BEGIN
           AND conname = 'roster_reports_academic_period_id_fkey'
           AND (
               contype <> 'f'
-              OR pg_get_constraintdef(oid) NOT ILIKE '%FOREIGN KEY (academic_period_id) REFERENCES academic_periods(id) ON DELETE RESTRICT%'
+              OR pg_get_constraintdef(oid) NOT ILIKE '%FOREIGN KEY (academic_period_id) REFERENCES %academic_periods(id) ON DELETE RESTRICT%'
           )
     ) THEN
         RAISE EXCEPTION 'Existing Ticket 01/04 foreign-key contract is incompatible';
@@ -249,10 +311,26 @@ BEGIN
         RAISE EXCEPTION 'Existing Ticket 01/04 check constraint is incompatible';
     END IF;
 
-    IF to_regclass('public.idx_students_nis') IS NOT NULL THEN
-        IF pg_get_indexdef('public.idx_students_nis'::regclass) <> 'CREATE INDEX idx_students_nis ON public.students USING btree (nis)' THEN
-            RAISE EXCEPTION 'Existing idx_students_nis has an incompatible definition';
-        END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_class index_class
+        JOIN pg_catalog.pg_namespace index_namespace ON index_namespace.oid = index_class.relnamespace
+        LEFT JOIN pg_catalog.pg_index index_meta ON index_meta.indexrelid = index_class.oid
+        WHERE index_namespace.nspname = 'public'
+          AND index_class.relname IN (
+              'idx_class_enrollments_student_period',
+              'uq_active_student_class_enrollment',
+              'uq_active_class_absence_number'
+          )
+          AND (
+              index_class.relkind <> 'i'
+              OR index_meta.indexrelid IS NULL
+              OR NOT index_meta.indisvalid
+              OR NOT index_meta.indisready
+          )
+    ) THEN
+        RAISE EXCEPTION
+            'Astra migration 0001 found an invalid, incomplete, or non-index same-named relation; inspect and drop it before rerun';
     END IF;
     IF to_regclass('public.idx_class_enrollments_student_period') IS NOT NULL THEN
         IF pg_get_indexdef('public.idx_class_enrollments_student_period'::regclass) <> 'CREATE INDEX idx_class_enrollments_student_period ON public.class_enrollments USING btree (student_id, academic_period_id)' THEN
@@ -272,7 +350,7 @@ BEGIN
 END
 $$;
 
-CREATE TABLE IF NOT EXISTS students (
+CREATE TABLE IF NOT EXISTS public.students (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     nis TEXT NOT NULL UNIQUE,
     full_name TEXT NOT NULL,
@@ -282,20 +360,20 @@ CREATE TABLE IF NOT EXISTS students (
     CONSTRAINT students_gender_check CHECK (gender IN ('L', 'P'))
 );
 
-CREATE TABLE IF NOT EXISTS student_bindings (
-    student_id UUID PRIMARY KEY REFERENCES students(id) ON DELETE CASCADE,
-    user_id TEXT NOT NULL UNIQUE REFERENCES profiles(user_id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS public.student_bindings (
+    student_id UUID PRIMARY KEY REFERENCES public.students(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL UNIQUE REFERENCES public.profiles(user_id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-ALTER TABLE class_enrollments
+ALTER TABLE public.class_enrollments
     ADD COLUMN IF NOT EXISTS student_id UUID;
 
-ALTER TABLE class_enrollments
+ALTER TABLE public.class_enrollments
     ADD COLUMN IF NOT EXISTS absence_number TEXT;
 
-ALTER TABLE class_enrollments
+ALTER TABLE public.class_enrollments
     ALTER COLUMN user_id DROP NOT NULL;
 
 DO $$
@@ -306,9 +384,9 @@ BEGIN
         WHERE conrelid = 'public.class_enrollments'::regclass
           AND conname = 'class_enrollments_student_id_fkey'
     ) THEN
-        ALTER TABLE class_enrollments
+        ALTER TABLE public.class_enrollments
             ADD CONSTRAINT class_enrollments_student_id_fkey
-            FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
+            FOREIGN KEY (student_id) REFERENCES public.students(id) ON DELETE CASCADE
             NOT VALID;
     END IF;
 
@@ -318,7 +396,7 @@ BEGIN
         WHERE conrelid = 'public.class_enrollments'::regclass
           AND conname = 'class_enrollments_owner_check'
     ) THEN
-        ALTER TABLE class_enrollments
+        ALTER TABLE public.class_enrollments
             ADD CONSTRAINT class_enrollments_owner_check
             CHECK (student_id IS NOT NULL OR user_id IS NOT NULL)
             NOT VALID;
@@ -330,7 +408,7 @@ BEGIN
         WHERE conrelid = 'public.class_enrollments'::regclass
           AND conname = 'class_enrollments_absence_number_check'
     ) THEN
-        ALTER TABLE class_enrollments
+        ALTER TABLE public.class_enrollments
             ADD CONSTRAINT class_enrollments_absence_number_check
             CHECK (absence_number IS NULL OR absence_number ~ '^[1-9][0-9]*$')
             NOT VALID;
@@ -338,7 +416,35 @@ BEGIN
 END
 $$;
 
-ALTER TABLE roster_reports
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'public.student_bindings'::regclass
+          AND conname = 'student_bindings_student_id_fkey'
+    ) THEN
+        ALTER TABLE public.student_bindings
+            ADD CONSTRAINT student_bindings_student_id_fkey
+            FOREIGN KEY (student_id) REFERENCES public.students(id) ON DELETE CASCADE
+            NOT VALID;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'public.student_bindings'::regclass
+          AND conname = 'student_bindings_user_id_fkey'
+    ) THEN
+        ALTER TABLE public.student_bindings
+            ADD CONSTRAINT student_bindings_user_id_fkey
+            FOREIGN KEY (user_id) REFERENCES public.profiles(user_id) ON DELETE CASCADE
+            NOT VALID;
+    END IF;
+END
+$$;
+
+ALTER TABLE public.roster_reports
     ADD COLUMN IF NOT EXISTS academic_period_id UUID;
 
 DO $$
@@ -349,21 +455,21 @@ BEGIN
         WHERE conrelid = 'public.roster_reports'::regclass
           AND conname = 'roster_reports_academic_period_id_fkey'
     ) THEN
-        ALTER TABLE roster_reports
+        ALTER TABLE public.roster_reports
             ADD CONSTRAINT roster_reports_academic_period_id_fkey
-            FOREIGN KEY (academic_period_id) REFERENCES academic_periods(id) ON DELETE RESTRICT
+            FOREIGN KEY (academic_period_id) REFERENCES public.academic_periods(id) ON DELETE RESTRICT
             NOT VALID;
     END IF;
 END
 $$;
 
-ALTER TABLE leave_requests
+ALTER TABLE public.leave_requests
     ADD COLUMN IF NOT EXISTS original_end_date DATE;
 
-ALTER TABLE leave_requests
+ALTER TABLE public.leave_requests
     ADD COLUMN IF NOT EXISTS effective_end_date DATE;
 
-ALTER TABLE leave_requests
+ALTER TABLE public.leave_requests
     ADD COLUMN IF NOT EXISTS duration_days INTEGER;
 
 DO $$
@@ -374,7 +480,7 @@ BEGIN
         WHERE conrelid = 'public.leave_requests'::regclass
           AND conname = 'leave_requests_duration_days_check'
     ) THEN
-        ALTER TABLE leave_requests
+        ALTER TABLE public.leave_requests
             ADD CONSTRAINT leave_requests_duration_days_check
             CHECK (duration_days IS NULL OR duration_days BETWEEN 1 AND 30)
             NOT VALID;
@@ -386,16 +492,13 @@ COMMIT;
 
 -- These indexes are intentionally outside the transaction. They can be
 -- retried independently if a concurrent build times out or loses a race.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_students_nis
-    ON students(nis);
-
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_class_enrollments_student_period
-    ON class_enrollments(student_id, academic_period_id);
+    ON public.class_enrollments(student_id, academic_period_id);
 
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_active_student_class_enrollment
-    ON class_enrollments(student_id, academic_period_id)
+    ON public.class_enrollments(student_id, academic_period_id)
     WHERE status = 'active';
 
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_active_class_absence_number
-    ON class_enrollments(class_id, academic_period_id, absence_number)
+    ON public.class_enrollments(class_id, academic_period_id, absence_number)
     WHERE status = 'active' AND absence_number IS NOT NULL;

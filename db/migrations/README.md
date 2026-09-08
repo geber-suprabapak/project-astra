@@ -20,18 +20,25 @@ After an approved backfill, validate the deferred constraints in the same
 maintenance plan:
 
 ```sql
-ALTER TABLE class_enrollments
+ALTER TABLE public.student_bindings
+  VALIDATE CONSTRAINT student_bindings_student_id_fkey;
+ALTER TABLE public.student_bindings
+  VALIDATE CONSTRAINT student_bindings_user_id_fkey;
+ALTER TABLE public.class_enrollments
   VALIDATE CONSTRAINT class_enrollments_student_id_fkey;
-ALTER TABLE class_enrollments
+ALTER TABLE public.class_enrollments
   VALIDATE CONSTRAINT class_enrollments_owner_check;
-ALTER TABLE class_enrollments
+ALTER TABLE public.class_enrollments
   VALIDATE CONSTRAINT class_enrollments_absence_number_check;
-ALTER TABLE roster_reports
+ALTER TABLE public.roster_reports
   VALIDATE CONSTRAINT roster_reports_academic_period_id_fkey;
-ALTER TABLE leave_requests
+ALTER TABLE public.leave_requests
   VALIDATE CONSTRAINT leave_requests_duration_days_check;
 ```
 
 The migration preflight rejects missing legacy columns, incompatible existing
-canonical objects, and invalid active legacy enrollments before its first DDL
-statement. It does not normalize or invent legacy data.
+canonical objects, invalid or incomplete same-named concurrent indexes, and
+invalid active legacy enrollments before its first DDL statement. It adds
+missing `student_bindings` foreign keys as `NOT VALID` so existing orphan rows
+remain reviewable, while rejecting any wrongly named or mapped binding FK. It
+does not normalize or invent legacy data.
