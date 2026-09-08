@@ -4,11 +4,11 @@
 - [x] Create isolated ticket worktree
 - [x] Publish monthly attendance source routes
 - [x] Verify manifest, typecheck, and lint
-- [ ] Commit Astra
+- [x] Commit Astra
 
 # Current
 
-Contract publication is complete and validated; parent handoff remains.
+Contract publication, PR #2 merge to main, and production database migration 0001 execution are complete. Astra is live and healthy on Evernight.
 
 # Blocked
 
