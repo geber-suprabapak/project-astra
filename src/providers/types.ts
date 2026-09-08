@@ -27,6 +27,22 @@ export interface UserProfile {
   gender?: string | null
 }
 
+export interface Student {
+  id: string
+  nis: string
+  full_name: string
+  gender: 'L' | 'P'
+  created_at?: string
+  updated_at?: string
+}
+
+export interface StudentBinding {
+  student_id: string
+  user_id: string
+  created_at?: string
+  updated_at?: string
+}
+
 export interface IdentityUser {
   userId: string
   authSource?: 'logto' | 'legacy_supabase'
@@ -116,6 +132,10 @@ export interface Permit {
   updated_at?: string
   rejection_reason?: string | null
   rejected_at?: string | null
+  requested_start_date?: string
+  original_end_date?: string | null
+  effective_end_date?: string | null
+  duration_days?: number | null
 }
 
 export const leaveRequestCategorySchema = z.enum(['sakit', 'pergi', 'dispensasi', 'lainnya'])
@@ -141,6 +161,74 @@ export interface LeaveRequest {
   student_nis?: string | null
   student_class?: string | null
   absence_number?: string | null
+  requested_start_date?: string
+  original_end_date?: string | null
+  effective_end_date?: string | null
+  duration_days?: number | null
+}
+
+export interface LeavePeriodFields {
+  requested_start_date: string
+  original_end_date: string | null
+  effective_end_date: string | null
+  duration_days: number | null
+}
+
+export function toWibDate(value: string): string {
+  const candidate = value.trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(candidate)) return candidate
+  const parsed = new Date(candidate)
+  if (Number.isNaN(parsed.getTime())) return candidate.slice(0, 10)
+  return new Date(parsed.getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
+}
+
+export function getLeavePeriodFields(request: {
+  date: string
+  approval_status: LeaveRequestApprovalStatus
+  original_end_date?: string | null
+  effective_end_date?: string | null
+  duration_days?: number | null
+}): LeavePeriodFields {
+  const requestedStart = toWibDate(request.date)
+  const originalEnd = request.original_end_date ? toWibDate(request.original_end_date) : null
+  const effectiveEnd = request.effective_end_date ? toWibDate(request.effective_end_date) : null
+
+  if (request.approval_status !== 'approved') {
+    return {
+      requested_start_date: requestedStart,
+      original_end_date: originalEnd,
+      effective_end_date: effectiveEnd,
+      duration_days: request.duration_days ?? null,
+    }
+  }
+
+  if (originalEnd || effectiveEnd) {
+    const resolvedOriginalEnd = originalEnd ?? effectiveEnd
+    const resolvedEffectiveEnd = effectiveEnd ?? resolvedOriginalEnd
+    const duration =
+      request.duration_days ??
+      (resolvedOriginalEnd && resolvedOriginalEnd >= requestedStart
+        ? Math.round(
+            (Date.parse(`${resolvedOriginalEnd}T00:00:00Z`) -
+              Date.parse(`${requestedStart}T00:00:00Z`)) /
+              86_400_000,
+          ) + 1
+        : null)
+    return {
+      requested_start_date: requestedStart,
+      original_end_date: resolvedOriginalEnd,
+      effective_end_date: resolvedEffectiveEnd,
+      duration_days: duration,
+    }
+  }
+
+  // Legacy approved rows only contain `date`; read them as a one-day period.
+  return {
+    requested_start_date: requestedStart,
+    original_end_date: requestedStart,
+    effective_end_date: requestedStart,
+    duration_days: 1,
+  }
 }
 
 export interface ListLeaveRequestsFilter {
@@ -159,6 +247,14 @@ export interface UpdateLeaveRequestStatusParams {
   status?: boolean
   rejectionReason?: string | null
   rejectedAt?: string | null
+  durationDays?: number
+}
+
+export interface ForceFinishLeaveRequestParams {
+  id: string
+  effectiveEndDate: string
+  actorId: string
+  reason: string
 }
 
 export interface CreateLeaveRequestData {
@@ -357,9 +453,11 @@ export type ClassEnrollmentStatus = z.infer<typeof classEnrollmentStatusSchema>
 
 export interface ClassEnrollment {
   id: string
-  user_id: string
+  student_id?: string | null
+  user_id: string | null
   class_id: string
   academic_period_id: string
+  absence_number?: string | null
   status: ClassEnrollmentStatus
   created_at?: string
   updated_at?: string
@@ -373,6 +471,12 @@ export interface EnrollStudentParams {
   userId: string
   classId: string
   academicPeriodId: string
+}
+
+export interface CreateStudentParams {
+  nis: string
+  fullName: string
+  gender: 'L' | 'P'
 }
 
 export interface TransferStudentEnrollmentParams {
@@ -484,6 +588,10 @@ export interface RosterRowInput {
   nis: string
   full_name: string
   class_name: string
+  gender?: string | null
+  absence_number?: string | number | null
+  class_id?: string | null
+  academic_period_id?: string | null
   grade?: number | null
 }
 
@@ -492,6 +600,10 @@ export interface RejectedRosterRow {
   nis?: string | null
   full_name?: string | null
   class_name?: string | null
+  class_id?: string | null
+  academic_period_id?: string | null
+  gender?: string | null
+  absence_number?: string | number | null
   grade?: number | null
   reason: string
 }
@@ -502,6 +614,7 @@ export type RosterReviewState = 'pending' | 'accepted' | 'rejected'
 export interface RosterReport {
   id: string
   school_id?: string | null
+  academic_period_id?: string | null
   total_rows: number
   valid_rows: number
   rejected_rows: number
@@ -517,6 +630,7 @@ export interface RosterReport {
 
 export interface StageRosterParams {
   schoolId?: string | null
+  academicPeriodId?: string | null
   totalRows: number
   validRows: number
   rejectedRows: number
@@ -652,6 +766,7 @@ export interface DomainStore {
   getLeaveRequestById(id: string): Promise<LeaveRequest | null>
   listLeaveRequests(filter?: ListLeaveRequestsFilter): Promise<LeaveRequest[]>
   updateLeaveRequestStatus(params: UpdateLeaveRequestStatusParams): Promise<LeaveRequest>
+  forceFinishLeaveRequest(params: ForceFinishLeaveRequestParams): Promise<LeaveRequest>
   deleteLeaveRequest(id: string): Promise<void>
   validateAttendanceAction(params: {
     userId: string
@@ -765,6 +880,9 @@ export interface DomainStore {
   deleteLocation(id: string): Promise<void>
 
   // Bootstrap & Roster domain methods
+  getStudentByNis(nis: string): Promise<Student | null>
+  createStudent(params: CreateStudentParams): Promise<Student>
+  bindStudentToUser(params: { studentId: string; userId: string }): Promise<StudentBinding>
   getSchool(): Promise<School | null>
   getSchoolBySlug(slug: string): Promise<School | null>
   createSchool(params: CreateSchoolParams): Promise<School>
@@ -811,7 +929,7 @@ export interface DomainStore {
   getRosterStudentByNis(nis: string): Promise<RosterStudent | null>
   listStudentProfiles(filter?: {
     lifecycle_status?: ProfileLifecycleStatus
-  }): Promise<UserProfile[]>
+  }): Promise<StudentRosterRow[]>
   createPendingStudentProfile(params: {
     userId: string
     nis: string
@@ -900,10 +1018,33 @@ export interface SaveFaceEnrollmentParams {
 }
 
 export interface RosterStudent {
+  student_id?: string | null
   nis: string
   full_name: string
   class_name: string
   grade?: number | null
+  gender?: string | null
+  user_id?: string | null
+  academic_period_id?: string | null
+  absence_number?: string | null
+}
+
+export interface StudentRosterRow {
+  student_id: string | null
+  user_id: string | null
+  full_name: string | null
+  email?: string | null
+  nis?: string | null
+  role?: IdentityRole | null
+  lifecycle_status: ProfileLifecycleStatus | null
+  gender?: string | null
+  avatar_url?: string | null
+  notification_token?: string | null
+  class_name?: string | null
+  class_id?: string | null
+  academic_period_id?: string | null
+  period_name?: string | null
+  absence_number?: string | null
 }
 
 export interface PasswordResetCode {

@@ -401,7 +401,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
   })
 
   describe('4. HTTP Endpoint RBAC & Flow Verification', () => {
-    it('allows school_admin, platform_admin, and teacher to create leave requests with HTTP 201', async () => {
+    it('rejects school_admin, platform_admin, and teacher from creating leave requests', async () => {
       const env = createTestEnv()
       await setupUsers(env.domainStore, env.identityProvider)
 
@@ -445,13 +445,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
             date: '2026-08-28',
           }),
         })
-        expect(res.status).toBe(201)
-        // SAFETY: HTTP 201 response body is a JSON object with success and data
-        const json = (await res.json()) as any
-        expect(json.success).toBe(true)
-        expect(json.data.category).toBe('sakit')
-        expect(json.data.approval_status).toBe('approved')
-        expect(json.data.status).toBe(true)
+        expect(res.status).toBe(403)
       }
     })
 
@@ -480,7 +474,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           date: '2026-08-29',
         }),
       })
-      expect(permitRes.status).toBe(201)
+      expect(permitRes.status).toBe(403)
     })
 
     it('rejects student and staff roles with HTTP 403 Forbidden', async () => {
@@ -529,7 +523,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
       expect(staffRes.status).toBe(403)
     })
 
-    it('returns 404 Not Found when target student does not exist', async () => {
+    it('rejects target selection before looking up a student', async () => {
       const env = createTestEnv()
       await setupUsers(env.domainStore, env.identityProvider)
 
@@ -554,7 +548,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           date: '2026-08-28',
         }),
       })
-      expect(nonExistentRes.status).toBe(404)
+      expect(nonExistentRes.status).toBe(403)
     })
 
     it('verifies attachment lifecycle transition and purpose gating', async () => {
@@ -596,12 +590,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           file_id: validFileId,
         }),
       })
-      expect(attachRes.status).toBe(201)
-      // SAFETY: HTTP 201 response body is a JSON object with success and data
-      const attachJson = (await attachRes.json()) as any
-      expect(attachJson.data.attachment_url).toContain('permit_test.jpg')
-      const updatedFile = env.domainStore.files.get(validFileId)
-      expect(updatedFile?.lifecycle).toBe('available')
+      expect(attachRes.status).toBe(403)
 
       // Wrong file purpose (avatar)
       const avatarFileId = '22222222-2222-3333-4444-555555555555'
@@ -630,7 +619,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           file_id: avatarFileId,
         }),
       })
-      expect(wrongPurposeRes.status).toBe(422)
+      expect(wrongPurposeRes.status).toBe(403)
 
       // Non-existent file ID
       const nonExistentFileRes = await env.app.request('/v1/admin/leave-requests', {
@@ -647,7 +636,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           file_id: '99999999-9999-9999-9999-999999999999',
         }),
       })
-      expect(nonExistentFileRes.status).toBe(404)
+      expect(nonExistentFileRes.status).toBe(403)
     })
 
     it('generates audit log entry with entity_type leave_request', async () => {
@@ -675,14 +664,10 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           date: '2026-08-28',
         }),
       })
-      expect(res.status).toBe(201)
-
-      const auditLogs = env.domainStore.auditLogs
-      const adminLeaveAudit = auditLogs.find((log) => log.action === 'create_admin_leave_request')
-      expect(adminLeaveAudit).toBeDefined()
-      expect(adminLeaveAudit?.actor_id).toBe('admin-1')
-      expect(adminLeaveAudit?.entity_type).toBe('leave_request')
-      expect(adminLeaveAudit?.details?.category).toBe('lainnya')
+      expect(res.status).toBe(403)
+      expect(env.domainStore.auditLogs).not.toContainEqual(
+        expect.objectContaining({ action: 'create_admin_leave_request' }),
+      )
     })
   })
 })

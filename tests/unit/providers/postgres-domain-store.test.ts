@@ -12,11 +12,16 @@ type MockSqlTarget = MockQueryHandler & {
   begin?: <T>(cb: (sql: Sql) => Promise<T>) => Promise<T>
 }
 
-function createMockSql(handler: MockQueryHandler): Sql {
+function createMockSql(handler: MockQueryHandler, onTransaction?: (active: boolean) => void): Sql {
   let proxyInstance: Sql
   const targetHandler: MockSqlTarget = Object.assign(handler, {
     begin: async <T>(cb: (sql: Sql) => Promise<T>): Promise<T> => {
-      return cb(proxyInstance)
+      onTransaction?.(true)
+      try {
+        return await cb(proxyInstance)
+      } finally {
+        onTransaction?.(false)
+      }
     },
   })
   const proxy = new Proxy(targetHandler, {
@@ -427,6 +432,75 @@ describe('PostgresDomainStore (Greenfield)', () => {
 
     const fetched = await store.getRosterReport('report-1')
     expect(fetched?.id).toBe('report-1')
+  })
+
+  it('acceptRosterReport performs its writes inside one SQL transaction', async () => {
+    let beginCalls = 0
+    let inTransaction = false
+    let writesOutsideTransaction = 0
+    let reportStatus = 'staged'
+    let acceptedBy: string | null = null
+    const report = {
+      id: 'report-1',
+      school_id: 'school-1',
+      academic_period_id: 'period-1',
+      total_rows: 1,
+      valid_rows: 1,
+      rejected_rows: 0,
+      review_state: 'pending',
+      rows: [
+        {
+          nis: '1001',
+          full_name: 'Student',
+          class_name: 'XII RPL 1',
+          class_id: 'class-1',
+          gender: 'L',
+          absence_number: '1',
+        },
+      ],
+      rejected_items: [],
+      accepted_at: null,
+      accepted_by: null,
+      created_at: '2026-08-21T00:00:00Z',
+      updated_at: '2026-08-21T00:00:00Z',
+    }
+    const mockSql = createMockSql(
+      (strings: TemplateStringsArray) => {
+        const query = strings.join('?')
+        if (/\b(INSERT|UPDATE|DELETE)\b/i.test(query) && !inTransaction) {
+          writesOutsideTransaction += 1
+        }
+        if (query.includes('FROM roster_reports')) {
+          return [{ ...report, status: reportStatus, accepted_by: acceptedBy }]
+        }
+        if (query.includes('FROM schools')) {
+          return [{ id: 'school-1', name: 'SMKN 2', slug: 'smkn2', timezone: 'Asia/Jakarta' }]
+        }
+        if (query.includes('FROM academic_periods')) {
+          return [{ id: 'period-1', school_id: 'school-1', name: '2026/2027 Ganjil' }]
+        }
+        if (query.includes('SELECT id FROM classes')) return [{ id: 'class-1' }]
+        if (query.includes('INSERT INTO students')) return [{ id: 'student-1' }]
+        if (query.includes('UPDATE roster_reports')) {
+          reportStatus = 'accepted'
+          acceptedBy = 'school-admin-1'
+          return []
+        }
+        return []
+      },
+      (active) => {
+        inTransaction = active
+        if (active) beginCalls += 1
+      },
+    )
+
+    const store = new PostgresDomainStore({ sql: mockSql })
+    const accepted = await store.acceptRosterReport('report-1', 'school-admin-1')
+
+    expect(beginCalls).toBe(1)
+    expect(writesOutsideTransaction).toBe(0)
+    expect(accepted.status).toBe('accepted')
+    expect(accepted.accepted_by).toBe('school-admin-1')
   })
 
   it('openSignup and getBootstrapStatus return proper status', async () => {
@@ -908,6 +982,49 @@ describe('PostgresDomainStore (Greenfield)', () => {
     expect(transfer.current.status).toBe('active')
   })
 
+  it('reads canonical and legacy enrollment identity fields from the shared roster query', async () => {
+    const queries: string[] = []
+    const mockSql = createMockSql((strings: TemplateStringsArray) => {
+      const query = strings.join('?')
+      queries.push(query)
+      if (query.includes('FROM class_enrollments')) {
+        return [
+          {
+            id: 'enroll-canonical',
+            student_id: 'student-record-1',
+            user_id: null,
+            class_id: 'class-1',
+            academic_period_id: 'period-1',
+            absence_number: '7',
+            status: 'active',
+            class_name: 'XII RPL 1',
+            student_name: 'Siti Aminah',
+            nis: '2001',
+            period_name: '2026/2027 Ganjil',
+          },
+        ]
+      }
+      return []
+    })
+
+    const store = new PostgresDomainStore({ sql: mockSql })
+    const rows = await store.listClassEnrollments({ classId: 'class-1' })
+    const active = await store.getActiveClassEnrollment('student-1', 'period-1')
+
+    expect(rows[0]).toMatchObject({
+      student_id: 'student-record-1',
+      user_id: null,
+      student_name: 'Siti Aminah',
+      nis: '2001',
+      absence_number: '7',
+    })
+    expect(active?.absence_number).toBe('7')
+    expect(queries.filter((query) => query.includes('FROM class_enrollments'))).toHaveLength(2)
+    expect(queries.every((query) => query.includes('ce.student_id'))).toBe(true)
+    expect(queries.every((query) => query.includes('ce.absence_number'))).toBe(true)
+    expect(queries.every((query) => query.includes('LEFT JOIN students'))).toBe(true)
+  })
+
   it('manages locations and calendar exceptions in postgres domain store', async () => {
     const mockSql = createMockSql((strings: TemplateStringsArray) => {
       const query = strings.join('?')
@@ -1362,6 +1479,89 @@ describe('PostgresDomainStore (Greenfield)', () => {
     expect(updated.status).toBe(true)
 
     await expect(store.deleteLeaveRequest('leave-123')).resolves.toBeUndefined()
+  })
+
+  it('lists leave periods by inclusive overlap using WIB date boundaries', async () => {
+    const calls: { query: string; values: readonly unknown[] }[] = []
+    const mockSql = createMockSql((strings: TemplateStringsArray, ...queryValues) => {
+      calls.push({ query: strings.join('?'), values: queryValues })
+      return [
+        {
+          id: 'leave-cross-month',
+          user_id: 'student-1',
+          category: 'sakit',
+          description: 'Sakit lintas bulan',
+          status: true,
+          attachment_url: null,
+          date: '2026-08-25',
+          approval_status: 'approved',
+          original_end_date: '2026-09-05',
+          effective_end_date: '2026-09-05',
+          duration_days: 12,
+        },
+      ]
+    })
+
+    const store = new PostgresDomainStore({ sql: mockSql })
+    const rows = await store.listLeaveRequests({
+      startDate: '2026-09-01',
+      endDate: '2026-09-30',
+    })
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0].requested_start_date).toBe('2026-08-25')
+    const endBound = calls.find(({ query }) =>
+      query.includes("(lr.date AT TIME ZONE 'Asia/Jakarta')::date <= ?::date"),
+    )
+    const startBound = calls.find(({ query }) =>
+      query.includes(
+        "COALESCE(lr.effective_end_date, lr.original_end_date, (lr.date AT TIME ZONE 'Asia/Jakarta')::date) >= ?::date",
+      ),
+    )
+    expect(endBound?.values).toEqual(['2026-09-30'])
+    expect(startBound?.values).toEqual(['2026-09-01'])
+    expect(
+      calls.every(({ query }) => !query.includes('lr.date >=') && !query.includes('lr.date <=')),
+    ).toBe(true)
+  })
+
+  it('rejects approval when the locked leave request is no longer pending', async () => {
+    const queries: string[] = []
+    const mockSql = createMockSql((strings: TemplateStringsArray) => {
+      const query = strings.join('?')
+      queries.push(query)
+      if (query.includes('SELECT user_id FROM leave_requests')) {
+        return [{ user_id: 'student-1' }]
+      }
+      if (query.includes('FOR UPDATE')) {
+        return [
+          {
+            id: 'leave-processed',
+            user_id: 'student-1',
+            category: 'sakit',
+            description: 'Sakit demam',
+            status: true,
+            attachment_url: null,
+            date: '2026-08-21',
+            approval_status: 'approved',
+          },
+        ]
+      }
+      return []
+    })
+
+    const store = new PostgresDomainStore({ sql: mockSql })
+
+    await expect(
+      store.updateLeaveRequestStatus({
+        id: 'leave-processed',
+        approvalStatus: 'approved',
+        status: true,
+        durationDays: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect(queries.some((query) => query.includes('FOR UPDATE'))).toBe(true)
+    expect(queries.some((query) => query.includes('UPDATE leave_requests'))).toBe(false)
   })
 
   it('handles notification outbox operations: enqueue, get, list, claim, updateStatus, and delete', async () => {

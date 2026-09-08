@@ -12,6 +12,8 @@ import {
   classEnrollmentStatusSchema,
   createAcademicPeriodSchema,
   createAdminLeaveRequestSchema,
+  approveLeaveRequestSchema,
+  forceFinishLeaveRequestSchema,
   createCalendarExceptionSchema,
   createClassSchema,
   createLocationSchema,
@@ -46,6 +48,7 @@ import {
 import {
   acceptRosterReport,
   approveLeaveRequest,
+  forceFinishLeaveRequest,
   approveStudent,
   bootstrapSchool,
   correctStudentEmail,
@@ -219,6 +222,7 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
 
     const report = await validateAndStageRoster({
       rows: parsed.data.rows,
+      academicPeriodId: parsed.data.academic_period_id,
       actorId: c.get('userId'),
       actorRole: c.get('profileRole'),
       providers,
@@ -1483,6 +1487,9 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
   // POST /v1/admin/leave-requests & /v1/admin/permits
   const handleCreateAdminLeaveRequest = async (c: any) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    if (c.get('profileRole') !== 'student') {
+      throw AppError.forbidden('Only students can submit their own leave requests.')
+    }
     const body = await c.req.json()
     const parsed = createAdminLeaveRequestSchema.safeParse(body)
     if (!parsed.success) {
@@ -1490,8 +1497,11 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
     }
 
     const userId = parsed.data.user_id ?? parsed.data.userId
+    if (userId !== c.get('userId')) {
+      throw AppError.forbidden('Only students can submit their own leave requests.')
+    }
     const fileId = parsed.data.file_id ?? parsed.data.fileId
-    const approvalStatus = parsed.data.approval_status ?? parsed.data.approvalStatus ?? 'approved'
+    const approvalStatus = parsed.data.approval_status ?? parsed.data.approvalStatus ?? 'pending'
 
     const created = await createAdminLeaveRequest({
       userId: userId!,
@@ -1534,8 +1544,13 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
     const body = await c.req.json().catch(() => ({}))
     const status = body.approval_status ?? body.approvalStatus
     if (status === 'approved') {
+      const parsed = approveLeaveRequestSchema.safeParse(body)
+      if (!parsed.success) {
+        throw AppError.validationError(parsed.error.flatten())
+      }
       const approved = await approveLeaveRequest({
         id,
+        durationDays: parsed.data.duration_days ?? parsed.data.durationDays,
         actorRole: c.get('profileRole'),
         actorId: c.get('userId'),
         providers,
@@ -1570,8 +1585,19 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
   const handleApproveLeaveRequest = async (c: any) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const id = c.req.param('id')
+    const contentType = c.req.header('content-type') || ''
+    let durationDays: number | undefined
+    if (contentType.includes('application/json')) {
+      const body = await c.req.json().catch(() => ({}))
+      const parsed = approveLeaveRequestSchema.safeParse(body)
+      if (!parsed.success) {
+        throw AppError.validationError(parsed.error.flatten())
+      }
+      durationDays = parsed.data.duration_days ?? parsed.data.durationDays
+    }
     const approved = await approveLeaveRequest({
       id,
+      durationDays,
       actorRole: c.get('profileRole'),
       actorId: c.get('userId'),
       providers,
@@ -1583,6 +1609,33 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
   router.patch('/leave-requests/:id/approve', handleApproveLeaveRequest)
   router.post('/permits/:id/approve', handleApproveLeaveRequest)
   router.patch('/permits/:id/approve', handleApproveLeaveRequest)
+
+  // POST /v1/admin/leave-requests/:id/force-finish
+  const handleForceFinishLeaveRequest = async (c: any) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const body = await c.req.json().catch(() => ({}))
+    const parsed = forceFinishLeaveRequestSchema.safeParse(body)
+    if (!parsed.success) {
+      throw AppError.validationError(parsed.error.flatten())
+    }
+    const effectiveEndDate =
+      parsed.data.effective_end_date ??
+      parsed.data.effectiveEndDate ??
+      parsed.data.last_excused_date ??
+      parsed.data.lastExcusedDate
+    const finished = await forceFinishLeaveRequest({
+      id: c.req.param('id'),
+      effectiveEndDate: effectiveEndDate!,
+      reason: parsed.data.reason,
+      actorRole: c.get('profileRole'),
+      actorId: c.get('userId'),
+      providers,
+    })
+    return successResponse(c, finished, 'Leave request force-finished successfully.')
+  }
+
+  router.post('/leave-requests/:id/force-finish', handleForceFinishLeaveRequest)
+  router.post('/permits/:id/force-finish', handleForceFinishLeaveRequest)
 
   // POST|PATCH /v1/admin/leave-requests/:id/reject & /v1/admin/permits/:id/reject
   const handleRejectLeaveRequest = async (c: any) => {

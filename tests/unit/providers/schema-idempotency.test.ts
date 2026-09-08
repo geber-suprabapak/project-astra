@@ -23,4 +23,15 @@ describe('db/schema.sql idempotency', () => {
       expect(stmt.toUpperCase()).toContain('IF NOT EXISTS')
     }
   })
+
+  it('keeps enrollment absence numbers positive and canonical at the database boundary', () => {
+    const schemaPath = resolve(__dirname, '../../../db/schema.sql')
+    const schemaSql = readFileSync(schemaPath, 'utf-8')
+
+    expect(schemaSql).toMatch(/class_enrollments_absence_number_check/i)
+    expect(schemaSql).toMatch(/absence_number IS NULL OR absence_number ~ '\^\[1-9\]\[0-9\]\*\$'/i)
+    expect(schemaSql).toMatch(
+      /uq_active_class_absence_number ON class_enrollments\(class_id, academic_period_id, absence_number\)/i,
+    )
+  })
 })

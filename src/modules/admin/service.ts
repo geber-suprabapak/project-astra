@@ -31,6 +31,7 @@ import type {
   RosterRowInput,
   Schedule,
   School,
+  StudentRosterRow,
   UserProfile,
 } from '../../providers/types.js'
 import {
@@ -137,12 +138,17 @@ export async function createSchoolAdmin(params: {
 
 export async function validateAndStageRoster(params: {
   rows: RosterRowInput[]
+  academicPeriodId?: string | null
   actorId: string
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<RosterReport> {
-  if (params.actorRole !== 'platform_admin' && params.actorRole !== 'school_admin') {
+  if (params.actorRole !== 'school_admin') {
     throw AppError.forbidden()
+  }
+
+  if (!params.academicPeriodId) {
+    throw AppError.validationError('Academic period is required.')
   }
 
   const school = await params.providers.domainStore.getSchool()
@@ -150,12 +156,27 @@ export async function validateAndStageRoster(params: {
     throw AppError.conflict('School must be bootstrapped before staging a roster.')
   }
 
-  const existingClasses = await params.providers.domainStore.getClasses(school.id)
-  const knownClasses = new Set(existingClasses.map((c) => c.name.trim().toLowerCase()))
+  const period = await params.providers.domainStore.getAcademicPeriod(params.academicPeriodId)
+  if (!period || period.school_id !== school.id) {
+    throw AppError.validationError('Academic period does not belong to the configured school.')
+  }
+
+  const existingClasses = await params.providers.domainStore.getClasses(
+    school.id,
+    params.academicPeriodId,
+  )
+  const normalizeText = (value: string) => value.trim().replace(/\s+/g, ' ')
+  const knownClasses = new Map(existingClasses.map((c) => [normalizeText(c.name).toLowerCase(), c]))
+  const activeEnrollments = await params.providers.domainStore.listClassEnrollments({
+    academicPeriodId: params.academicPeriodId,
+    status: 'active',
+  })
 
   const rejectedItems: RejectedRosterRow[] = []
+  const normalizedRows: RosterRowInput[] = []
   const seenNisBatch = new Set<string>()
   const duplicateNisBatch = new Set<string>()
+  const seenAbsenceBatch = new Set<string>()
 
   for (const row of params.rows) {
     const rawNis = row.nis ? row.nis.trim() : ''
@@ -171,19 +192,27 @@ export async function validateAndStageRoster(params: {
   for (let i = 0; i < params.rows.length; i++) {
     const row = params.rows[i]
     const nis = row.nis ? row.nis.trim() : ''
-    const fullName = row.full_name ? row.full_name.trim() : ''
-    const className = row.class_name ? row.class_name.trim() : ''
+    const fullName = row.full_name ? normalizeText(row.full_name) : ''
+    const className = row.class_name ? normalizeText(row.class_name) : ''
+    const gender = row.gender ? row.gender.trim().toUpperCase() : ''
+    const absenceRaw = row.absence_number
+    const absenceText =
+      absenceRaw === null || absenceRaw === undefined ? '' : String(absenceRaw).trim()
+    const absenceNumber = /^\d+$/.test(absenceText) ? Number(absenceText) : NaN
 
     const reasons: string[] = []
 
     if (!nis) {
       reasons.push('NIS cannot be empty.')
+    } else if (!/^\d+$/.test(nis)) {
+      reasons.push('NIS must contain only digits.')
     } else if (duplicateNisBatch.has(nis)) {
       reasons.push(`Duplicate NIS "${nis}" in roster batch.`)
     } else {
       const existingProfile = await params.providers.domainStore.getProfileByNis(nis)
-      if (existingProfile) {
-        reasons.push(`NIS "${nis}" already exists in student profiles.`)
+      const existingStudent = await params.providers.domainStore.getStudentByNis(nis)
+      if (existingProfile || existingStudent) {
+        reasons.push(`NIS "${nis}" already exists in the student roster.`)
       }
     }
 
@@ -191,11 +220,52 @@ export async function validateAndStageRoster(params: {
       reasons.push('Full name cannot be empty.')
     }
 
-    if (!className) {
+    const cls = row.class_id
+      ? existingClasses.find((candidate) => candidate.id === row.class_id)
+      : knownClasses.get(className.toLowerCase())
+    if (!className && !row.class_id) {
       reasons.push('Class name cannot be empty.')
-    } else if (existingClasses.length > 0 && !knownClasses.has(className.toLowerCase())) {
+    } else if (!cls) {
       reasons.push(`Invalid class reference: "${row.class_name}" is not a recognized class.`)
     }
+
+    if (!gender || (gender !== 'L' && gender !== 'P')) {
+      reasons.push('Gender must be L or P.')
+    }
+
+    if (!absenceText || !Number.isInteger(absenceNumber) || absenceNumber <= 0) {
+      reasons.push('Absence number must be a positive integer.')
+    } else if (cls) {
+      const absenceKey = `${cls.id}:${absenceNumber}`
+      if (seenAbsenceBatch.has(absenceKey)) {
+        reasons.push(`Duplicate absence number "${absenceText}" in class and academic period.`)
+      }
+      if (
+        activeEnrollments.some(
+          (enrollment) =>
+            enrollment.class_id === cls.id &&
+            enrollment.absence_number !== null &&
+            enrollment.absence_number !== undefined &&
+            Number(enrollment.absence_number) === absenceNumber,
+        )
+      ) {
+        reasons.push(
+          `Absence number "${absenceText}" is already used in this class and academic period.`,
+        )
+      }
+      seenAbsenceBatch.add(absenceKey)
+    }
+
+    normalizedRows.push({
+      ...row,
+      nis,
+      full_name: fullName,
+      class_name: cls?.name ?? className,
+      class_id: cls?.id ?? row.class_id ?? null,
+      academic_period_id: params.academicPeriodId,
+      gender,
+      absence_number: absenceText || null,
+    })
 
     if (reasons.length > 0) {
       rejectedItems.push({
@@ -203,6 +273,10 @@ export async function validateAndStageRoster(params: {
         nis: row.nis || null,
         full_name: row.full_name || null,
         class_name: row.class_name || null,
+        class_id: row.class_id ?? null,
+        academic_period_id: params.academicPeriodId,
+        gender: row.gender ?? null,
+        absence_number: row.absence_number ?? null,
         grade: row.grade ?? null,
         reason: reasons.join(' '),
       })
@@ -222,7 +296,8 @@ export async function validateAndStageRoster(params: {
     rejectedRows,
     status,
     reviewState,
-    rows: params.rows,
+    academicPeriodId: params.academicPeriodId,
+    rows: normalizedRows,
     rejectedItems,
   })
 
@@ -247,7 +322,7 @@ export async function getRosterReport(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<RosterReport> {
-  if (params.actorRole !== 'platform_admin' && params.actorRole !== 'school_admin') {
+  if (params.actorRole !== 'school_admin') {
     throw AppError.forbidden()
   }
 
@@ -277,6 +352,7 @@ export async function acceptRosterReport(params: {
   if (report.rejected_rows > 0 || (report.rejected_items && report.rejected_items.length > 0)) {
     throw AppError.validationError('Cannot accept a roster report with rejected rows.')
   }
+  if (report.status === 'accepted') return report
 
   const accepted = await params.providers.domainStore.acceptRosterReport(params.id, params.actorId)
 
@@ -731,7 +807,7 @@ export async function listStudents(params: {
   status?: ProfileLifecycleStatus
   actorRole: IdentityRole | null
   providers: AppProviders
-}): Promise<UserProfile[]> {
+}): Promise<StudentRosterRow[]> {
   if (
     !params.actorRole ||
     !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
@@ -1988,6 +2064,10 @@ async function mapLeaveRequestWithAttachment(
     description: lr.description,
     status: lr.status,
     date: lr.date,
+    requested_start_date: lr.requested_start_date ?? lr.date.slice(0, 10),
+    original_end_date: lr.original_end_date ?? null,
+    effective_end_date: lr.effective_end_date ?? null,
+    duration_days: lr.duration_days ?? null,
     approval_status: lr.approval_status,
     attachment_url: attachmentUrl,
     rejection_reason: lr.rejection_reason ?? null,
@@ -2008,16 +2088,13 @@ export async function createAdminLeaveRequest(params: {
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse> {
-  if (
-    !params.actorRole ||
-    !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)
-  ) {
-    throw AppError.forbidden()
+  if (params.actorRole !== 'student' || params.userId !== params.actorId) {
+    throw AppError.forbidden('Only students can submit their own leave requests.')
   }
 
   const targetProfile = await params.providers.domainStore.getUserProfile(params.userId)
-  if (!targetProfile) {
-    throw AppError.notFound('Target student profile')
+  if (targetProfile.role !== 'student' || targetProfile.lifecycle_status !== 'approved') {
+    throw AppError.forbidden('Only approved students can submit leave requests.')
   }
 
   let storagePath: string | null = null
@@ -2025,6 +2102,9 @@ export async function createAdminLeaveRequest(params: {
     const fileRecord = await params.providers.domainStore.getFileRecord(params.fileId)
     if (!fileRecord) {
       throw AppError.notFound('Attachment file')
+    }
+    if (fileRecord.user_id !== params.actorId) {
+      throw AppError.forbidden('Cannot attach a file owned by another user.')
     }
     if (fileRecord.purpose !== 'permit_attachment') {
       throw AppError.validationError('File purpose must be permit_attachment.')
@@ -2038,8 +2118,13 @@ export async function createAdminLeaveRequest(params: {
     storagePath = fileRecord.object_path
   }
 
-  const approvalStatus: LeaveRequestApprovalStatus = params.approvalStatus ?? 'approved'
-  const status = approvalStatus === 'approved'
+  const approvalStatus: LeaveRequestApprovalStatus = params.approvalStatus ?? 'pending'
+  if (approvalStatus !== 'pending') {
+    throw AppError.validationError(
+      'Admin-created leave requests must start pending; use the approval or rejection endpoint for status transitions.',
+    )
+  }
+  const status = false
   const dateValue = params.date.includes('T') ? params.date : `${params.date}T00:00:00+07:00`
 
   const created = await params.providers.domainStore.createLeaveRequest({
@@ -2108,14 +2193,12 @@ export async function getAdminLeaveRequest(params: {
 
 export async function approveLeaveRequest(params: {
   id: string
+  durationDays?: number
   actorRole: IdentityRole | null
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse> {
-  if (
-    !params.actorRole ||
-    !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)
-  ) {
+  if (params.actorRole !== 'school_admin') {
     throw AppError.forbidden()
   }
 
@@ -2124,10 +2207,27 @@ export async function approveLeaveRequest(params: {
     throw AppError.notFound('Leave request')
   }
 
+  if (lr.approval_status === 'approved') {
+    throw AppError.conflict('Approved Leave Period cannot be edited or extended.')
+  }
+
+  const durationDays = params.durationDays
+  if (
+    durationDays === undefined ||
+    !Number.isInteger(durationDays) ||
+    durationDays < 1 ||
+    durationDays > 30
+  ) {
+    throw AppError.validationError({
+      duration_days: ['Duration must be explicitly provided between 1 and 30 days.'],
+    })
+  }
+
   const updated = await params.providers.domainStore.updateLeaveRequestStatus({
     id: params.id,
     approvalStatus: 'approved',
     status: true,
+    durationDays,
   })
 
   await params.providers.domainStore.insertAuditLog({
@@ -2140,6 +2240,10 @@ export async function approveLeaveRequest(params: {
       student_user_id: lr.user_id,
       category: lr.category,
       date: lr.date,
+      duration_days: durationDays,
+      requested_start_date: updated.requested_start_date,
+      original_end_date: updated.original_end_date,
+      effective_end_date: updated.effective_end_date,
     },
   })
 
@@ -2159,6 +2263,28 @@ export async function approveLeaveRequest(params: {
   return mapLeaveRequestWithAttachment(updated, params.providers)
 }
 
+export async function forceFinishLeaveRequest(params: {
+  id: string
+  effectiveEndDate: string
+  reason: string
+  actorRole: IdentityRole | null
+  actorId: string
+  providers: AppProviders
+}): Promise<AdminLeaveRequestResponse> {
+  if (params.actorRole !== 'school_admin') {
+    throw AppError.forbidden()
+  }
+
+  const updated = await params.providers.domainStore.forceFinishLeaveRequest({
+    id: params.id,
+    effectiveEndDate: params.effectiveEndDate,
+    actorId: params.actorId,
+    reason: params.reason,
+  })
+
+  return mapLeaveRequestWithAttachment(updated, params.providers)
+}
+
 export async function rejectLeaveRequest(params: {
   id: string
   reason?: string | null
@@ -2166,16 +2292,17 @@ export async function rejectLeaveRequest(params: {
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse> {
-  if (
-    !params.actorRole ||
-    !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)
-  ) {
+  if (params.actorRole !== 'school_admin') {
     throw AppError.forbidden()
   }
 
   const lr = await params.providers.domainStore.getLeaveRequestById(params.id)
   if (!lr) {
     throw AppError.notFound('Leave request')
+  }
+
+  if (lr.approval_status === 'approved') {
+    throw AppError.conflict('Approved Leave Period cannot be edited or extended.')
   }
 
   const updated = await params.providers.domainStore.updateLeaveRequestStatus({
@@ -2223,16 +2350,17 @@ export async function reopenLeaveRequest(params: {
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse> {
-  if (
-    !params.actorRole ||
-    !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)
-  ) {
+  if (params.actorRole !== 'school_admin') {
     throw AppError.forbidden()
   }
 
   const lr = await params.providers.domainStore.getLeaveRequestById(params.id)
   if (!lr) {
     throw AppError.notFound('Leave request')
+  }
+
+  if (lr.approval_status === 'approved') {
+    throw AppError.conflict('Approved Leave Period cannot be edited or extended.')
   }
 
   const updated = await params.providers.domainStore.updateLeaveRequestStatus({

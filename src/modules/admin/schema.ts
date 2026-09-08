@@ -50,10 +50,15 @@ export const rosterRowSchema = z.object({
   nis: z.string(),
   full_name: z.string(),
   class_name: z.string(),
+  class_id: z.string().min(1).nullable().optional(),
+  academic_period_id: z.string().min(1).nullable().optional(),
+  gender: z.string().nullable().optional(),
+  absence_number: z.union([z.string(), z.number()]).nullable().optional(),
   grade: z.number().int().positive().nullable().optional(),
 })
 
 export const stageRosterSchema = z.object({
+  academic_period_id: z.string().min(1, 'Academic period is required.'),
   rows: z.array(rosterRowSchema).min(1, 'Roster must contain at least one row.'),
 })
 
@@ -62,17 +67,23 @@ export type StageRosterInput = z.infer<typeof stageRosterSchema>
 export const rosterReportResponseSchema = z.object({
   id: z.string(),
   school_id: z.string().nullable().optional(),
+  academic_period_id: z.string().nullable().optional(),
   total_rows: z.number(),
   valid_rows: z.number(),
   rejected_rows: z.number(),
   status: z.enum(['staged', 'accepted', 'rejected']),
   review_state: z.enum(['pending', 'accepted', 'rejected']),
+  rows: z.array(rosterRowSchema),
   rejected_items: z.array(
     z.object({
       row_index: z.number(),
       nis: z.string().nullable().optional(),
       full_name: z.string().nullable().optional(),
       class_name: z.string().nullable().optional(),
+      class_id: z.string().nullable().optional(),
+      academic_period_id: z.string().nullable().optional(),
+      gender: z.string().nullable().optional(),
+      absence_number: z.union([z.string(), z.number()]).nullable().optional(),
       grade: z.number().nullable().optional(),
       reason: z.string(),
     }),
@@ -759,6 +770,10 @@ export const adminLeaveRequestResponseSchema = z.object({
   description: z.string(),
   status: z.boolean(),
   date: z.string(),
+  requested_start_date: z.string().optional(),
+  original_end_date: z.string().nullable().optional(),
+  effective_end_date: z.string().nullable().optional(),
+  duration_days: z.number().int().min(1).max(30).nullable().optional(),
   approval_status: z.enum(['pending', 'approved', 'rejected']),
   attachment_url: z.string().nullable().optional(),
   rejection_reason: z.string().nullable().optional(),
@@ -774,6 +789,43 @@ export const rejectLeaveRequestSchema = z.object({
   rejection_reason: z.string().min(1).optional(),
 })
 
+export const approveLeaveRequestSchema = z
+  .object({
+    duration_days: z.number().int().min(1).max(30).optional(),
+    durationDays: z.number().int().min(1).max(30).optional(),
+  })
+  .refine((data) => data.duration_days !== undefined || data.durationDays !== undefined, {
+    message: 'Duration is required when approving a leave request.',
+    path: ['duration_days'],
+  })
+
+const forceFinishDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD required')
+  .refine((value) => {
+    const date = new Date(`${value}T00:00:00.000Z`)
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
+  }, 'Date must be a valid calendar date.')
+
+export const forceFinishLeaveRequestSchema = z
+  .object({
+    effective_end_date: forceFinishDateSchema.optional(),
+    effectiveEndDate: forceFinishDateSchema.optional(),
+    last_excused_date: forceFinishDateSchema.optional(),
+    lastExcusedDate: forceFinishDateSchema.optional(),
+    reason: z.string().trim().min(1).max(500),
+  })
+  .refine(
+    (data) =>
+      Boolean(
+        data.effective_end_date ||
+        data.effectiveEndDate ||
+        data.last_excused_date ||
+        data.lastExcusedDate,
+      ),
+    { message: 'Effective end date is required.', path: ['effective_end_date'] },
+  )
+
 export type RejectLeaveRequestInput = z.infer<typeof rejectLeaveRequestSchema>
 
 export const createAdminLeaveRequestSchema = z
@@ -785,7 +837,9 @@ export const createAdminLeaveRequestSchema = z
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD required'),
     file_id: z.string().uuid().optional().nullable(),
     fileId: z.string().uuid().optional().nullable(),
-    approval_status: leaveRequestApprovalStatusSchema.default('approved'),
+    // Administrative creation records the student's request only. Approval or
+    // rejection must go through the role-checked transition endpoints.
+    approval_status: leaveRequestApprovalStatusSchema.default('pending'),
     approvalStatus: leaveRequestApprovalStatusSchema.optional(),
   })
   .refine((data) => Boolean(data.user_id || data.userId), {
