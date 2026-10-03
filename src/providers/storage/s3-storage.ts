@@ -24,6 +24,7 @@ export interface S3ObjectStorageOptions {
   secretAccessKey?: string
   bucketAvatars?: string
   bucketPermits?: string
+  bucketAdiwiyata?: string
   forcePathStyle?: boolean
   publicUrl?: string
   redisClient?: RedisCacheClient | null
@@ -62,6 +63,7 @@ export class S3ObjectStorage implements ObjectStorage {
   private readonly secretAccessKey: string
   private readonly bucketAvatars: string
   private readonly bucketPermits: string
+  private readonly bucketAdiwiyata: string
   private readonly forcePathStyle: boolean
   private readonly publicUrl: string
   private readonly redisClient: RedisCacheClient | null
@@ -73,6 +75,7 @@ export class S3ObjectStorage implements ObjectStorage {
     this.secretAccessKey = options.secretAccessKey ?? env.s3SecretAccessKey
     this.bucketAvatars = options.bucketAvatars ?? env.s3BucketAvatars
     this.bucketPermits = options.bucketPermits ?? env.s3BucketPermits
+    this.bucketAdiwiyata = options.bucketAdiwiyata ?? env.s3BucketAdiwiyata
     this.forcePathStyle = options.forcePathStyle ?? env.s3ForcePathStyle
     this.publicUrl = (options.publicUrl ?? env.s3PublicUrl ?? this.endpoint).replace(/\/$/, '')
     this.redisClient = options.redisClient !== undefined ? options.redisClient : getRedisClient()
@@ -393,11 +396,45 @@ export class S3ObjectStorage implements ObjectStorage {
     await Promise.allSettled(deletePromises)
   }
 
+  async uploadAdiwiyataReport(path: string, file: Buffer): Promise<void> {
+    try {
+      const response = await this.executeS3Request(
+        'PUT',
+        this.bucketAdiwiyata,
+        path,
+        file,
+        'image/jpeg',
+      )
+      if (!response.ok) {
+        logger.error({ status: response.status }, 'S3 Adiwiyata report upload failed')
+        throw AppError.storageUploadFailed()
+      }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err }, 'S3 Adiwiyata report upload failed with unexpected error')
+      throw AppError.storageUploadFailed()
+    }
+  }
+
+  async getSignedAdiwiyataReportUrl(path: string, expiresInSeconds = 900): Promise<string | null> {
+    if (!path || expiresInSeconds <= 0) return null
+    try {
+      return this.signUrl(this.bucketAdiwiyata, path, expiresInSeconds)
+    } catch {
+      return null
+    }
+  }
+
   async deleteObject(
-    purpose: 'avatar' | 'permit_attachment' | 'face_enrollment',
+    purpose: 'avatar' | 'permit_attachment' | 'face_enrollment' | 'adiwiyata_report',
     path: string,
   ): Promise<void> {
-    const bucket = purpose === 'permit_attachment' ? this.bucketPermits : this.bucketAvatars
+    const bucket =
+      purpose === 'permit_attachment'
+        ? this.bucketPermits
+        : purpose === 'adiwiyata_report'
+          ? this.bucketAdiwiyata
+          : this.bucketAvatars
     try {
       const response = await this.executeS3Request('DELETE', bucket, path)
       if (!response.ok) {

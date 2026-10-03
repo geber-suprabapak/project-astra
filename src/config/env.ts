@@ -34,6 +34,7 @@ export const envSchema = z
     S3_SECRET_ACCESS_KEY: z.string().min(1).default('minioadmin'),
     S3_BUCKET_AVATARS: z.string().min(1).default('avatars'),
     S3_BUCKET_PERMITS: z.string().min(1).default('perizinan'),
+    S3_BUCKET_ADIWIYATA: z.string().min(1).default('adiwiyata'),
     S3_FORCE_PATH_STYLE: z
       .union([z.boolean(), z.string().transform((s) => s.toLowerCase() === 'true')])
       .default(true),
@@ -168,6 +169,7 @@ export const env = {
   s3SecretAccessKey: raw.S3_SECRET_ACCESS_KEY,
   s3BucketAvatars: raw.S3_BUCKET_AVATARS,
   s3BucketPermits: raw.S3_BUCKET_PERMITS,
+  s3BucketAdiwiyata: raw.S3_BUCKET_ADIWIYATA,
   s3ForcePathStyle: raw.S3_FORCE_PATH_STYLE,
   s3PublicUrl: raw.S3_PUBLIC_URL,
   storageUploadTimeoutMs: raw.STORAGE_UPLOAD_TIMEOUT_MS,

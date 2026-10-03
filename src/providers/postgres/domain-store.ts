@@ -1,11 +1,19 @@
 import postgres, { type Sql } from 'postgres'
+import { z } from 'zod'
 import { env } from '../../config/env.js'
 import { AppError } from '../../lib/errors/app-error.js'
+import { ErrorCode } from '../../lib/errors/codes.js'
 import { logger } from '../../lib/logging/logger.js'
 import { normalizeAttendanceRecord } from '../types.js'
 import { getLeavePeriodFields } from '../types.js'
 import type {
   Absence,
+  AdiwiyataAdminReport,
+  AdiwiyataEligibility,
+  AdiwiyataReport,
+  AdiwiyataReportVerificationParams,
+  AdiwiyataReportVerificationResult,
+  AdiwiyataSite,
   AcademicPeriod,
   ActivePermitSummary,
   AttendanceActionRpcResponse,
@@ -23,6 +31,7 @@ import type {
   ClassRoom,
   ClaimPendingNotificationsParams,
   CreateAcademicPeriodParams,
+  CreateAdiwiyataSiteParams,
   CreateCalendarExceptionParams,
   CreateClassParams,
   CreateFileRecordParams,
@@ -72,8 +81,10 @@ import type {
   StudentBinding,
   StudentRosterRow,
   StageRosterParams,
+  SubmitAdiwiyataReportParams,
   TransferStudentEnrollmentParams,
   UpdateAcademicPeriodParams,
+  UpdateAdiwiyataSiteParams,
   UpdateCalendarExceptionParams,
   UpdateClassParams,
   UpdateLocationParams,
@@ -84,6 +95,26 @@ import type {
   UpdateNotificationStatusParams,
   UserProfile,
 } from '../types.js'
+import { adiwiyataReportLockName } from '../adiwiyata-lock.js'
+
+interface AdiwiyataAdminReportDbRow extends AdiwiyataReport {
+  site_name: string
+  category: AdiwiyataAdminReport['category']
+  class_name: string
+  uploader_name: string | null
+  file_user_id: string | null
+  file_purpose: FilePurpose | null
+  file_object_path: string | null
+  file_content_type: string | null
+  file_size_bytes: number | null
+  file_lifecycle: FileLifecycle | null
+  file_created_at: string | null
+  file_updated_at: string | null
+}
+
+interface AdiwiyataReportVerificationDbRow extends AdiwiyataReport {
+  school_id: string
+}
 
 const DAY_KEY_MAP = ['minggu', 'senin', 'selasa', 'rabu', 'kamis', 'jumat', 'sabtu'] as const
 
@@ -160,6 +191,541 @@ export class PostgresDomainStore implements DomainStore {
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, userId }, 'Failed to query user profile')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async getAdiwiyataEligibility(userId: string): Promise<AdiwiyataEligibility | null> {
+    try {
+      const rows = await this.sql<AdiwiyataEligibility[]>`
+        SELECT id, user_id, added_by, is_active, created_at::text, updated_at::text
+        FROM adiwiyata_eligibility
+        WHERE user_id = ${userId}
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId }, 'Failed to query Adiwiyata eligibility')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async listAdiwiyataEligibility(): Promise<AdiwiyataEligibility[]> {
+    try {
+      const rows = await this.sql<AdiwiyataEligibility[]>`
+        SELECT id, user_id, added_by, is_active, created_at::text, updated_at::text
+        FROM adiwiyata_eligibility
+        ORDER BY created_at ASC, id ASC
+      `
+      return rows ?? []
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err }, 'Failed to list Adiwiyata eligibility')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async upsertAdiwiyataEligibility(userId: string, addedBy: string): Promise<AdiwiyataEligibility> {
+    try {
+      const rows = await this.sql<AdiwiyataEligibility[]>`
+        INSERT INTO adiwiyata_eligibility (user_id, added_by, is_active)
+        VALUES (${userId}, ${addedBy}, TRUE)
+        ON CONFLICT (user_id) DO UPDATE
+        SET is_active = TRUE, updated_at = NOW()
+        RETURNING id, user_id, added_by, is_active, created_at::text, updated_at::text
+      `
+      if (!rows[0]) throw AppError.internal('Failed to activate Adiwiyata eligibility.')
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId }, 'Failed to upsert Adiwiyata eligibility')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async setAdiwiyataEligibilityActive(
+    id: string,
+    isActive: boolean,
+  ): Promise<AdiwiyataEligibility | null> {
+    try {
+      const rows = await this.sql<AdiwiyataEligibility[]>`
+        UPDATE adiwiyata_eligibility
+        SET is_active = ${isActive}, updated_at = NOW()
+        WHERE id = ${id}::uuid
+        RETURNING id, user_id, added_by, is_active, created_at::text, updated_at::text
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id, isActive }, 'Failed to update Adiwiyata eligibility state')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async listAdiwiyataSites(filter?: {
+    schoolId?: string
+    isActive?: boolean
+  }): Promise<AdiwiyataSite[]> {
+    try {
+      const rows = await this.sql<AdiwiyataSite[]>`
+        SELECT id, school_id, name, category, class_id, is_active, sort_order, created_by,
+               created_at::text, updated_at::text
+        FROM adiwiyata_sites
+        WHERE (${filter?.schoolId ?? null}::uuid IS NULL OR school_id = ${filter?.schoolId ?? null}::uuid)
+          AND (${filter?.isActive ?? null}::boolean IS NULL OR is_active = ${filter?.isActive ?? null})
+        ORDER BY sort_order ASC, name ASC
+      `
+      return rows ?? []
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, filter }, 'Failed to list Adiwiyata Sites')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async createAdiwiyataSite(params: CreateAdiwiyataSiteParams): Promise<AdiwiyataSite> {
+    try {
+      const rows = await this.sql<AdiwiyataSite[]>`
+        INSERT INTO adiwiyata_sites (school_id, name, category, class_id, sort_order, created_by)
+        VALUES (
+          ${params.schoolId}::uuid,
+          ${params.name},
+          ${params.category},
+          ${params.classId ?? null}::uuid,
+          ${params.sortOrder ?? 0},
+          ${params.createdBy}
+        )
+        RETURNING id, school_id, name, category, class_id, is_active, sort_order, created_by,
+                  created_at::text, updated_at::text
+      `
+      if (!rows[0]) throw AppError.internal('Failed to create Adiwiyata Site.')
+      return rows[0]
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to create Adiwiyata Site')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async updateAdiwiyataSite(
+    id: string,
+    schoolId: string,
+    params: UpdateAdiwiyataSiteParams,
+  ): Promise<AdiwiyataSite | null> {
+    try {
+      const rows = await this.sql<AdiwiyataSite[]>`
+        UPDATE adiwiyata_sites
+        SET name = CASE WHEN ${params.name !== undefined} THEN ${params.name ?? null} ELSE name END,
+            category = CASE WHEN ${params.category !== undefined} THEN ${params.category ?? null} ELSE category END,
+            class_id = CASE WHEN ${params.classId !== undefined} THEN ${params.classId ?? null}::uuid ELSE class_id END,
+            sort_order = CASE WHEN ${params.sortOrder !== undefined} THEN ${params.sortOrder ?? null} ELSE sort_order END,
+            is_active = CASE WHEN ${params.isActive !== undefined} THEN ${params.isActive ?? null} ELSE is_active END,
+            updated_at = NOW()
+        WHERE id = ${id}::uuid AND school_id = ${schoolId}::uuid
+        RETURNING id, school_id, name, category, class_id, is_active, sort_order, created_by,
+                  created_at::text, updated_at::text
+      `
+      return rows[0] ?? null
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, id, schoolId, params }, 'Failed to update Adiwiyata Site')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async listAdiwiyataReports(filter?: {
+    classId?: string
+    siteId?: string
+    reportedBy?: string
+    reportDate?: string
+    siteIds?: string[]
+  }): Promise<AdiwiyataReport[]> {
+    try {
+      if (filter?.siteIds?.length === 0) return []
+      return await this.sql<AdiwiyataReport[]>`
+        SELECT id, site_id, class_id, reported_by, file_id, report_date::text,
+               created_at::text, verified_at::text, verified_by
+        FROM adiwiyata_reports
+        WHERE (${filter?.classId ?? null}::uuid IS NULL OR class_id = ${filter?.classId ?? null}::uuid)
+          AND (${filter?.siteId ?? null}::uuid IS NULL OR site_id = ${filter?.siteId ?? null}::uuid)
+          AND (${filter?.reportedBy ?? null}::text IS NULL OR reported_by = ${filter?.reportedBy ?? null})
+          AND (${filter?.reportDate ?? null}::date IS NULL OR report_date = ${filter?.reportDate ?? null}::date)
+          AND (${filter?.siteIds ?? null}::uuid[] IS NULL OR site_id = ANY(${filter?.siteIds ?? null}::uuid[]))
+        ORDER BY created_at ASC, id ASC
+      `
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, filter }, 'Failed to list Adiwiyata reports')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async listAdiwiyataAdminReports(filter: {
+    schoolId: string
+    reportDate: string
+    classId?: string
+    siteId?: string
+  }): Promise<AdiwiyataAdminReport[]> {
+    try {
+      const rows = await this.sql<AdiwiyataAdminReportDbRow[]>`
+        SELECT r.id, r.site_id, r.class_id, r.reported_by, r.file_id, r.report_date::text,
+               r.created_at::text, r.verified_at::text, r.verified_by,
+               s.name AS site_name, s.category, c.name AS class_name, p.full_name AS uploader_name,
+               f.user_id AS file_user_id, f.purpose AS file_purpose, f.object_path AS file_object_path,
+               f.content_type AS file_content_type, f.size_bytes AS file_size_bytes,
+               f.lifecycle AS file_lifecycle, f.created_at::text AS file_created_at,
+               f.updated_at::text AS file_updated_at
+        FROM adiwiyata_reports r
+        JOIN adiwiyata_sites s ON s.id = r.site_id AND s.school_id = ${filter.schoolId}::uuid
+        JOIN classes c ON c.id = r.class_id AND c.school_id = s.school_id
+        JOIN files f ON f.id = r.file_id AND f.purpose = 'adiwiyata_report'
+        LEFT JOIN profiles p ON p.user_id = r.reported_by
+        WHERE r.report_date = ${filter.reportDate}::date
+          AND (${filter.classId ?? null}::uuid IS NULL OR r.class_id = ${filter.classId ?? null}::uuid)
+          AND (${filter.siteId ?? null}::uuid IS NULL OR r.site_id = ${filter.siteId ?? null}::uuid)
+        ORDER BY s.sort_order, s.name, c.name, r.created_at, r.id
+      `
+      return rows.map((row) => ({
+        id: row.id,
+        site_id: row.site_id,
+        class_id: row.class_id,
+        reported_by: row.reported_by,
+        file_id: row.file_id,
+        report_date: row.report_date,
+        created_at: row.created_at,
+        verified_at: row.verified_at,
+        verified_by: row.verified_by,
+        site_name: row.site_name,
+        category: row.category,
+        class_name: row.class_name,
+        uploader_name: row.uploader_name,
+        photo_file:
+          row.file_user_id === null
+            ? null
+            : {
+                id: row.file_id,
+                user_id: row.file_user_id,
+                purpose: row.file_purpose!,
+                object_path: row.file_object_path!,
+                content_type: row.file_content_type!,
+                size_bytes: row.file_size_bytes,
+                lifecycle: row.file_lifecycle!,
+                created_at: row.file_created_at ?? undefined,
+                updated_at: row.file_updated_at ?? undefined,
+              },
+      }))
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, filter }, 'Failed to list Adiwiyata admin reports')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async updateAdiwiyataReportVerification(
+    params: AdiwiyataReportVerificationParams,
+  ): Promise<AdiwiyataReportVerificationResult | null> {
+    try {
+      return await this.sql.begin(async (sql) => {
+        const findReport = async (forUpdate: boolean) =>
+          forUpdate
+            ? sql<AdiwiyataReportVerificationDbRow[]>`
+              SELECT r.id, r.site_id, r.class_id, r.reported_by, r.file_id, r.report_date::text,
+                     r.created_at::text, r.verified_at::text, r.verified_by, s.school_id
+              FROM adiwiyata_reports r
+              JOIN adiwiyata_sites s ON s.id = r.site_id
+              JOIN classes c ON c.id = r.class_id AND c.school_id = s.school_id
+              WHERE r.id = ${params.reportId}::uuid AND s.school_id = ${params.schoolId}::uuid
+              FOR UPDATE OF r
+            `
+            : sql<AdiwiyataReportVerificationDbRow[]>`
+              SELECT r.id, r.site_id, r.class_id, r.reported_by, r.file_id, r.report_date::text,
+                     r.created_at::text, r.verified_at::text, r.verified_by, s.school_id
+              FROM adiwiyata_reports r
+              JOIN adiwiyata_sites s ON s.id = r.site_id
+              JOIN classes c ON c.id = r.class_id AND c.school_id = s.school_id
+              WHERE r.id = ${params.reportId}::uuid AND s.school_id = ${params.schoolId}::uuid
+            `
+        const initialRows = await findReport(false)
+        const initial = initialRows[0]
+        if (!initial) return null
+
+        const lockName = adiwiyataReportLockName(
+          initial.class_id,
+          initial.site_id,
+          initial.report_date,
+        )
+        await sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockName}, 0))`
+        const currentRows = await findReport(true)
+        const current = currentRows[0]
+        if (!current) return null
+
+        const alreadySet = params.verified
+          ? current.verified_at !== null
+          : current.verified_at === null
+        if (!alreadySet) {
+          const verifiedAt = params.verified ? params.at : null
+          const verifiedBy = params.verified ? params.actorId : null
+          const updatedRows = await sql<AdiwiyataReport[]>`
+            UPDATE adiwiyata_reports
+            SET verified_at = ${verifiedAt}::timestamptz, verified_by = ${verifiedBy}
+            WHERE id = ${params.reportId}::uuid
+            RETURNING id, site_id, class_id, reported_by, file_id, report_date::text,
+                      created_at::text, verified_at::text, verified_by
+          `
+          const report = updatedRows[0]
+          if (!report) throw AppError.internal('Failed to update Adiwiyata report verification.')
+
+          const auditRows = await sql<{ id: string }[]>`
+            INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, details)
+            VALUES (
+              ${params.actorId},
+              ${params.verified ? 'verify' : 'unverify'},
+              'adiwiyata_report',
+              ${report.id},
+              ${JSON.stringify({
+                site_id: report.site_id,
+                class_id: report.class_id,
+                report_date: report.report_date,
+                prior_verified_at: current.verified_at,
+                prior_verified_by: current.verified_by,
+                next_verified_at: report.verified_at,
+                next_verified_by: report.verified_by,
+              })}::jsonb
+            )
+            RETURNING id
+          `
+          if (!auditRows[0])
+            throw AppError.internal('Failed to record Adiwiyata verification audit.')
+        }
+
+        const coverageRows = await sql<{ has_verified: boolean }[]>`
+          SELECT EXISTS (
+            SELECT 1 FROM adiwiyata_reports
+            WHERE class_id = ${current.class_id}::uuid
+              AND site_id = ${current.site_id}::uuid
+              AND report_date = ${current.report_date}::date
+              AND verified_at IS NOT NULL
+          ) AS has_verified
+        `
+        const report: AdiwiyataReport = alreadySet
+          ? current
+          : {
+              ...current,
+              verified_at: params.verified ? params.at : null,
+              verified_by: params.verified ? params.actorId : null,
+            }
+        return {
+          report,
+          coverage_status: coverageRows[0]?.has_verified ? 'verified' : 'reported',
+          changed: !alreadySet,
+        }
+      })
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, params }, 'Failed to update Adiwiyata report verification')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
+  async submitAdiwiyataReport(params: SubmitAdiwiyataReportParams): Promise<AdiwiyataReport> {
+    try {
+      return await this.sql.begin(async (sql) => {
+        // Ticket 06 verify/unverify must take this same transaction lock name.
+        const lockName = adiwiyataReportLockName(params.classId, params.siteId, params.reportDate)
+        await sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockName}, 0))`
+
+        const profile = await sql<
+          { full_name: string | null; role: string; lifecycle_status: string }[]
+        >`
+          SELECT full_name, role, lifecycle_status
+          FROM profiles
+          WHERE user_id = ${params.userId}
+          LIMIT 1
+        `
+        if (profile[0]?.role !== 'student' || profile[0].lifecycle_status !== 'approved') {
+          throw new AppError(
+            ErrorCode.ADIWIYATA_NOT_ELIGIBLE,
+            403,
+            'Akun Siswa tidak lagi memenuhi syarat Adiwiyata.',
+          )
+        }
+        const eligibility = await sql<{ is_active: boolean }[]>`
+          SELECT is_active FROM adiwiyata_eligibility WHERE user_id = ${params.userId} LIMIT 1
+        `
+        if (!eligibility[0]?.is_active) {
+          throw new AppError(
+            ErrorCode.ADIWIYATA_NOT_ELIGIBLE,
+            403,
+            'Akses Adiwiyata tidak lagi aktif.',
+          )
+        }
+
+        const periods = await sql<{ id: string; school_id: string }[]>`
+          SELECT id, school_id FROM academic_periods WHERE is_active = TRUE ORDER BY id
+        `
+        if (periods.length !== 1) {
+          throw new AppError(
+            ErrorCode.ADIWIYATA_CONFIGURATION_ERROR,
+            503,
+            'Astra harus memiliki tepat satu Periode Akademik aktif.',
+          )
+        }
+        const period = periods[0]!
+        const enrollments = await sql<
+          { class_id: string; class_name: string; school_id: string; academic_period_id: string }[]
+        >`
+          SELECT c.id AS class_id, c.name AS class_name, c.school_id, c.academic_period_id
+          FROM class_enrollments ce
+          JOIN classes c ON c.id = ce.class_id
+          WHERE ce.user_id = ${params.userId}
+            AND ce.academic_period_id = ${period.id}::uuid
+            AND ce.status = 'active'
+          FOR UPDATE OF ce
+        `
+        if (enrollments.length !== 1 || enrollments[0]!.class_id !== params.classId) {
+          throw AppError.conflict(
+            'Enrollment Siswa berubah. Muat ulang dashboard sebelum mengirim foto.',
+          )
+        }
+        const enrollment = enrollments[0]!
+        if (
+          enrollment.school_id !== period.school_id ||
+          enrollment.academic_period_id !== period.id ||
+          enrollment.class_name !== params.className ||
+          profile[0].full_name?.trim() !== params.profileName
+        ) {
+          throw AppError.conflict(
+            'Profil atau kelas berubah. Muat ulang dashboard sebelum mengirim foto.',
+          )
+        }
+
+        const sites = await sql<{ id: string }[]>`
+          SELECT id
+          FROM adiwiyata_sites
+          WHERE id = ${params.siteId}::uuid
+            AND school_id = ${period.school_id}::uuid
+            AND is_active = TRUE
+            AND (class_id IS NULL OR class_id = ${params.classId}::uuid)
+          LIMIT 1
+        `
+        if (!sites[0]) {
+          throw AppError.validationError('Site tidak aktif atau tidak terlihat untuk kelas ini.')
+        }
+
+        const schedules = await sql<{ class_id: string | null }[]>`
+          SELECT class_id
+          FROM schedules
+          WHERE school_id = ${period.school_id}::uuid
+            AND academic_period_id = ${period.id}::uuid
+            AND is_active = TRUE
+            AND day_of_week = ${getDayKeyWIB(new Date(`${params.reportDate}T12:00:00+07:00`))}
+        `
+        const scheduleCount = await sql<{ count: number }[]>`
+          SELECT count(*)::int AS count
+          FROM schedules
+          WHERE school_id = ${period.school_id}::uuid
+            AND academic_period_id = ${period.id}::uuid
+            AND is_active = TRUE
+        `
+        if (Number(scheduleCount[0]?.count ?? 0) === 0) {
+          throw new AppError(
+            ErrorCode.ADIWIYATA_CONFIGURATION_ERROR,
+            503,
+            'Belum ada jadwal aktif untuk sekolah dan Periode Akademik ini.',
+          )
+        }
+        const classSchedules = schedules.filter((schedule) => schedule.class_id === params.classId)
+        const applicableSchedules =
+          classSchedules.length > 0
+            ? classSchedules
+            : schedules.filter((schedule) => schedule.class_id === null)
+        if (applicableSchedules.length > 1) {
+          throw new AppError(
+            ErrorCode.ADIWIYATA_CONFIGURATION_ERROR,
+            503,
+            'Ada beberapa jadwal aktif pada tingkat kelas yang berlaku untuk hari ini.',
+          )
+        }
+        const holidays = await sql<{ id: string }[]>`
+          SELECT id
+          FROM calendar_exceptions
+          WHERE date = ${params.reportDate}::date
+            AND is_holiday = TRUE
+            AND (school_id IS NULL OR school_id = ${period.school_id}::uuid)
+            AND (academic_period_id IS NULL OR academic_period_id = ${period.id}::uuid)
+          LIMIT 1
+        `
+        if (holidays[0] || applicableSchedules.length !== 1) {
+          throw AppError.conflict('Laporan hanya dapat dikirim pada hari sekolah yang dijadwalkan.')
+        }
+
+        const duplicate = await sql<{ id: string }[]>`
+          SELECT id FROM adiwiyata_reports
+          WHERE site_id = ${params.siteId}::uuid
+            AND reported_by = ${params.userId}
+            AND report_date = ${params.reportDate}::date
+          LIMIT 1
+        `
+        if (duplicate[0]) {
+          throw AppError.conflict(
+            'Siswa sudah mengirim laporan untuk Site ini pada tanggal WIB tersebut.',
+          )
+        }
+        const verified = await sql<{ id: string }[]>`
+          SELECT id FROM adiwiyata_reports
+          WHERE site_id = ${params.siteId}::uuid
+            AND class_id = ${params.classId}::uuid
+            AND report_date = ${params.reportDate}::date
+            AND verified_at IS NOT NULL
+          LIMIT 1
+        `
+        if (verified[0]) {
+          throw AppError.conflict('Laporan kelas untuk Site ini sudah diverifikasi dan ditutup.')
+        }
+        const file = await sql<{ id: string }[]>`
+          SELECT id FROM files
+          WHERE id = ${params.fileId}::uuid
+            AND user_id = ${params.userId}
+            AND purpose = 'adiwiyata_report'
+            AND lifecycle = 'pending_upload'
+          FOR UPDATE
+        `
+        if (!file[0]) throw AppError.internal('Metadata foto laporan tidak tersedia.')
+
+        const reports = await sql<AdiwiyataReport[]>`
+          INSERT INTO adiwiyata_reports (
+            id, site_id, class_id, reported_by, file_id, report_date, created_at
+          ) VALUES (
+            ${params.reportId}::uuid, ${params.siteId}::uuid, ${params.classId}::uuid,
+            ${params.userId}, ${params.fileId}::uuid, ${params.reportDate}::date,
+            ${params.createdAt}::timestamptz
+          )
+          RETURNING id, site_id, class_id, reported_by, file_id, report_date::text,
+                    created_at::text, verified_at::text, verified_by
+        `
+        if (!reports[0]) throw AppError.internal('Failed to create Adiwiyata report.')
+        const updatedFile = await sql<{ id: string }[]>`
+          UPDATE files
+          SET lifecycle = 'available', size_bytes = ${params.fileSizeBytes}, updated_at = ${params.createdAt}::timestamptz
+          WHERE id = ${params.fileId}::uuid AND lifecycle = 'pending_upload'
+          RETURNING id
+        `
+        if (!updatedFile[0])
+          throw AppError.internal('Failed to activate Adiwiyata report file metadata.')
+        return reports[0]
+      })
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      if (z.object({ code: z.literal('23505') }).safeParse(err).success) {
+        throw AppError.conflict(
+          'Siswa sudah mengirim laporan untuk Site ini pada tanggal WIB tersebut.',
+        )
+      }
+      logger.error(
+        { err, userId: params.userId, siteId: params.siteId },
+        'Failed to submit Adiwiyata report',
+      )
       throw AppError.internal('An unexpected database error occurred.')
     }
   }

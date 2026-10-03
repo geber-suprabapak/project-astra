@@ -40,6 +40,11 @@ describe('env config', () => {
     expect(env.businessTimezone).toBe('Asia/Jakarta')
   })
 
+  it('defaults the dedicated Adiwiyata bucket name', () => {
+    const parsed = parseEnv(baseEnv)
+    expect(parsed.success && parsed.data.S3_BUCKET_ADIWIYATA).toBe('adiwiyata')
+  })
+
   it('requires REDIS_URL in production', () => {
     const parsed = parseEnv({
       ...baseEnv,

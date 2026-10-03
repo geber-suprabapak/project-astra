@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   createUploadIntent,
   confirmFileUpload,
@@ -147,6 +147,18 @@ describe('files service', () => {
         code: ErrorCode.VALIDATION_ERROR,
       })
     })
+
+    it('rejects generic Adiwiyata evidence upload intents', async () => {
+      const providers = createTestProviders()
+      await expect(
+        createUploadIntent({
+          userId: 'student-1',
+          purpose: 'adiwiyata_report',
+          contentType: 'image/jpeg',
+          providers,
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR })
+    })
   })
 
   describe('confirmFileUpload', () => {
@@ -186,6 +198,39 @@ describe('files service', () => {
       ).rejects.toMatchObject({
         code: ErrorCode.FORBIDDEN,
       })
+    })
+
+    it('keeps pending Adiwiyata metadata under report-transaction control', async () => {
+      const providers = createTestProviders()
+      const file = await providers.domainStore.createFileRecord({
+        userId: 'student-1',
+        purpose: 'adiwiyata_report',
+        objectPath: 'reports/pending.jpg',
+        contentType: 'image/jpeg',
+        lifecycle: 'pending_upload',
+      })
+      providers.objectStorage.objects.set(file.object_path, {
+        buffer: Buffer.from('evidence'),
+        contentType: 'image/jpeg',
+      })
+
+      await expect(
+        confirmFileUpload({
+          userId: 'student-1',
+          fileId: file.id,
+          providers,
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.CONFLICT })
+      await expect(
+        deleteFile({
+          userId: 'student-1',
+          fileId: file.id,
+          providers,
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.CONFLICT })
+
+      expect((await providers.domainStore.getFileRecord(file.id))?.lifecycle).toBe('pending_upload')
+      expect(providers.objectStorage.objects.has(file.object_path)).toBe(true)
     })
   })
 
@@ -250,6 +295,116 @@ describe('files service', () => {
       const record = await providers.domainStore.getFileRecord(intent.file_id)
       expect(record?.lifecycle).toBe('deleted')
       expect(providers.objectStorage.objects.has(intent.object_path)).toBe(false)
+    })
+
+    it('allows only an owner or an approved Astra administrator with scope to read Adiwiyata evidence', async () => {
+      const providers = createTestProviders()
+      providers.domainStore.profiles.set('teacher-1', {
+        user_id: 'teacher-1',
+        full_name: 'Teacher',
+        role: 'teacher',
+        lifecycle_status: 'approved',
+      })
+      providers.domainStore.profiles.set('school-admin-1', {
+        user_id: 'school-admin-1',
+        full_name: 'School Admin',
+        role: 'school_admin',
+        lifecycle_status: 'approved',
+      })
+      providers.domainStore.profiles.set('platform-admin-pending', {
+        user_id: 'platform-admin-pending',
+        full_name: 'Pending Admin',
+        role: 'platform_admin',
+        lifecycle_status: 'pending',
+      })
+      const file = await providers.domainStore.createFileRecord({
+        userId: 'student-1',
+        purpose: 'adiwiyata_report',
+        objectPath: 'reports/private.jpg',
+        contentType: 'image/jpeg',
+        lifecycle: 'available',
+      })
+
+      providers.objectStorage.getSignedAdiwiyataReportUrl = async () =>
+        'https://storage.local/private'
+      const owner = await getFile({ userId: 'student-1', fileId: file.id, providers })
+      expect(owner.download_url).toBe('https://storage.local/private')
+
+      await expect(
+        getFile({
+          userId: 'teacher-1',
+          fileId: file.id,
+          userScopes: ['files:read:any'],
+          providers,
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.FORBIDDEN })
+      await expect(
+        getFile({
+          userId: 'school-admin-1',
+          fileId: file.id,
+          userScopes: ['files:read:any'],
+          providers,
+        }),
+      ).resolves.toMatchObject({
+        file: { id: file.id },
+        download_url: 'https://storage.local/private',
+      })
+      await expect(
+        getFile({
+          userId: 'platform-admin-pending',
+          fileId: file.id,
+          userScopes: ['files:read:any'],
+          providers,
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.FORBIDDEN })
+    })
+
+    it('does not issue a report URL after the file retention deadline', async () => {
+      const providers = createTestProviders()
+      const file = await providers.domainStore.createFileRecord({
+        userId: 'student-1',
+        purpose: 'adiwiyata_report',
+        objectPath: 'reports/expired.jpg',
+        contentType: 'image/jpeg',
+        lifecycle: 'available',
+      })
+      providers.domainStore.files.get(file.id)!.created_at = '2024-01-01T00:00:00.000Z'
+      const signedUrl = vi.fn(async () => 'https://storage.local/expired')
+      providers.objectStorage.getSignedAdiwiyataReportUrl = signedUrl
+
+      const result = await getFile({ userId: 'student-1', fileId: file.id, providers })
+
+      expect(result.download_url).toBeNull()
+      expect(signedUrl).not.toHaveBeenCalled()
+    })
+
+    it('caps a photo URL at the exact 365-day file deadline and preserves metadata afterward', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      try {
+        const providers = createTestProviders()
+        const file = await providers.domainStore.createFileRecord({
+          userId: 'student-1',
+          purpose: 'adiwiyata_report',
+          objectPath: 'reports/deadline.jpg',
+          contentType: 'image/jpeg',
+          lifecycle: 'available',
+        })
+        providers.domainStore.files.get(file.id)!.created_at = '2025-09-30T00:00:00.000Z'
+        const signedUrl = vi.fn(async () => 'https://storage.local/bounded')
+        providers.objectStorage.getSignedAdiwiyataReportUrl = signedUrl
+        vi.setSystemTime(new Date('2026-09-29T23:59:58.500Z'))
+        expect(
+          (await getFile({ userId: 'student-1', fileId: file.id, providers })).download_url,
+        ).toBe('https://storage.local/bounded')
+        expect(signedUrl).toHaveBeenLastCalledWith(file.object_path, 1)
+        vi.setSystemTime(new Date('2026-09-30T00:00:00.000Z'))
+        const expired = await getFile({ userId: 'student-1', fileId: file.id, providers })
+        expect(expired.download_url).toBeNull()
+        expect(expired.file.lifecycle).toBe('available')
+        expect(signedUrl).toHaveBeenCalledTimes(1)
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })

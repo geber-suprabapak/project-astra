@@ -101,6 +101,34 @@ CREATE INDEX IF NOT EXISTS idx_profiles_nis ON profiles(nis);
 CREATE INDEX IF NOT EXISTS idx_profiles_role ON profiles(role);
 
 -- ----------------------------------------------------------------------------
+-- Tables: Adiwiyata Sites and Student eligibility
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS adiwiyata_sites (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID NOT NULL REFERENCES schools(id),
+    name TEXT NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('tanaman', 'lele')),
+    class_id UUID REFERENCES classes(id),
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_adiwiyata_sites_school ON adiwiyata_sites(school_id);
+CREATE INDEX IF NOT EXISTS idx_adiwiyata_sites_class ON adiwiyata_sites(class_id);
+
+CREATE TABLE IF NOT EXISTS adiwiyata_eligibility (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL UNIQUE REFERENCES profiles(user_id),
+    added_by TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ----------------------------------------------------------------------------
 -- Table: class_enrollments
 -- Description: Time-bounded association of a Student to a class in an academic period
 -- ----------------------------------------------------------------------------
@@ -340,9 +368,33 @@ CREATE TABLE IF NOT EXISTS files (
     lifecycle TEXT NOT NULL DEFAULT 'available',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT files_purpose_check CHECK (purpose IN ('avatar', 'permit_attachment', 'face_enrollment')),
+    CONSTRAINT files_purpose_check CHECK (purpose IN ('avatar', 'permit_attachment', 'face_enrollment', 'adiwiyata_report')),
     CONSTRAINT files_lifecycle_check CHECK (lifecycle IN ('pending_upload', 'available', 'rejected', 'deleted'))
 );
+
+ALTER TABLE files DROP CONSTRAINT IF EXISTS files_purpose_check;
+ALTER TABLE files ADD CONSTRAINT files_purpose_check
+    CHECK (purpose IN ('avatar', 'permit_attachment', 'face_enrollment', 'adiwiyata_report'));
+
+CREATE TABLE IF NOT EXISTS adiwiyata_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    site_id UUID NOT NULL REFERENCES adiwiyata_sites(id),
+    class_id UUID NOT NULL REFERENCES classes(id),
+    reported_by TEXT NOT NULL REFERENCES profiles(user_id),
+    file_id UUID NOT NULL,
+    report_date DATE NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    verified_at TIMESTAMPTZ,
+    verified_by TEXT REFERENCES profiles(user_id),
+    CONSTRAINT adiwiyata_reports_file_id_key UNIQUE (file_id),
+    CONSTRAINT adiwiyata_reports_user_site_date_key UNIQUE (site_id, reported_by, report_date),
+    CONSTRAINT adiwiyata_reports_file_fkey FOREIGN KEY (file_id) REFERENCES files(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_adiwiyata_reports_class_site_date
+    ON adiwiyata_reports(class_id, site_id, report_date);
+CREATE INDEX IF NOT EXISTS idx_adiwiyata_reports_reported_by
+    ON adiwiyata_reports(reported_by);
 
 CREATE INDEX IF NOT EXISTS idx_files_user ON files(user_id);
 CREATE INDEX IF NOT EXISTS idx_files_lifecycle ON files(lifecycle);
