@@ -17,11 +17,13 @@ describe('integration: published Astra contract manifest', () => {
       await readFile(new URL('../../contracts/astra-v1.json', import.meta.url), 'utf8'),
     ) as {
       mobile_routes: string[]
+      adiwiyata_routes: string[]
       admin_routes: string[]
       identity_routes: string[]
     }
     const publishedRoutes = [
       ...contract.mobile_routes,
+      ...contract.adiwiyata_routes,
       ...contract.admin_routes,
       ...contract.identity_routes,
     ]

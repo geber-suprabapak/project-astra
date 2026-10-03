@@ -20,6 +20,28 @@ export interface UploadIntentResult {
   expires_in_seconds: number
 }
 
+const ADIWIYATA_REPORT_RETENTION_MS = 365 * 24 * 60 * 60 * 1000
+const ADIWIYATA_REPORT_URL_TTL_SECONDS = 900
+
+export async function getAdiwiyataReportUrl(
+  fileRecord: FileRecord,
+  providers: AppProviders,
+  now = Date.now(),
+): Promise<string | null> {
+  if (fileRecord.lifecycle !== 'available' || !fileRecord.created_at) return null
+  const deadline = Date.parse(fileRecord.created_at) + ADIWIYATA_REPORT_RETENTION_MS
+  const secondsLeft = Math.floor((deadline - now) / 1000)
+  if (!Number.isFinite(secondsLeft) || secondsLeft <= 0) return null
+  try {
+    return await providers.objectStorage.getSignedAdiwiyataReportUrl(
+      fileRecord.object_path,
+      Math.min(ADIWIYATA_REPORT_URL_TTL_SECONDS, secondsLeft),
+    )
+  } catch {
+    return null
+  }
+}
+
 function validateFileConstraints(purpose: FilePurpose, contentType: string, sizeBytes?: number) {
   if (purpose === 'avatar') {
     if (!ALLOWED_AVATAR_MIME.includes(contentType)) {
@@ -67,6 +89,10 @@ export async function createUploadIntent(params: {
   providers?: AppProviders
 }): Promise<UploadIntentResult> {
   const providers = params.providers ?? defaultProviders
+
+  if (params.purpose === 'adiwiyata_report') {
+    throw AppError.validationError('Adiwiyata evidence must be sent through the report endpoint.')
+  }
 
   const profile = await providers.domainStore.getUserProfile(params.userId)
   if (profile.lifecycle_status !== 'approved') {
@@ -130,6 +156,9 @@ export async function confirmFileUpload(params: {
   if (fileRecord.user_id !== params.userId) {
     throw AppError.forbidden('Cannot confirm files owned by another user.')
   }
+  if (fileRecord.purpose === 'adiwiyata_report') {
+    throw AppError.conflict('Adiwiyata report files are activated only by the report transaction.')
+  }
   if (fileRecord.lifecycle !== 'pending_upload') {
     return fileRecord
   }
@@ -156,6 +185,17 @@ export async function getFile(params: {
   if (!isOwner && !isPrivileged) {
     throw AppError.forbidden('You do not have permission to view this file.')
   }
+  if (fileRecord.purpose === 'adiwiyata_report' && !isOwner) {
+    const profile = await providers.domainStore.getUserProfile(params.userId)
+    if (
+      profile.lifecycle_status !== 'approved' ||
+      (profile.role !== 'school_admin' && profile.role !== 'platform_admin')
+    ) {
+      throw AppError.forbidden(
+        'Only approved Astra administrators can view another student’s Adiwiyata report.',
+      )
+    }
+  }
 
   if (fileRecord.lifecycle === 'deleted' || fileRecord.lifecycle === 'rejected') {
     throw AppError.notFound('File is no longer available.')
@@ -168,6 +208,8 @@ export async function getFile(params: {
     downloadUrl = await providers.objectStorage.getSignedPermitUrl(fileRecord.object_path)
   } else if (fileRecord.purpose === 'face_enrollment') {
     downloadUrl = await providers.objectStorage.getSignedFaceEnrollmentUrl(fileRecord.object_path)
+  } else if (fileRecord.purpose === 'adiwiyata_report') {
+    downloadUrl = await getAdiwiyataReportUrl(fileRecord, providers)
   }
 
   return { file: fileRecord, download_url: downloadUrl }
@@ -190,6 +232,12 @@ export async function deleteFile(params: {
   const isPrivileged = hasScope(params.userScopes, logtoScopes.filesDeleteAny)
   if (!isOwner && !isPrivileged) {
     throw AppError.forbidden('You do not have permission to delete this file.')
+  }
+
+  if (fileRecord.purpose === 'adiwiyata_report') {
+    throw AppError.conflict(
+      'Adiwiyata report evidence cannot be deleted through the file endpoint.',
+    )
   }
 
   await providers.objectStorage.deleteObject(fileRecord.purpose, fileRecord.object_path)

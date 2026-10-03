@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { AppError } from '../../lib/errors/app-error.js'
+import { ErrorCode } from '../../lib/errors/codes.js'
 import {
   identityRoleSchema,
   type Absence,
@@ -13,6 +15,12 @@ import {
   type AttendanceStatus,
   type AuditLog,
   type AuditLogEntry,
+  type AdiwiyataAdminReport,
+  type AdiwiyataEligibility,
+  type AdiwiyataReport,
+  type AdiwiyataReportVerificationParams,
+  type AdiwiyataReportVerificationResult,
+  type AdiwiyataSite,
   type BootstrapStatus,
   type CalendarException,
   type ClassEnrollment,
@@ -20,6 +28,7 @@ import {
   type ClassRoom,
   type ClaimPendingNotificationsParams,
   type CreateAcademicPeriodParams,
+  type CreateAdiwiyataSiteParams,
   type CreateCalendarExceptionParams,
   type CreateClassParams,
   type CreateFileRecordParams,
@@ -74,8 +83,10 @@ import {
   type StudentBinding,
   type StudentRosterRow,
   type StageRosterParams,
+  type SubmitAdiwiyataReportParams,
   type TransferStudentEnrollmentParams,
   type UpdateAcademicPeriodParams,
+  type UpdateAdiwiyataSiteParams,
   type UpdateCalendarExceptionParams,
   type UpdateClassParams,
   type UpdateLocationParams,
@@ -88,6 +99,7 @@ import {
   type UserProfile,
 } from '../types.js'
 import { isMfaVerified } from '../identity/claims.js'
+import { adiwiyataReportLockName } from '../adiwiyata-lock.js'
 
 const DEFAULT_PERMISSIONS: Permission[] = [
   {
@@ -402,6 +414,10 @@ export class MemoryDomainStore implements DomainStore {
   public academicPeriods: AcademicPeriod[] = []
   public classes: ClassRoom[] = []
   public classEnrollments: ClassEnrollment[] = []
+  public adiwiyataEligibility = new Map<string, AdiwiyataEligibility>()
+  public adiwiyataSites = new Map<string, AdiwiyataSite>()
+  public adiwiyataReports = new Map<string, AdiwiyataReport>()
+  private readonly adiwiyataLocks = new Map<string, Promise<void>>()
   public rosterReports = new Map<string, RosterReport>()
   public auditLogs: AuditLog[] = []
   public roles = new Map<string, Role>()
@@ -438,12 +454,443 @@ export class MemoryDomainStore implements DomainStore {
     }
   }
 
+  private async lockAdiwiyataReportPair(
+    classId: string,
+    siteId: string,
+    reportDate: string,
+  ): Promise<() => void> {
+    const lockName = adiwiyataReportLockName(classId, siteId, reportDate)
+    const previous = this.adiwiyataLocks.get(lockName) ?? Promise.resolve()
+    let release!: () => void
+    const current = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    this.adiwiyataLocks.set(lockName, current)
+    await previous
+    return () => {
+      release()
+      if (this.adiwiyataLocks.get(lockName) === current) this.adiwiyataLocks.delete(lockName)
+    }
+  }
+
   async getUserProfile(userId: string): Promise<UserProfile> {
     const profile = this.profiles.get(userId)
     if (!profile) {
       throw AppError.notFound('User profile')
     }
     return { ...profile }
+  }
+
+  async getAdiwiyataEligibility(userId: string): Promise<AdiwiyataEligibility | null> {
+    const eligibility = this.adiwiyataEligibility.get(userId)
+    return eligibility ? { ...eligibility } : null
+  }
+
+  async listAdiwiyataEligibility(): Promise<AdiwiyataEligibility[]> {
+    return Array.from(this.adiwiyataEligibility.values(), (eligibility) => ({ ...eligibility }))
+  }
+
+  async upsertAdiwiyataEligibility(userId: string, addedBy: string): Promise<AdiwiyataEligibility> {
+    const existing = this.adiwiyataEligibility.get(userId)
+    const now = new Date().toISOString()
+    const eligibility: AdiwiyataEligibility = existing
+      ? { ...existing, is_active: true, updated_at: now }
+      : {
+          id: randomUUID(),
+          user_id: userId,
+          added_by: addedBy,
+          is_active: true,
+          created_at: now,
+          updated_at: now,
+        }
+    this.adiwiyataEligibility.set(userId, eligibility)
+    return { ...eligibility }
+  }
+
+  async setAdiwiyataEligibilityActive(
+    id: string,
+    isActive: boolean,
+  ): Promise<AdiwiyataEligibility | null> {
+    for (const [userId, eligibility] of this.adiwiyataEligibility) {
+      if (eligibility.id !== id) continue
+      const updated = { ...eligibility, is_active: isActive, updated_at: new Date().toISOString() }
+      this.adiwiyataEligibility.set(userId, updated)
+      return { ...updated }
+    }
+    return null
+  }
+
+  async listAdiwiyataSites(filter?: {
+    schoolId?: string
+    isActive?: boolean
+  }): Promise<AdiwiyataSite[]> {
+    return Array.from(this.adiwiyataSites.values())
+      .filter((site) => filter?.schoolId === undefined || site.school_id === filter.schoolId)
+      .filter((site) => filter?.isActive === undefined || site.is_active === filter.isActive)
+      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
+      .map((site) => ({ ...site }))
+  }
+
+  async createAdiwiyataSite(params: CreateAdiwiyataSiteParams): Promise<AdiwiyataSite> {
+    const now = new Date().toISOString()
+    const site: AdiwiyataSite = {
+      id: randomUUID(),
+      school_id: params.schoolId,
+      name: params.name,
+      category: params.category,
+      class_id: params.classId ?? null,
+      is_active: true,
+      sort_order: params.sortOrder ?? 0,
+      created_by: params.createdBy,
+      created_at: now,
+      updated_at: now,
+    }
+    this.adiwiyataSites.set(site.id, site)
+    return { ...site }
+  }
+
+  async updateAdiwiyataSite(
+    id: string,
+    schoolId: string,
+    params: UpdateAdiwiyataSiteParams,
+  ): Promise<AdiwiyataSite | null> {
+    const site = this.adiwiyataSites.get(id)
+    if (!site || site.school_id !== schoolId) return null
+    if (params.name !== undefined) site.name = params.name
+    if (params.category !== undefined) site.category = params.category
+    if (params.classId !== undefined) site.class_id = params.classId
+    if (params.sortOrder !== undefined) site.sort_order = params.sortOrder
+    if (params.isActive !== undefined) site.is_active = params.isActive
+    site.updated_at = new Date().toISOString()
+    return { ...site }
+  }
+
+  async listAdiwiyataReports(filter?: {
+    classId?: string
+    siteId?: string
+    reportedBy?: string
+    reportDate?: string
+    siteIds?: string[]
+  }): Promise<AdiwiyataReport[]> {
+    return Array.from(this.adiwiyataReports.values())
+      .filter((report) => filter?.classId === undefined || report.class_id === filter.classId)
+      .filter((report) => filter?.siteId === undefined || report.site_id === filter.siteId)
+      .filter(
+        (report) => filter?.reportedBy === undefined || report.reported_by === filter.reportedBy,
+      )
+      .filter(
+        (report) => filter?.reportDate === undefined || report.report_date === filter.reportDate,
+      )
+      .filter((report) => filter?.siteIds === undefined || filter.siteIds.includes(report.site_id))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
+      .map((report) => ({ ...report }))
+  }
+
+  async listAdiwiyataAdminReports(filter: {
+    schoolId: string
+    reportDate: string
+    classId?: string
+    siteId?: string
+  }): Promise<AdiwiyataAdminReport[]> {
+    return Array.from(this.adiwiyataReports.values())
+      .filter((report) => report.report_date === filter.reportDate)
+      .filter((report) => filter.classId === undefined || report.class_id === filter.classId)
+      .filter((report) => filter.siteId === undefined || report.site_id === filter.siteId)
+      .flatMap((report) => {
+        const site = this.adiwiyataSites.get(report.site_id)
+        const classroom = this.classes.find((item) => item.id === report.class_id)
+        const file = this.files.get(report.file_id)
+        if (
+          !site ||
+          site.school_id !== filter.schoolId ||
+          !classroom ||
+          classroom.school_id !== filter.schoolId ||
+          file?.purpose !== 'adiwiyata_report'
+        )
+          return []
+        return [
+          {
+            ...report,
+            site_name: site.name,
+            category: site.category,
+            class_name: classroom.name,
+            uploader_name: this.profiles.get(report.reported_by)?.full_name ?? null,
+            photo_file: { ...file },
+          },
+        ]
+      })
+      .sort(
+        (a, b) =>
+          a.site_name.localeCompare(b.site_name) ||
+          a.class_name.localeCompare(b.class_name) ||
+          a.created_at.localeCompare(b.created_at) ||
+          a.id.localeCompare(b.id),
+      )
+  }
+
+  async updateAdiwiyataReportVerification(
+    params: AdiwiyataReportVerificationParams,
+  ): Promise<AdiwiyataReportVerificationResult | null> {
+    const initial = this.adiwiyataReports.get(params.reportId)
+    if (!initial) return null
+    const release = await this.lockAdiwiyataReportPair(
+      initial.class_id,
+      initial.site_id,
+      initial.report_date,
+    )
+    try {
+      const report = this.adiwiyataReports.get(params.reportId)
+      const site = report ? this.adiwiyataSites.get(report.site_id) : null
+      const classroom = report ? this.classes.find((item) => item.id === report.class_id) : null
+      if (
+        !report ||
+        !site ||
+        site.school_id !== params.schoolId ||
+        !classroom ||
+        classroom.school_id !== params.schoolId
+      )
+        return null
+
+      const alreadySet = params.verified ? report.verified_at !== null : report.verified_at === null
+      if (alreadySet) {
+        return {
+          report: { ...report },
+          coverage_status: this.adiwiyataReportsForPair(report).some(
+            (item) => item.verified_at !== null,
+          )
+            ? 'verified'
+            : 'reported',
+          changed: false,
+        }
+      }
+
+      const previous = { ...report }
+      const existingAuditIds = new Set(this.auditLogs.map((item) => item.id))
+      report.verified_at = params.verified ? params.at : null
+      report.verified_by = params.verified ? params.actorId : null
+      const action = params.verified ? 'verify' : 'unverify'
+      const details = {
+        site_id: report.site_id,
+        class_id: report.class_id,
+        report_date: report.report_date,
+        prior_verified_at: previous.verified_at,
+        prior_verified_by: previous.verified_by,
+        next_verified_at: report.verified_at,
+        next_verified_by: report.verified_by,
+      }
+      try {
+        await this.insertAuditLog({
+          actor_id: params.actorId,
+          action,
+          entity_type: 'adiwiyata_report',
+          entity_id: report.id,
+          details,
+        })
+      } catch (error) {
+        this.adiwiyataReports.set(report.id, previous)
+        const failedAuditIndex = this.auditLogs.findIndex(
+          (item) =>
+            !existingAuditIds.has(item.id) &&
+            item.actor_id === params.actorId &&
+            item.action === action &&
+            item.entity_type === 'adiwiyata_report' &&
+            item.entity_id === report.id &&
+            JSON.stringify(item.details) === JSON.stringify(details),
+        )
+        if (failedAuditIndex >= 0) this.auditLogs.splice(failedAuditIndex, 1)
+        throw error
+      }
+
+      return {
+        report: { ...report },
+        coverage_status: this.adiwiyataReportsForPair(report).some(
+          (item) => item.verified_at !== null,
+        )
+          ? 'verified'
+          : 'reported',
+        changed: true,
+      }
+    } finally {
+      release()
+    }
+  }
+
+  private adiwiyataReportsForPair(report: AdiwiyataReport): AdiwiyataReport[] {
+    return Array.from(this.adiwiyataReports.values()).filter(
+      (item) =>
+        item.class_id === report.class_id &&
+        item.site_id === report.site_id &&
+        item.report_date === report.report_date,
+    )
+  }
+
+  async submitAdiwiyataReport(params: SubmitAdiwiyataReportParams): Promise<AdiwiyataReport> {
+    const release = await this.lockAdiwiyataReportPair(
+      params.classId,
+      params.siteId,
+      params.reportDate,
+    )
+
+    try {
+      const profile = this.profiles.get(params.userId)
+      if (profile?.role !== 'student' || profile.lifecycle_status !== 'approved') {
+        throw new AppError(
+          ErrorCode.ADIWIYATA_NOT_ELIGIBLE,
+          403,
+          'Akun Siswa tidak lagi memenuhi syarat Adiwiyata.',
+        )
+      }
+      if (!this.adiwiyataEligibility.get(params.userId)?.is_active) {
+        throw new AppError(
+          ErrorCode.ADIWIYATA_NOT_ELIGIBLE,
+          403,
+          'Akses Adiwiyata tidak lagi aktif.',
+        )
+      }
+      const periods = this.academicPeriods.filter((period) => period.is_active)
+      if (periods.length !== 1) {
+        throw new AppError(
+          ErrorCode.ADIWIYATA_CONFIGURATION_ERROR,
+          503,
+          'Astra harus memiliki tepat satu Periode Akademik aktif.',
+        )
+      }
+      const period = periods[0]!
+      const enrollments = this.classEnrollments.filter(
+        (enrollment) =>
+          enrollment.user_id === params.userId &&
+          enrollment.academic_period_id === period.id &&
+          enrollment.status === 'active',
+      )
+      if (enrollments.length !== 1 || enrollments[0]!.class_id !== params.classId) {
+        throw AppError.conflict(
+          'Enrollment Siswa berubah. Muat ulang dashboard sebelum mengirim foto.',
+        )
+      }
+      const classroom = this.classes.find((item) => item.id === params.classId)
+      if (
+        !classroom ||
+        classroom.school_id !== period.school_id ||
+        classroom.academic_period_id !== period.id ||
+        classroom.name !== params.className ||
+        profile.full_name?.trim() !== params.profileName
+      ) {
+        throw AppError.conflict(
+          'Profil atau kelas berubah. Muat ulang dashboard sebelum mengirim foto.',
+        )
+      }
+      const site = this.adiwiyataSites.get(params.siteId)
+      if (
+        !site ||
+        !site.is_active ||
+        site.school_id !== period.school_id ||
+        (site.class_id !== null && site.class_id !== params.classId)
+      ) {
+        throw AppError.validationError('Site tidak aktif atau tidak terlihat untuk kelas ini.')
+      }
+      const dayKey = new Intl.DateTimeFormat('id-ID', { weekday: 'long', timeZone: 'Asia/Jakarta' })
+        .format(new Date(`${params.reportDate}T12:00:00+07:00`))
+        .toLowerCase()
+      const schedules = Array.from(this.schedules.values()).filter(
+        (schedule) =>
+          schedule.school_id === period.school_id &&
+          schedule.academic_period_id === period.id &&
+          schedule.is_active,
+      )
+      if (schedules.length === 0) {
+        throw new AppError(
+          ErrorCode.ADIWIYATA_CONFIGURATION_ERROR,
+          503,
+          'Belum ada jadwal aktif untuk sekolah dan Periode Akademik ini.',
+        )
+      }
+      const exceptions = Array.from(this.calendarExceptions.values()).some(
+        (exception) =>
+          exception.date === params.reportDate &&
+          exception.is_holiday &&
+          (exception.school_id === null || exception.school_id === period.school_id) &&
+          (exception.academic_period_id === null || exception.academic_period_id === period.id),
+      )
+      const matching = schedules.filter(
+        (schedule) => (schedule.day_of_week ?? schedule.hari).toLowerCase() === dayKey,
+      )
+      const classSchedules = matching.filter((schedule) => schedule.class_id === params.classId)
+      const applicable =
+        classSchedules.length > 0
+          ? classSchedules
+          : matching.filter((schedule) => schedule.class_id === null)
+      if (applicable.length > 1) {
+        throw new AppError(
+          ErrorCode.ADIWIYATA_CONFIGURATION_ERROR,
+          503,
+          'Ada beberapa jadwal aktif pada tingkat kelas yang berlaku untuk hari ini.',
+        )
+      }
+      if (exceptions || applicable.length !== 1) {
+        throw AppError.conflict('Laporan hanya dapat dikirim pada hari sekolah yang dijadwalkan.')
+      }
+      if (
+        Array.from(this.adiwiyataReports.values()).some(
+          (report) =>
+            report.reported_by === params.userId &&
+            report.site_id === params.siteId &&
+            report.report_date === params.reportDate,
+        )
+      ) {
+        throw AppError.conflict(
+          'Siswa sudah mengirim laporan untuk Site ini pada tanggal WIB tersebut.',
+        )
+      }
+      if (
+        Array.from(this.adiwiyataReports.values()).some(
+          (report) =>
+            report.class_id === params.classId &&
+            report.site_id === params.siteId &&
+            report.report_date === params.reportDate &&
+            report.verified_at !== null,
+        )
+      ) {
+        throw AppError.conflict('Laporan kelas untuk Site ini sudah diverifikasi dan ditutup.')
+      }
+      const file = this.files.get(params.fileId)
+      if (
+        !file ||
+        file.user_id !== params.userId ||
+        file.purpose !== 'adiwiyata_report' ||
+        file.lifecycle !== 'pending_upload'
+      ) {
+        throw AppError.internal('Metadata foto laporan tidak tersedia.')
+      }
+      if (
+        Array.from(this.adiwiyataReports.values()).some(
+          (report) => report.file_id === params.fileId,
+        )
+      ) {
+        throw AppError.conflict('Metadata foto ini sudah digunakan oleh laporan lain.')
+      }
+
+      const report: AdiwiyataReport = {
+        id: params.reportId,
+        site_id: params.siteId,
+        class_id: params.classId,
+        reported_by: params.userId,
+        file_id: params.fileId,
+        report_date: params.reportDate,
+        created_at: new Date(params.createdAt).toISOString(),
+        verified_at: null,
+        verified_by: null,
+      }
+      this.adiwiyataReports.set(report.id, report)
+      this.files.set(file.id, {
+        ...file,
+        size_bytes: params.fileSizeBytes,
+        lifecycle: 'available',
+        updated_at: report.created_at,
+      })
+      return { ...report }
+    } finally {
+      release()
+    }
   }
 
   async updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<void> {
@@ -2756,6 +3203,15 @@ export class MemoryObjectStorage implements ObjectStorage {
     return path
   }
 
+  async uploadAdiwiyataReport(path: string, file: Buffer): Promise<void> {
+    this.objects.set(path, { buffer: file, contentType: 'image/jpeg' })
+  }
+
+  async getSignedAdiwiyataReportUrl(path: string, expiresInSeconds = 900): Promise<string | null> {
+    if (!path || expiresInSeconds <= 0) return null
+    return `https://storage.local/signed/${encodeURIComponent(path)}?expires=${expiresInSeconds}`
+  }
+
   async deleteFaceEnrollmentImages(userId: string): Promise<void> {
     for (const key of Array.from(this.objects.keys())) {
       if (key.startsWith(`${userId}/face_`)) {
@@ -2765,7 +3221,7 @@ export class MemoryObjectStorage implements ObjectStorage {
   }
 
   async deleteObject(
-    _purpose: 'avatar' | 'permit_attachment' | 'face_enrollment',
+    _purpose: 'avatar' | 'permit_attachment' | 'face_enrollment' | 'adiwiyata_report',
     path: string,
   ): Promise<void> {
     this.objects.delete(path)

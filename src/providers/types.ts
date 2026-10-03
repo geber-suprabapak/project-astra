@@ -404,6 +404,94 @@ export interface AcademicPeriod {
   updated_at?: string
 }
 
+export type AdiwiyataSiteCategory = 'tanaman' | 'lele'
+
+export interface AdiwiyataSite {
+  id: string
+  school_id: string
+  name: string
+  category: AdiwiyataSiteCategory
+  class_id: string | null
+  is_active: boolean
+  sort_order: number
+  created_by: string | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface CreateAdiwiyataSiteParams {
+  schoolId: string
+  name: string
+  category: AdiwiyataSiteCategory
+  classId?: string | null
+  sortOrder?: number
+  createdBy: string
+}
+
+export interface UpdateAdiwiyataSiteParams {
+  name?: string
+  category?: AdiwiyataSiteCategory
+  classId?: string | null
+  sortOrder?: number
+  isActive?: boolean
+}
+
+export interface AdiwiyataEligibility {
+  id: string
+  user_id: string
+  added_by: string | null
+  is_active: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+export interface AdiwiyataReport {
+  id: string
+  site_id: string
+  class_id: string
+  reported_by: string
+  file_id: string
+  report_date: string
+  created_at: string
+  verified_at: string | null
+  verified_by: string | null
+}
+
+export interface AdiwiyataAdminReport extends AdiwiyataReport {
+  site_name: string
+  category: AdiwiyataSiteCategory
+  class_name: string
+  uploader_name: string | null
+  photo_file: FileRecord | null
+}
+
+export interface AdiwiyataReportVerificationParams {
+  reportId: string
+  schoolId: string
+  actorId: string
+  verified: boolean
+  at: string
+}
+
+export interface AdiwiyataReportVerificationResult {
+  report: AdiwiyataReport
+  coverage_status: 'reported' | 'verified'
+  changed: boolean
+}
+
+export interface SubmitAdiwiyataReportParams {
+  reportId: string
+  userId: string
+  siteId: string
+  classId: string
+  profileName: string
+  className: string
+  reportDate: string
+  createdAt: string
+  fileId: string
+  fileSizeBytes: number
+}
+
 export interface CreateAcademicPeriodParams {
   schoolId?: string
   name: string
@@ -747,6 +835,34 @@ export interface InsertAttendanceData {
 
 export interface DomainStore {
   getUserProfile(userId: string): Promise<UserProfile>
+  getAdiwiyataEligibility(userId: string): Promise<AdiwiyataEligibility | null>
+  listAdiwiyataEligibility(): Promise<AdiwiyataEligibility[]>
+  upsertAdiwiyataEligibility(userId: string, addedBy: string): Promise<AdiwiyataEligibility>
+  setAdiwiyataEligibilityActive(id: string, isActive: boolean): Promise<AdiwiyataEligibility | null>
+  listAdiwiyataSites(filter?: { schoolId?: string; isActive?: boolean }): Promise<AdiwiyataSite[]>
+  createAdiwiyataSite(params: CreateAdiwiyataSiteParams): Promise<AdiwiyataSite>
+  updateAdiwiyataSite(
+    id: string,
+    schoolId: string,
+    params: UpdateAdiwiyataSiteParams,
+  ): Promise<AdiwiyataSite | null>
+  listAdiwiyataReports(filter?: {
+    classId?: string
+    siteId?: string
+    reportedBy?: string
+    reportDate?: string
+    siteIds?: string[]
+  }): Promise<AdiwiyataReport[]>
+  listAdiwiyataAdminReports(filter: {
+    schoolId: string
+    reportDate: string
+    classId?: string
+    siteId?: string
+  }): Promise<AdiwiyataAdminReport[]>
+  updateAdiwiyataReportVerification(
+    params: AdiwiyataReportVerificationParams,
+  ): Promise<AdiwiyataReportVerificationResult | null>
+  submitAdiwiyataReport(params: SubmitAdiwiyataReportParams): Promise<AdiwiyataReport>
   resolveLegacyUserId?(legacyUserId: string): Promise<string | null>
   updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<void>
   getProfileByNis(nis: string): Promise<UserProfile | null>
@@ -972,7 +1088,12 @@ export interface DomainStore {
   close?(): Promise<void>
 }
 
-export const filePurposeSchema = z.enum(['avatar', 'permit_attachment', 'face_enrollment'])
+export const filePurposeSchema = z.enum([
+  'avatar',
+  'permit_attachment',
+  'face_enrollment',
+  'adiwiyata_report',
+])
 export type FilePurpose = z.infer<typeof filePurposeSchema>
 
 export const fileLifecycleSchema = z.enum(['pending_upload', 'available', 'rejected', 'deleted'])
@@ -1078,6 +1199,8 @@ export interface ObjectStorage {
     file: Buffer,
     contentType: string,
   ): Promise<string>
+  uploadAdiwiyataReport(path: string, file: Buffer): Promise<void>
+  getSignedAdiwiyataReportUrl(path: string, expiresInSeconds?: number): Promise<string | null>
   deleteFaceEnrollmentImages(userId: string): Promise<void>
   /** Delete one object belonging to an Astra file record. */
   deleteObject(purpose: FilePurpose, path: string): Promise<void>

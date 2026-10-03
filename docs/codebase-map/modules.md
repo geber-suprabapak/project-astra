@@ -15,6 +15,14 @@
 **Purpose:** Implement client-facing domain behavior without exposing storage/database internals.
 **Entry points:** `src/modules/{attendance,dashboard,enrollment,files,permits,profile,notifications,admin}/`.
 
+## Adiwiyata
+
+**Purpose:** Authorize student camera reports and administrative Site/access management, daily coverage, and per-photo verification.
+**Entry points:** `src/modules/adiwiyata/routes.ts`, `src/modules/adiwiyata/admin-routes.ts`, `src/modules/adiwiyata/service.ts`.
+**Owns:** Class–Site–WIB-date coverage and server-watermarked final reports. Today's expected pairs reuse current eligible enrollment, active Sites, scoped schedules and holidays; historical dates contain actual reports only.
+**Depends on:** Existing profiles, roster/bindings, academic periods, enrollment, schedules, calendar, `DomainStore`, file metadata and the dedicated S3 bucket. Verification and submission share the pair lock in `src/providers/adiwiyata-lock.ts`.
+**Read next:** `contracts/astra-v1.json`, `tests/integration/adiwiyata-admin-reports.test.ts`, `tests/integration/adiwiyata-dashboard.test.ts`.
+
 ## Providers and clients
 
 **Purpose:** Adapt PostgreSQL, S3-compatible storage, OIDC, Redis, and Robin.

@@ -10,6 +10,7 @@ import {
 import { type ReadinessResult } from './modules/health/service.js'
 import { createV1Mobile, v1Mobile } from './routes/v1-mobile.js'
 import { createAdminRouter, adminRouter } from './modules/admin/routes.js'
+import { adiwiyataRouter, createAdiwiyataRouter } from './modules/adiwiyata/routes.js'
 import {
   createPasswordRouter,
   createStudentAuthRouter,
@@ -32,6 +33,7 @@ export interface AppDeps {
   passwordRouter?: Hono<AppEnv>
   healthRouter?: Hono<AppEnv>
   studentAuthRouter?: Hono<AppEnv>
+  adiwiyataRouter?: Hono<AppEnv>
 }
 
 export function createApp(deps: AppDeps = {}) {
@@ -151,6 +153,11 @@ export function createApp(deps: AppDeps = {}) {
     deps.passwordRouter ??
     (deps.providers ? createPasswordRouter({ providers: resolvedProviders }) : passwordRouter)
   app.route('/v1/auth/password', resolvedPasswordRouter)
+
+  const resolvedAdiwiyataRouter =
+    deps.adiwiyataRouter ??
+    (deps.providers ? createAdiwiyataRouter({ providers: resolvedProviders }) : adiwiyataRouter)
+  app.route('/v1/adiwiyata', resolvedAdiwiyataRouter)
 
   // Mobile API routes
   app.route('/v1/mobile', mobileRouter)

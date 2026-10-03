@@ -213,4 +213,34 @@ describe('S3ObjectStorage', () => {
       expect(mockRedis.del).toHaveBeenCalledWith('astra:signed_permit:user-1/permit.png')
     })
   })
+
+  describe('Adiwiyata evidence bucket', () => {
+    it('writes and deletes through the private endpoint and signs reads on the public URL', async () => {
+      const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 200 }))
+      globalThis.fetch = fetchMock
+      const storage = new S3ObjectStorage({
+        ...storageOptions,
+        bucketAdiwiyata: 'adiwiyata',
+        publicUrl: 'http://localhost:3354',
+      })
+      const path = 'reports/report-1.jpg'
+
+      await storage.uploadAdiwiyataReport(path, Buffer.from('jpeg bytes'))
+      const signedUrl = await storage.getSignedAdiwiyataReportUrl(path, 123)
+      await storage.deleteObject('adiwiyata_report', path)
+
+      const [uploadUrl, uploadInit] = fetchMock.mock.calls[0]!
+      expect(new URL(String(uploadUrl)).toString()).toBe(
+        'http://localhost:9000/adiwiyata/reports/report-1.jpg',
+      )
+      expect(new Headers(uploadInit?.headers).get('content-type')).toBe('image/jpeg')
+      expect(signedUrl).toContain('http://localhost:3354/adiwiyata/reports/report-1.jpg?')
+      expect(signedUrl).toContain('X-Amz-Expires=123')
+      const [deleteUrl, deleteInit] = fetchMock.mock.calls[1]!
+      expect(new URL(String(deleteUrl)).toString()).toBe(
+        'http://localhost:9000/adiwiyata/reports/report-1.jpg',
+      )
+      expect(deleteInit?.method).toBe('DELETE')
+    })
+  })
 })
