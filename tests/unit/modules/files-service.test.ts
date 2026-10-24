@@ -380,16 +380,20 @@ describe('files service', () => {
         contentType: 'image/jpeg',
       })
 
-      await expect(confirmFileUpload({
-        userId: 'student-1',
-        fileId: file.id,
-        providers,
-      })).rejects.toMatchObject({ code: ErrorCode.CONFLICT })
-      await expect(deleteFile({
-        userId: 'student-1',
-        fileId: file.id,
-        providers,
-      })).rejects.toMatchObject({ code: ErrorCode.CONFLICT })
+      await expect(
+        confirmFileUpload({
+          userId: 'student-1',
+          fileId: file.id,
+          providers,
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.CONFLICT })
+      await expect(
+        deleteFile({
+          userId: 'student-1',
+          fileId: file.id,
+          providers,
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.CONFLICT })
 
       expect((await providers.domainStore.getFileRecord(file.id))?.lifecycle).toBe('pending_upload')
       expect(providers.objectStorage.objects.has(file.object_path)).toBe(true)
@@ -534,28 +538,38 @@ describe('files service', () => {
         lifecycle: 'available',
       })
 
-      providers.objectStorage.getSignedAdiwiyataReportUrl = async () => 'https://storage.local/private'
+      providers.objectStorage.getSignedAdiwiyataReportUrl = async () =>
+        'https://storage.local/private'
       const owner = await getFile({ userId: 'student-1', fileId: file.id, providers })
       expect(owner.download_url).toBe('https://storage.local/private')
 
-      await expect(getFile({
-        userId: 'teacher-1',
-        fileId: file.id,
-        userScopes: ['files:read:any'],
-        providers,
-      })).rejects.toMatchObject({ code: ErrorCode.FORBIDDEN })
-      await expect(getFile({
-        userId: 'school-admin-1',
-        fileId: file.id,
-        userScopes: ['files:read:any'],
-        providers,
-      })).resolves.toMatchObject({ file: { id: file.id }, download_url: 'https://storage.local/private' })
-      await expect(getFile({
-        userId: 'platform-admin-pending',
-        fileId: file.id,
-        userScopes: ['files:read:any'],
-        providers,
-      })).rejects.toMatchObject({ code: ErrorCode.FORBIDDEN })
+      await expect(
+        getFile({
+          userId: 'teacher-1',
+          fileId: file.id,
+          userScopes: ['files:read:any'],
+          providers,
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.FORBIDDEN })
+      await expect(
+        getFile({
+          userId: 'school-admin-1',
+          fileId: file.id,
+          userScopes: ['files:read:any'],
+          providers,
+        }),
+      ).resolves.toMatchObject({
+        file: { id: file.id },
+        download_url: 'https://storage.local/private',
+      })
+      await expect(
+        getFile({
+          userId: 'platform-admin-pending',
+          fileId: file.id,
+          userScopes: ['files:read:any'],
+          providers,
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.FORBIDDEN })
     })
 
     it('does not issue a report URL after the file retention deadline', async () => {
@@ -581,12 +595,20 @@ describe('files service', () => {
       vi.useFakeTimers({ toFake: ['Date'] })
       try {
         const providers = createTestProviders()
-        const file = await providers.domainStore.createFileRecord({ userId: 'student-1', purpose: 'adiwiyata_report', objectPath: 'reports/deadline.jpg', contentType: 'image/jpeg', lifecycle: 'available' })
+        const file = await providers.domainStore.createFileRecord({
+          userId: 'student-1',
+          purpose: 'adiwiyata_report',
+          objectPath: 'reports/deadline.jpg',
+          contentType: 'image/jpeg',
+          lifecycle: 'available',
+        })
         providers.domainStore.files.get(file.id)!.created_at = '2025-09-30T00:00:00.000Z'
         const signedUrl = vi.fn(async () => 'https://storage.local/bounded')
         providers.objectStorage.getSignedAdiwiyataReportUrl = signedUrl
         vi.setSystemTime(new Date('2026-09-29T23:59:58.500Z'))
-        expect((await getFile({ userId: 'student-1', fileId: file.id, providers })).download_url).toBe('https://storage.local/bounded')
+        expect(
+          (await getFile({ userId: 'student-1', fileId: file.id, providers })).download_url,
+        ).toBe('https://storage.local/bounded')
         expect(signedUrl).toHaveBeenLastCalledWith(file.object_path, 1)
         vi.setSystemTime(new Date('2026-09-30T00:00:00.000Z'))
         const expired = await getFile({ userId: 'student-1', fileId: file.id, providers })

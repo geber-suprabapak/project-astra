@@ -46,19 +46,31 @@ function schedule(): Schedule {
 
 function createEnvironment() {
   const domainStore = new MemoryDomainStore()
-  domainStore.academicPeriods = [{
-    id: periodId,
-    school_id: schoolId,
-    name: 'Tahun Ajaran 2026/2027 Ganjil',
-    start_date: '2026-07-01',
-    end_date: '2026-12-31',
-    is_active: true,
-  }]
+  domainStore.academicPeriods = [
+    {
+      id: periodId,
+      school_id: schoolId,
+      name: 'Tahun Ajaran 2026/2027 Ganjil',
+      start_date: '2026-07-01',
+      end_date: '2026-12-31',
+      is_active: true,
+    },
+  ]
   domainStore.classes = [
     { id: classId, school_id: schoolId, academic_period_id: periodId, name: 'XII RPL 1' },
     { id: nextClassId, school_id: schoolId, academic_period_id: periodId, name: 'XII RPL 2' },
-    { id: previousClassId, school_id: schoolId, academic_period_id: previousPeriodId, name: 'XII RPL 2' },
-    { id: otherSchoolClassId, school_id: otherSchoolId, academic_period_id: periodId, name: 'XII RPL 2' },
+    {
+      id: previousClassId,
+      school_id: schoolId,
+      academic_period_id: previousPeriodId,
+      name: 'XII RPL 2',
+    },
+    {
+      id: otherSchoolClassId,
+      school_id: otherSchoolId,
+      academic_period_id: periodId,
+      name: 'XII RPL 2',
+    },
   ]
   domainStore.profiles.set('site-admin', {
     user_id: 'site-admin',
@@ -84,13 +96,15 @@ function createEnvironment() {
     role: 'school_admin',
     lifecycle_status: 'pending',
   })
-  domainStore.classEnrollments = [{
-    id: 'enrollment-1',
-    user_id: 'site-student',
-    class_id: classId,
-    academic_period_id: periodId,
-    status: 'active',
-  }]
+  domainStore.classEnrollments = [
+    {
+      id: 'enrollment-1',
+      user_id: 'site-student',
+      class_id: classId,
+      academic_period_id: periodId,
+      status: 'active',
+    },
+  ]
   domainStore.adiwiyataEligibility.set('site-student', {
     id: 'eligibility-1',
     user_id: 'site-student',
@@ -157,9 +171,18 @@ function createEnvironment() {
     identityProvider,
     robinClient: {
       checkReadiness: async () => ({ healthy: true, modelReady: true, qdrantConnected: true }),
-      getEnrollmentStatus: async () => ({ status: 'enrolled' as const, embeddingCount: 1, message: 'Ready.' }),
+      getEnrollmentStatus: async () => ({
+        status: 'enrolled' as const,
+        embeddingCount: 1,
+        message: 'Ready.',
+      }),
       enroll: async () => ({ imagesProcessed: 1, imagesFailed: 0, totalEmbeddings: 1 }),
-      identify: async () => ({ status: 'ok' as const, confidence: 0.9, qualityScore: 0.9, processTimeMs: 1 }),
+      identify: async () => ({
+        status: 'ok' as const,
+        confidence: 0.9,
+        qualityScore: 0.9,
+        processTimeMs: 1,
+      }),
       deleteEnrollment: async () => {},
     } satisfies RobinClient,
   }
@@ -222,12 +245,22 @@ describe('integration: Adiwiyata Site management', () => {
   it('requires admin:read and an approved Astra admin profile', async () => {
     const { app } = createEnvironment()
     expect((await request(app, '/v1/admin/adiwiyata/sites')).status).toBe(401)
-    expect((await request(app, '/v1/admin/adiwiyata/sites', adminWithoutScopeToken)).status).toBe(403)
-    expect((await request(app, '/v1/admin/adiwiyata/sites', studentAdminScopeToken)).status).toBe(403)
+    expect((await request(app, '/v1/admin/adiwiyata/sites', adminWithoutScopeToken)).status).toBe(
+      403,
+    )
+    expect((await request(app, '/v1/admin/adiwiyata/sites', studentAdminScopeToken)).status).toBe(
+      403,
+    )
     expect((await request(app, '/v1/admin/adiwiyata/sites', pendingAdminToken)).status).toBe(403)
-    expect((await request(app, '/v1/admin/adiwiyata/sites', studentAdminScopeToken, 'POST', {
-      name: 'Tidak boleh', category: 'tanaman', sort_order: 0,
-    })).status).toBe(403)
+    expect(
+      (
+        await request(app, '/v1/admin/adiwiyata/sites', studentAdminScopeToken, 'POST', {
+          name: 'Tidak boleh',
+          category: 'tanaman',
+          sort_order: 0,
+        })
+      ).status,
+    ).toBe(403)
     expect((await request(app, '/v1/admin/adiwiyata/sites', platformAdminToken)).status).toBe(200)
   })
 
@@ -243,25 +276,45 @@ describe('integration: Adiwiyata Site management', () => {
       oldSiteId,
       'd0000000-0000-0000-0000-000000000003',
     ])
-    expect(initial.data.sites.some((site: { name: string }) => site.name === 'Sekolah Lain')).toBe(false)
+    expect(initial.data.sites.some((site: { name: string }) => site.name === 'Sekolah Lain')).toBe(
+      false,
+    )
 
     const created = await request(app, '/v1/admin/adiwiyata/sites', adminToken, 'POST', {
-      name: 'Kebun Baru', category: 'tanaman', class_id: nextClassId, sort_order: 10,
+      name: 'Kebun Baru',
+      category: 'tanaman',
+      class_id: nextClassId,
+      sort_order: 10,
     })
     expect(created.status).toBe(201)
     const createdSite = (await created.json()).data
     expect(createdSite.school_id).toBe(schoolId)
     expect(createdSite.created_by).toBe('site-admin')
 
-    const edited = await request(app, `/v1/admin/adiwiyata/sites/${oldSiteId}`, adminToken, 'PATCH', {
-      name: 'Kebun Periode Baru', category: 'tanaman', class_id: nextClassId, sort_order: 1,
-    })
+    const edited = await request(
+      app,
+      `/v1/admin/adiwiyata/sites/${oldSiteId}`,
+      adminToken,
+      'PATCH',
+      {
+        name: 'Kebun Periode Baru',
+        category: 'tanaman',
+        class_id: nextClassId,
+        sort_order: 1,
+      },
+    )
     expect(edited.status).toBe(200)
     expect((await edited.json()).data.class_id).toBe(nextClassId)
 
-    const general = await request(app, `/v1/admin/adiwiyata/sites/${oldSiteId}`, adminToken, 'PATCH', {
-      class_id: null,
-    })
+    const general = await request(
+      app,
+      `/v1/admin/adiwiyata/sites/${oldSiteId}`,
+      adminToken,
+      'PATCH',
+      {
+        class_id: null,
+      },
+    )
     expect(general.status).toBe(200)
     expect((await general.json()).data.class_id).toBeNull()
     const studentDashboard = await request(app, '/v1/adiwiyata/dashboard', studentToken)
@@ -269,18 +322,36 @@ describe('integration: Adiwiyata Site management', () => {
     const visibleSiteIds = visibleSites.map((site) => site.id)
     expect(visibleSiteIds.filter((id) => id === oldSiteId)).toHaveLength(1)
 
-    const oldClass = await request(app, `/v1/admin/adiwiyata/sites/${oldSiteId}`, adminToken, 'PATCH', {
-      class_id: previousClassId,
-    })
+    const oldClass = await request(
+      app,
+      `/v1/admin/adiwiyata/sites/${oldSiteId}`,
+      adminToken,
+      'PATCH',
+      {
+        class_id: previousClassId,
+      },
+    )
     expect(oldClass.status).toBe(422)
-    const wrongSchoolClass = await request(app, `/v1/admin/adiwiyata/sites/${oldSiteId}`, adminToken, 'PATCH', {
-      class_id: otherSchoolClassId,
-    })
+    const wrongSchoolClass = await request(
+      app,
+      `/v1/admin/adiwiyata/sites/${oldSiteId}`,
+      adminToken,
+      'PATCH',
+      {
+        class_id: otherSchoolClassId,
+      },
+    )
     expect(wrongSchoolClass.status).toBe(422)
 
-    const reordered = await request(app, `/v1/admin/adiwiyata/sites/${activeSiteId}`, adminToken, 'PATCH', {
-      sort_order: 0,
-    })
+    const reordered = await request(
+      app,
+      `/v1/admin/adiwiyata/sites/${activeSiteId}`,
+      adminToken,
+      'PATCH',
+      {
+        sort_order: 0,
+      },
+    )
     expect(reordered.status).toBe(200)
     const after = await (await request(app, '/v1/admin/adiwiyata/sites', adminToken)).json()
     expect(after.data.sites[0].id).toBe(activeSiteId)
@@ -289,7 +360,10 @@ describe('integration: Adiwiyata Site management', () => {
   it('rejects Site validation errors and an ambiguous active period', async () => {
     const { app, domainStore } = createEnvironment()
     const invalid = await request(app, '/v1/admin/adiwiyata/sites', adminToken, 'POST', {
-      name: '   ', category: 'fish', class_id: previousClassId, sort_order: 1.5,
+      name: '   ',
+      category: 'fish',
+      class_id: previousClassId,
+      sort_order: 1.5,
     })
     expect(invalid.status).toBe(422)
 
@@ -308,7 +382,12 @@ describe('integration: Adiwiyata Site management', () => {
 
   it('soft-deactivates without deleting the row and hides the Site from students', async () => {
     const { app, domainStore } = createEnvironment()
-    const response = await request(app, `/v1/admin/adiwiyata/sites/${activeSiteId}`, adminToken, 'DELETE')
+    const response = await request(
+      app,
+      `/v1/admin/adiwiyata/sites/${activeSiteId}`,
+      adminToken,
+      'DELETE',
+    )
     expect(response.status).toBe(200)
     expect((await response.json()).data.is_active).toBe(false)
     expect(domainStore.adiwiyataSites.has(activeSiteId)).toBe(true)

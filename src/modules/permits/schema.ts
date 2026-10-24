@@ -7,7 +7,7 @@ export const MAX_PERMIT_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024 // 10MB
 
 export const CreatePermitSchema = z.object({
   category: z.enum(PERMIT_CATEGORIES, {
-    errorMap: () => ({ message: `Category must be one of: ${PERMIT_CATEGORIES.join(', ')}` }),
+    error: `Category must be one of: ${PERMIT_CATEGORIES.join(', ')}`,
   }),
   description: z
     .string()

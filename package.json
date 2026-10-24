@@ -19,24 +19,31 @@
     "worker:notifications": "bun src/workers/notifications.ts"
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.14",
-    "hono": "^4.12.14",
+    "@hono/node-server": "1.19.15",
+    "hono": "4.12.25",
     "jose": "^5.10.0",
     "pino": "^9.6.0",
     "postgres": "^3.4.9",
     "redis": "^5.12.1",
     "sharp": "0.35.5",
-    "zod": "^3.24.2"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@oxlint/plugins": "1.81.0",
     "@types/node": "^20.11.17",
-    "@vitest/coverage-v8": "^3.1.1",
+    "@vitest/coverage-v8": "3.2.6",
     "oxfmt": "0.63.0",
     "oxlint": "1.81.0",
     "typescript": "^5.8.3",
-    "vitest": "^3.1.1",
-    "ws": "^8.20.1"
+    "vitest": "3.2.6",
+    "ws": "8.21.0"
+  },
+  "overrides": {
+    "nanoid": "3.3.18",
+    "postcss": "8.5.18",
+    "source-map-js": "1.2.2",
+    "tinypool": "2.1.2",
+    "vite": "7.3.7"
   },
   "engines": {
     "node": ">=22"

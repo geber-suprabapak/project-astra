@@ -9,10 +9,7 @@ import { rateLimits } from '../../middleware/rate-limit.js'
 import { defaultProviders } from '../../providers/index.js'
 import type { AppProviders } from '../../providers/types.js'
 import type { AppEnv } from '../../types/context.js'
-import {
-  getAdiwiyataDashboard,
-  submitAdiwiyataStudentReport,
-} from './service.js'
+import { getAdiwiyataDashboard, submitAdiwiyataStudentReport } from './service.js'
 import { MAX_ADIWIYATA_INPUT_BYTES } from './image.js'
 
 export interface AdiwiyataRouterDeps {
@@ -30,10 +27,8 @@ const profileRejected = () =>
 const siteIdSchema = z.string().regex(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i)
 const multipartBodyLimit = bodyLimit({
   maxSize: MAX_ADIWIYATA_INPUT_BYTES + 64 * 1024,
-  onError: (c) => errorResponse(
-    c,
-    AppError.validationError('Multipart request exceeds the 5 MB photo limit.'),
-  ),
+  onError: (c) =>
+    errorResponse(c, AppError.validationError('Multipart request exceeds the 5 MB photo limit.')),
 })
 
 export function createAdiwiyataRouter(deps: AdiwiyataRouterDeps = {}) {
@@ -65,17 +60,22 @@ export function createAdiwiyataRouter(deps: AdiwiyataRouterDeps = {}) {
     const siteValue = siteFields[0]
     const imageValue = imageFields[0]
     if (
-      keys.length !== 2 || keys.some((key) => key !== 'site_id' && key !== 'image') ||
-      siteFields.length !== 1 || imageFields.length !== 1 ||
+      keys.length !== 2 ||
+      keys.some((key) => key !== 'site_id' && key !== 'image') ||
+      siteFields.length !== 1 ||
+      imageFields.length !== 1 ||
       !(imageValue instanceof File)
     ) {
-      throw AppError.validationError('Kirim tepat satu field site_id dan satu field image tanpa caption tambahan.')
+      throw AppError.validationError(
+        'Kirim tepat satu field site_id dan satu field image tanpa caption tambahan.',
+      )
     }
     const siteId = siteIdSchema.safeParse(siteValue)
     const image = imageValue
     if (!siteId.success) throw AppError.validationError('site_id harus berupa UUID.')
     if (
-      image.size === 0 || image.size > MAX_ADIWIYATA_INPUT_BYTES ||
+      image.size === 0 ||
+      image.size > MAX_ADIWIYATA_INPUT_BYTES ||
       (image.type !== 'image/jpeg' && image.type !== 'image/png')
     ) {
       throw AppError.validationError('image harus berupa JPEG atau PNG berukuran maksimal 5 MB.')

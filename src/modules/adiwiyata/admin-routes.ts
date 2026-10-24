@@ -18,41 +18,51 @@ import {
 } from './service.js'
 
 const uuidSchema = z.string().regex(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i)
-const realDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
-  if (value.startsWith('0000-')) return false
-  const parsed = new Date(`${value}T00:00:00.000Z`)
-  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
-})
-const reportsQuerySchema = z.object({
-  date: realDateSchema.optional(),
-  class_id: uuidSchema.optional(),
-  site_id: uuidSchema.optional(),
-}).strict()
+const realDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((value) => {
+    if (value.startsWith('0000-')) return false
+    const parsed = new Date(`${value}T00:00:00.000Z`)
+    return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+  })
+const reportsQuerySchema = z
+  .object({
+    date: realDateSchema.optional(),
+    class_id: uuidSchema.optional(),
+    site_id: uuidSchema.optional(),
+  })
+  .strict()
 
-const eligibilityIdSchema = z.string().uuid()
+const eligibilityIdSchema = uuidSchema
 const eligibilityUserIdSchema = z.string().trim().min(1).max(255)
 const eligibilityGrantSchema = z.object({ user_id: eligibilityUserIdSchema }).strict()
-const siteIdSchema = z.string().uuid()
+const siteIdSchema = uuidSchema
 const siteNameSchema = z.string().trim().min(1).max(120)
 const siteCategorySchema = z.enum(['tanaman', 'lele'])
-const siteClassIdSchema = z.string().uuid().nullable()
+const siteClassIdSchema = uuidSchema.nullable()
 const siteSortOrderSchema = z.number().finite().int().min(0).max(2_147_483_647)
 
-const createSiteSchema = z.object({
-  name: siteNameSchema,
-  category: siteCategorySchema,
-  class_id: siteClassIdSchema.optional(),
-  sort_order: siteSortOrderSchema.default(0),
-}).strict()
+const createSiteSchema = z
+  .object({
+    name: siteNameSchema,
+    category: siteCategorySchema,
+    class_id: siteClassIdSchema.optional(),
+    sort_order: siteSortOrderSchema.default(0),
+  })
+  .strict()
 
-const updateSiteSchema = z.object({
-  name: siteNameSchema.optional(),
-  category: siteCategorySchema.optional(),
-  class_id: siteClassIdSchema.optional(),
-  sort_order: siteSortOrderSchema.optional(),
-}).strict().refine((body) => Object.keys(body).length > 0, {
-  message: 'At least one Site field must be supplied.',
-})
+const updateSiteSchema = z
+  .object({
+    name: siteNameSchema.optional(),
+    category: siteCategorySchema.optional(),
+    class_id: siteClassIdSchema.optional(),
+    sort_order: siteSortOrderSchema.optional(),
+  })
+  .strict()
+  .refine((body) => Object.keys(body).length > 0, {
+    message: 'At least one Site field must be supplied.',
+  })
 
 export interface AdiwiyataAdminRouterDeps {
   providers?: AppProviders
@@ -80,7 +90,8 @@ export function createAdiwiyataAdminRouter(deps: AdiwiyataAdminRouterDeps = {}) 
 
   router.post('/reports/:id/verify', async (c) => {
     const id = uuidSchema.safeParse(c.req.param('id'))
-    if (!id.success) throw AppError.validationError({ fieldErrors: { id: ['ID laporan tidak valid.'] } })
+    if (!id.success)
+      throw AppError.validationError({ fieldErrors: { id: ['ID laporan tidak valid.'] } })
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const result = await setAdiwiyataAdminReportVerification({
       reportId: id.data,
@@ -95,7 +106,8 @@ export function createAdiwiyataAdminRouter(deps: AdiwiyataAdminRouterDeps = {}) 
 
   router.post('/reports/:id/unverify', async (c) => {
     const id = uuidSchema.safeParse(c.req.param('id'))
-    if (!id.success) throw AppError.validationError({ fieldErrors: { id: ['ID laporan tidak valid.'] } })
+    if (!id.success)
+      throw AppError.validationError({ fieldErrors: { id: ['ID laporan tidak valid.'] } })
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const result = await setAdiwiyataAdminReportVerification({
       reportId: id.data,
@@ -109,8 +121,13 @@ export function createAdiwiyataAdminRouter(deps: AdiwiyataAdminRouterDeps = {}) 
   })
 
   router.get('/eligibility', async (c) => {
-    const query = z.string().trim().max(200).safeParse(c.req.query('q') ?? '')
-    if (!query.success) throw AppError.validationError('Search query must be 200 characters or less.')
+    const query = z
+      .string()
+      .trim()
+      .max(200)
+      .safeParse(c.req.query('q') ?? '')
+    if (!query.success)
+      throw AppError.validationError('Search query must be 200 characters or less.')
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const result = await listAdiwiyataAdminEligibility({
       actorRole: c.get('profileRole'),
@@ -135,7 +152,8 @@ export function createAdiwiyataAdminRouter(deps: AdiwiyataAdminRouterDeps = {}) 
 
   router.delete('/eligibility/:id', async (c) => {
     const id = eligibilityIdSchema.safeParse(c.req.param('id'))
-    if (!id.success) throw AppError.validationError({ fieldErrors: { id: ['ID akses siswa tidak valid.'] } })
+    if (!id.success)
+      throw AppError.validationError({ fieldErrors: { id: ['ID akses siswa tidak valid.'] } })
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const eligibility = await revokeAdiwiyataEligibility({
       id: id.data,
@@ -172,7 +190,8 @@ export function createAdiwiyataAdminRouter(deps: AdiwiyataAdminRouterDeps = {}) 
 
   router.patch('/sites/:id', async (c) => {
     const id = siteIdSchema.safeParse(c.req.param('id'))
-    if (!id.success) throw AppError.validationError({ fieldErrors: { id: ['ID Site tidak valid.'] } })
+    if (!id.success)
+      throw AppError.validationError({ fieldErrors: { id: ['ID Site tidak valid.'] } })
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const parsed = updateSiteSchema.safeParse(await c.req.json())
     if (!parsed.success) throw AppError.validationError(parsed.error.flatten())
@@ -190,7 +209,8 @@ export function createAdiwiyataAdminRouter(deps: AdiwiyataAdminRouterDeps = {}) 
 
   router.delete('/sites/:id', async (c) => {
     const id = siteIdSchema.safeParse(c.req.param('id'))
-    if (!id.success) throw AppError.validationError({ fieldErrors: { id: ['ID Site tidak valid.'] } })
+    if (!id.success)
+      throw AppError.validationError({ fieldErrors: { id: ['ID Site tidak valid.'] } })
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const site = await deactivateAdiwiyataAdminSite({
       id: id.data,

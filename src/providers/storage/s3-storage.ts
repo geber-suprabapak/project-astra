@@ -416,10 +416,7 @@ export class S3ObjectStorage implements ObjectStorage {
     }
   }
 
-  async getSignedAdiwiyataReportUrl(
-    path: string,
-    expiresInSeconds = 900,
-  ): Promise<string | null> {
+  async getSignedAdiwiyataReportUrl(path: string, expiresInSeconds = 900): Promise<string | null> {
     if (!path || expiresInSeconds <= 0) return null
     try {
       return this.signUrl(this.bucketAdiwiyata, path, expiresInSeconds)

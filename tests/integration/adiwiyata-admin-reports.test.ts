@@ -66,18 +66,25 @@ function makeSchedule(overrides: Partial<Schedule> = {}): Schedule {
 
 function createEnvironment() {
   const domainStore = new MemoryDomainStore()
-  domainStore.academicPeriods = [{
-    id: periodId,
-    school_id: schoolId,
-    name: 'Periode aktif',
-    start_date: '2026-07-01',
-    end_date: '2026-12-31',
-    is_active: true,
-  }]
+  domainStore.academicPeriods = [
+    {
+      id: periodId,
+      school_id: schoolId,
+      name: 'Periode aktif',
+      start_date: '2026-07-01',
+      end_date: '2026-12-31',
+      is_active: true,
+    },
+  ]
   domainStore.classes = [
     { id: classId, school_id: schoolId, academic_period_id: periodId, name: 'XII RPL 1' },
     { id: oldClassId, school_id: schoolId, academic_period_id: oldPeriodId, name: 'XI RPL 1' },
-    { id: otherSchoolClassId, school_id: otherSchoolId, academic_period_id: periodId, name: 'XII RPL 1' },
+    {
+      id: otherSchoolClassId,
+      school_id: otherSchoolId,
+      academic_period_id: periodId,
+      name: 'XII RPL 1',
+    },
   ]
   for (const [userId, role, lifecycle_status, full_name] of [
     ['report-admin', 'school_admin', 'approved', 'Admin Sekolah'],
@@ -110,17 +117,28 @@ function createEnvironment() {
   })
   domainStore.schedules.clear()
   domainStore.schedules.set('report-schedule', makeSchedule())
-  domainStore.classEnrollments = ['report-student', 'report-student-2', 'report-student-3'].map((user_id, index) => ({
-    id: `report-enrollment-${index}`,
-    student_id: `report-student-record-${index}`,
-    user_id,
-    class_id: classId,
-    academic_period_id: periodId,
-    status: 'active',
-  }))
-  for (const [index, user_id] of ['report-student', 'report-student-2', 'report-student-3'].entries()) {
+  domainStore.classEnrollments = ['report-student', 'report-student-2', 'report-student-3'].map(
+    (user_id, index) => ({
+      id: `report-enrollment-${index}`,
+      student_id: `report-student-record-${index}`,
+      user_id,
+      class_id: classId,
+      academic_period_id: periodId,
+      status: 'active',
+    }),
+  )
+  for (const [index, user_id] of [
+    'report-student',
+    'report-student-2',
+    'report-student-3',
+  ].entries()) {
     const student_id = `report-student-record-${index}`
-    domainStore.students.set(student_id, { id: student_id, nis: `900${index}`, full_name: domainStore.profiles.get(user_id)!.full_name!, gender: null })
+    domainStore.students.set(student_id, {
+      id: student_id,
+      nis: `900${index}`,
+      full_name: domainStore.profiles.get(user_id)!.full_name!,
+      gender: null,
+    })
     domainStore.studentBindings.set(student_id, { student_id, user_id })
     domainStore.adiwiyataEligibility.set(user_id, {
       id: `report-eligibility-${index}`,
@@ -136,9 +154,18 @@ function createEnvironment() {
     identityProvider: new MemoryIdentityProvider(),
     robinClient: {
       checkReadiness: async () => ({ healthy: true, modelReady: true, qdrantConnected: true }),
-      getEnrollmentStatus: async () => ({ status: 'enrolled' as const, embeddingCount: 1, message: 'Ready.' }),
+      getEnrollmentStatus: async () => ({
+        status: 'enrolled' as const,
+        embeddingCount: 1,
+        message: 'Ready.',
+      }),
       enroll: async () => ({ imagesProcessed: 1, imagesFailed: 0, totalEmbeddings: 1 }),
-      identify: async () => ({ status: 'ok' as const, confidence: 0.9, qualityScore: 0.9, processTimeMs: 1 }),
+      identify: async () => ({
+        status: 'ok' as const,
+        confidence: 0.9,
+        qualityScore: 0.9,
+        processTimeMs: 1,
+      }),
       deleteEnrollment: async () => {},
     },
   }
@@ -205,20 +232,58 @@ describe('Adiwiyata admin reports', () => {
       const { app, domainStore } = createEnvironment()
       const classSiteId = 'd0000000-0000-0000-0000-000000000003'
       domainStore.adiwiyataSites.set(classSiteId, {
-        ...domainStore.adiwiyataSites.get(siteId)!, id: classSiteId, name: 'Kebun Kelas', class_id: classId,
+        ...domainStore.adiwiyataSites.get(siteId)!,
+        id: classSiteId,
+        name: 'Kebun Kelas',
+        class_id: classId,
       })
       const today = await request(app, `/v1/admin/adiwiyata/reports?date=${reportDate}`, adminToken)
       const initial = (await today.json()).data
       expect(initial.coverage).toEqual([
-        expect.objectContaining({ class_id: classId, site_id: classSiteId, coverage_status: 'missing', photo_count: 0 }),
-        expect.objectContaining({ class_id: classId, site_id: siteId, coverage_status: 'missing', photo_count: 0 }),
+        expect.objectContaining({
+          class_id: classId,
+          site_id: classSiteId,
+          coverage_status: 'missing',
+          photo_count: 0,
+        }),
+        expect.objectContaining({
+          class_id: classId,
+          site_id: siteId,
+          coverage_status: 'missing',
+          photo_count: 0,
+        }),
       ])
-      seedReport(domainStore, { id: 'e0000000-0000-0000-0000-000000000008', userId: 'report-student' })
-      seedReport(domainStore, { id: 'e0000000-0000-0000-0000-000000000009', userId: 'report-student-2', verifiedAt: reportAt, verifiedBy: 'report-admin' })
-      const reported = (await (await request(app, `/v1/admin/adiwiyata/reports?date=${reportDate}&site_id=${siteId}`, adminToken)).json()).data
-      expect(reported.coverage).toEqual([expect.objectContaining({ class_id: classId, site_id: siteId, coverage_status: 'verified', photo_count: 2 })])
+      seedReport(domainStore, {
+        id: 'e0000000-0000-0000-0000-000000000008',
+        userId: 'report-student',
+      })
+      seedReport(domainStore, {
+        id: 'e0000000-0000-0000-0000-000000000009',
+        userId: 'report-student-2',
+        verifiedAt: reportAt,
+        verifiedBy: 'report-admin',
+      })
+      const reported = (
+        await (
+          await request(
+            app,
+            `/v1/admin/adiwiyata/reports?date=${reportDate}&site_id=${siteId}`,
+            adminToken,
+          )
+        ).json()
+      ).data
+      expect(reported.coverage).toEqual([
+        expect.objectContaining({
+          class_id: classId,
+          site_id: siteId,
+          coverage_status: 'verified',
+          photo_count: 2,
+        }),
+      ])
       expect(reported.filter_options.sites).toHaveLength(2)
-      const history = (await (await request(app, '/v1/admin/adiwiyata/reports?date=2026-09-28', adminToken)).json()).data
+      const history = (
+        await (await request(app, '/v1/admin/adiwiyata/reports?date=2026-09-28', adminToken)).json()
+      ).data
       expect(history.coverage).toEqual([])
     } finally {
       vi.useRealTimers()
@@ -231,24 +296,46 @@ describe('Adiwiyata admin reports', () => {
     try {
       const { app, domainStore } = createEnvironment()
       const secondClassId = 'c0000000-0000-0000-0000-000000000004'
-      domainStore.classes.push({ id: secondClassId, school_id: schoolId, academic_period_id: periodId, name: 'XII RPL 2' })
+      domainStore.classes.push({
+        id: secondClassId,
+        school_id: schoolId,
+        academic_period_id: periodId,
+        name: 'XII RPL 2',
+      })
       domainStore.schedules.set('general', makeSchedule({ id: 'general', class_id: null }))
-      domainStore.schedules.set('general-duplicate', makeSchedule({ id: 'general-duplicate', class_id: null }))
-      const list = async () => request(app, `/v1/admin/adiwiyata/reports?date=${reportDate}`, adminToken)
-      expect((await (await list()).json()).data.coverage).toEqual([expect.objectContaining({ class_id: classId, coverage_status: 'missing' })])
+      domainStore.schedules.set(
+        'general-duplicate',
+        makeSchedule({ id: 'general-duplicate', class_id: null }),
+      )
+      const list = async () =>
+        request(app, `/v1/admin/adiwiyata/reports?date=${reportDate}`, adminToken)
+      expect((await (await list()).json()).data.coverage).toEqual([
+        expect.objectContaining({ class_id: classId, coverage_status: 'missing' }),
+      ])
       domainStore.classEnrollments[2]!.class_id = secondClassId
       expect((await list()).status).toBe(503)
       domainStore.schedules.delete('general-duplicate')
       expect((await (await list()).json()).data.coverage).toHaveLength(2)
       domainStore.adiwiyataEligibility.get('report-student-3')!.is_active = false
       expect((await (await list()).json()).data.coverage).toHaveLength(1)
-      domainStore.calendarExceptions.set('holiday', { id: 'holiday', school_id: schoolId, academic_period_id: periodId, date: reportDate, reason: 'Libur sekolah', is_holiday: true })
-      expect((await (await list()).json()).data.coverage).toEqual([expect.objectContaining({ coverage_status: 'not_scheduled', reason: 'Libur sekolah' })])
+      domainStore.calendarExceptions.set('holiday', {
+        id: 'holiday',
+        school_id: schoolId,
+        academic_period_id: periodId,
+        date: reportDate,
+        reason: 'Libur sekolah',
+        is_holiday: true,
+      })
+      expect((await (await list()).json()).data.coverage).toEqual([
+        expect.objectContaining({ coverage_status: 'not_scheduled', reason: 'Libur sekolah' }),
+      ])
       domainStore.calendarExceptions.clear()
       domainStore.schedules.clear()
       domainStore.schedules.set('other-day', makeSchedule({ day_of_week: 'senin', hari: 'senin' }))
       domainStore.schedules.set('foreign', makeSchedule({ school_id: otherSchoolId }))
-      expect((await (await list()).json()).data.coverage).toEqual([expect.objectContaining({ coverage_status: 'not_scheduled' })])
+      expect((await (await list()).json()).data.coverage).toEqual([
+        expect.objectContaining({ coverage_status: 'not_scheduled' }),
+      ])
       domainStore.schedules.delete('other-day')
       expect((await list()).status).toBe(503)
     } finally {
@@ -260,22 +347,38 @@ describe('Adiwiyata admin reports', () => {
     const { app } = createEnvironment()
     expect((await request(app, '/v1/admin/adiwiyata/reports')).status).toBe(401)
     expect((await request(app, '/v1/admin/adiwiyata/reports', noAdminScopeToken)).status).toBe(403)
-    expect((await request(app, '/v1/admin/adiwiyata/reports', studentAdminScopeToken)).status).toBe(403)
+    expect((await request(app, '/v1/admin/adiwiyata/reports', studentAdminScopeToken)).status).toBe(
+      403,
+    )
     expect((await request(app, '/v1/admin/adiwiyata/reports', pendingAdminToken)).status).toBe(403)
 
-    const metadataOnly = await request(app, `/v1/admin/adiwiyata/reports?date=${reportDate}`, adminNoPhotosToken)
+    const metadataOnly = await request(
+      app,
+      `/v1/admin/adiwiyata/reports?date=${reportDate}`,
+      adminNoPhotosToken,
+    )
     expect(metadataOnly.status).toBe(200)
     expect((await metadataOnly.json()).data.can_view_photos).toBe(false)
-    const photoAccess = await request(app, `/v1/admin/adiwiyata/reports?date=${reportDate}`, adminToken)
+    const photoAccess = await request(
+      app,
+      `/v1/admin/adiwiyata/reports?date=${reportDate}`,
+      adminToken,
+    )
     expect(photoAccess.status).toBe(200)
     expect((await photoAccess.json()).data.can_view_photos).toBe(true)
   })
 
   it('validates strict real dates and UUID filters while accepting arbitrary UUID version bits', async () => {
     const { app } = createEnvironment()
-    expect((await request(app, '/v1/admin/adiwiyata/reports?date=2026-02-30', adminToken)).status).toBe(422)
-    expect((await request(app, '/v1/admin/adiwiyata/reports?date=2026-2-03', adminToken)).status).toBe(422)
-    expect((await request(app, '/v1/admin/adiwiyata/reports?class_id=nope', adminToken)).status).toBe(422)
+    expect(
+      (await request(app, '/v1/admin/adiwiyata/reports?date=2026-02-30', adminToken)).status,
+    ).toBe(422)
+    expect(
+      (await request(app, '/v1/admin/adiwiyata/reports?date=2026-2-03', adminToken)).status,
+    ).toBe(422)
+    expect(
+      (await request(app, '/v1/admin/adiwiyata/reports?class_id=nope', adminToken)).status,
+    ).toBe(422)
     const zeroUuid = await request(
       app,
       '/v1/admin/adiwiyata/reports?date=2026-09-29&class_id=00000000-0000-0000-0000-000000000001',
@@ -313,20 +416,22 @@ describe('Adiwiyata admin reports', () => {
       date: '2025-01-10',
       timezone: 'Asia/Jakarta',
       can_view_photos: true,
-      reports: [{
-        id: oldReportId,
-        site_id: siteId,
-        site_name: 'Kebun Umum',
-        category: 'tanaman',
-        class_id: oldClassId,
-        class_name: 'XI RPL 1',
-        reported_by: 'report-student',
-        uploader_name: 'Siswa Satu',
-        file_id: fileId,
-        file_created_at: '2025-01-10T00:00:00.000Z',
-        report_date: '2025-01-10',
-        photo_url: null,
-      }],
+      reports: [
+        {
+          id: oldReportId,
+          site_id: siteId,
+          site_name: 'Kebun Umum',
+          category: 'tanaman',
+          class_id: oldClassId,
+          class_name: 'XI RPL 1',
+          reported_by: 'report-student',
+          uploader_name: 'Siswa Satu',
+          file_id: fileId,
+          file_created_at: '2025-01-10T00:00:00.000Z',
+          report_date: '2025-01-10',
+          photo_url: null,
+        },
+      ],
     })
     expect(body.data.today).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(body.data.reports).toHaveLength(1)
@@ -339,7 +444,12 @@ describe('Adiwiyata admin reports', () => {
     seedReport(domainStore, { id: firstId, userId: 'report-student' })
     seedReport(domainStore, { id: secondId, userId: 'report-student-2' })
 
-    const verifyFirst = await request(app, `/v1/admin/adiwiyata/reports/${firstId}/verify`, adminNoPhotosToken, 'POST')
+    const verifyFirst = await request(
+      app,
+      `/v1/admin/adiwiyata/reports/${firstId}/verify`,
+      adminNoPhotosToken,
+      'POST',
+    )
     expect(verifyFirst.status).toBe(200)
     expect((await verifyFirst.json()).data).toMatchObject({
       report: { id: firstId, verified_by: 'report-admin' },
@@ -351,20 +461,42 @@ describe('Adiwiyata admin reports', () => {
       action: 'verify',
       entity_type: 'adiwiyata_report',
       entity_id: firstId,
-      details: { prior_verified_at: null, prior_verified_by: null, next_verified_by: 'report-admin' },
+      details: {
+        prior_verified_at: null,
+        prior_verified_by: null,
+        next_verified_by: 'report-admin',
+      },
     })
 
     await request(app, `/v1/admin/adiwiyata/reports/${firstId}/verify`, adminToken, 'POST')
     expect(domainStore.auditLogs).toHaveLength(1)
-    const verifySecond = await request(app, `/v1/admin/adiwiyata/reports/${secondId}/verify`, adminToken, 'POST')
+    const verifySecond = await request(
+      app,
+      `/v1/admin/adiwiyata/reports/${secondId}/verify`,
+      adminToken,
+      'POST',
+    )
     expect((await verifySecond.json()).data.coverage_status).toBe('verified')
-    const unverifyFirst = await request(app, `/v1/admin/adiwiyata/reports/${firstId}/unverify`, adminToken, 'POST')
+    const unverifyFirst = await request(
+      app,
+      `/v1/admin/adiwiyata/reports/${firstId}/unverify`,
+      adminToken,
+      'POST',
+    )
     expect((await unverifyFirst.json()).data.coverage_status).toBe('verified')
-    const unverifySecond = await request(app, `/v1/admin/adiwiyata/reports/${secondId}/unverify`, adminToken, 'POST')
+    const unverifySecond = await request(
+      app,
+      `/v1/admin/adiwiyata/reports/${secondId}/unverify`,
+      adminToken,
+      'POST',
+    )
     expect((await unverifySecond.json()).data.coverage_status).toBe('reported')
     await request(app, `/v1/admin/adiwiyata/reports/${secondId}/unverify`, adminToken, 'POST')
     expect(domainStore.auditLogs).toHaveLength(4)
-    expect(domainStore.adiwiyataReports.get(secondId)).toMatchObject({ verified_at: null, verified_by: null })
+    expect(domainStore.adiwiyataReports.get(secondId)).toMatchObject({
+      verified_at: null,
+      verified_by: null,
+    })
   })
 
   it('shares the upload pair lock with verification and closes later uploads', async () => {
@@ -420,18 +552,20 @@ describe('Adiwiyata admin reports', () => {
       created_at: reportAt,
       updated_at: reportAt,
     })
-    await expect(domainStore.submitAdiwiyataReport({
-      reportId: 'e0000000-0000-0000-0000-000000000005',
-      userId: 'report-student-3',
-      siteId,
-      classId,
-      profileName: 'Siswa Tiga',
-      className: 'XII RPL 1',
-      reportDate,
-      createdAt: reportAt,
-      fileId: rejectedFileId,
-      fileSizeBytes: 512,
-    })).rejects.toMatchObject({ httpStatus: 409 })
+    await expect(
+      domainStore.submitAdiwiyataReport({
+        reportId: 'e0000000-0000-0000-0000-000000000005',
+        userId: 'report-student-3',
+        siteId,
+        classId,
+        profileName: 'Siswa Tiga',
+        className: 'XII RPL 1',
+        reportDate,
+        createdAt: reportAt,
+        fileId: rejectedFileId,
+        fileSizeBytes: 512,
+      }),
+    ).rejects.toMatchObject({ httpStatus: 409 })
   })
 
   it('rolls back failed verification audit without deleting a concurrent unrelated audit', async () => {
@@ -441,8 +575,12 @@ describe('Adiwiyata admin reports', () => {
     const originalInsert = domainStore.insertAuditLog.bind(domainStore)
     let markEntered!: () => void
     let unblock!: () => void
-    const entered = new Promise<void>((resolve) => { markEntered = resolve })
-    const gate = new Promise<void>((resolve) => { unblock = resolve })
+    const entered = new Promise<void>((resolve) => {
+      markEntered = resolve
+    })
+    const gate = new Promise<void>((resolve) => {
+      unblock = resolve
+    })
     domainStore.insertAuditLog = async (entry) => {
       if (entry.entity_type === 'adiwiyata_report') {
         markEntered()
@@ -469,7 +607,10 @@ describe('Adiwiyata admin reports', () => {
     })
     unblock()
     await expect(mutation).rejects.toThrow('simulated audit acknowledgment failure')
-    expect(domainStore.adiwiyataReports.get(reportId)).toMatchObject({ verified_at: null, verified_by: null })
+    expect(domainStore.adiwiyataReports.get(reportId)).toMatchObject({
+      verified_at: null,
+      verified_by: null,
+    })
     expect(domainStore.auditLogs).toHaveLength(1)
     expect(domainStore.auditLogs[0]).toMatchObject({
       actor_id: 'other-admin',

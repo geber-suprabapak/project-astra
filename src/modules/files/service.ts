@@ -180,7 +180,11 @@ export async function confirmFileUpload(params: {
 
   let objectStat: { sizeBytes: number; contentType: string } | null
   try {
-    objectStat = await statObject.call(providers.objectStorage, fileRecord.purpose, fileRecord.object_path)
+    objectStat = await statObject.call(
+      providers.objectStorage,
+      fileRecord.purpose,
+      fileRecord.object_path,
+    )
   } catch (err) {
     if (err instanceof AppError) throw err
     throw AppError.dependencyUnavailable('object storage')
@@ -230,7 +234,9 @@ export async function getFile(params: {
       profile.lifecycle_status !== 'approved' ||
       (profile.role !== 'school_admin' && profile.role !== 'platform_admin')
     ) {
-      throw AppError.forbidden('Only approved Astra administrators can view another student’s Adiwiyata report.')
+      throw AppError.forbidden(
+        'Only approved Astra administrators can view another student’s Adiwiyata report.',
+      )
     }
   }
 
@@ -275,7 +281,9 @@ export async function deleteFile(params: {
   }
 
   if (fileRecord.purpose === 'adiwiyata_report') {
-    throw AppError.conflict('Adiwiyata report evidence cannot be deleted through the file endpoint.')
+    throw AppError.conflict(
+      'Adiwiyata report evidence cannot be deleted through the file endpoint.',
+    )
   }
 
   await providers.objectStorage.deleteObject(fileRecord.purpose, fileRecord.object_path)

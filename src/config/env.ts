@@ -20,7 +20,7 @@ export const envSchema = z
     TENANT_NAME: z.string().min(1),
     BUSINESS_TIMEZONE: z.string().min(1).default('Asia/Jakarta'),
 
-    CORS_ALLOWED_ORIGINS: commaSeparated.default(''),
+    CORS_ALLOWED_ORIGINS: commaSeparated.default([]),
 
     DATABASE_URL: z.string().min(1).default('postgresql://postgres:postgres@localhost:5432/astra'),
     DATABASE_MAX_CONNECTIONS: positiveInt.default(10),

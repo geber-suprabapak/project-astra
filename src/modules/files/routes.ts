@@ -26,7 +26,7 @@ export function createFilesRouter(deps: FilesRouterDeps = {}) {
     const body = await c.req.json().catch(() => null)
     const parsed = RequestUploadIntentSchema.safeParse(body)
     if (!parsed.success) {
-      throw AppError.validationError(parsed.error.errors.map((e) => e.message).join('; '))
+      throw AppError.validationError(parsed.error.issues.map((e) => e.message).join('; '))
     }
 
     const intent = await createUploadIntent({

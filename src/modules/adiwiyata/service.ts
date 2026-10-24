@@ -19,11 +19,7 @@ import type {
 import { getAdiwiyataReportUrl } from '../files/service.js'
 import { getDayKeyWIB, getTodayWIB } from '../dashboard/service.js'
 import { hasScope, logtoScopes } from '../../authz/scopes.js'
-import {
-  createWatermarkedJpeg,
-  decodeAdiwiyataImage,
-  MAX_ADIWIYATA_OUTPUT_BYTES,
-} from './image.js'
+import { createWatermarkedJpeg, decodeAdiwiyataImage, MAX_ADIWIYATA_OUTPUT_BYTES } from './image.js'
 
 export interface AdiwiyataDashboard {
   date: string
@@ -57,9 +53,10 @@ function notEligible(message: string): AppError {
 }
 
 function configurationError(item: string, message: string, count?: number): AppError {
-  const details = count === undefined
-    ? { configuration_item: item }
-    : { configuration_item: item, matching_rows: count }
+  const details =
+    count === undefined
+      ? { configuration_item: item }
+      : { configuration_item: item, matching_rows: count }
   return new AppError(ErrorCode.ADIWIYATA_CONFIGURATION_ERROR, 503, message, details)
 }
 
@@ -71,27 +68,46 @@ function schoolDayForClass(
   now: Date,
 ): AdiwiyataDashboard['school_day'] {
   const date = getTodayWIB(now)
-  const periodSchedules = schedules.filter(schedule =>
-    schedule.school_id === period.school_id && schedule.academic_period_id === period.id && schedule.is_active,
+  const periodSchedules = schedules.filter(
+    (schedule) =>
+      schedule.school_id === period.school_id &&
+      schedule.academic_period_id === period.id &&
+      schedule.is_active,
   )
   if (periodSchedules.length === 0) {
-    throw configurationError('schedule', 'Belum ada jadwal aktif Astra untuk sekolah dan Periode Akademik ini. Admin sekolah perlu memeriksa konfigurasi jadwal.', 0)
+    throw configurationError(
+      'schedule',
+      'Belum ada jadwal aktif Astra untuk sekolah dan Periode Akademik ini. Admin sekolah perlu memeriksa konfigurasi jadwal.',
+      0,
+    )
   }
-  const holiday = exceptions.find(exception =>
-    exception.date === date && exception.is_holiday &&
-    (exception.academic_period_id == null || exception.academic_period_id === period.id) &&
-    (exception.school_id == null || exception.school_id === period.school_id),
+  const holiday = exceptions.find(
+    (exception) =>
+      exception.date === date &&
+      exception.is_holiday &&
+      (exception.academic_period_id == null || exception.academic_period_id === period.id) &&
+      (exception.school_id == null || exception.school_id === period.school_id),
   )
   if (holiday) return { is_school_day: false, status: 'holiday', reason: holiday.reason }
-  const daySchedules = periodSchedules.filter(schedule =>
-    (schedule.day_of_week ?? schedule.hari)?.toLowerCase() === getDayKeyWIB(now),
+  const daySchedules = periodSchedules.filter(
+    (schedule) => (schedule.day_of_week ?? schedule.hari)?.toLowerCase() === getDayKeyWIB(now),
   )
-  const classSchedules = daySchedules.filter(schedule => schedule.class_id === classId)
-  const matching = classSchedules.length ? classSchedules : daySchedules.filter(schedule => schedule.class_id === null)
+  const classSchedules = daySchedules.filter((schedule) => schedule.class_id === classId)
+  const matching = classSchedules.length
+    ? classSchedules
+    : daySchedules.filter((schedule) => schedule.class_id === null)
   if (matching.length > 1) {
-    throw configurationError('schedule', 'Astra memiliki beberapa jadwal aktif pada tingkat kelas yang berlaku untuk hari ini. Admin sekolah perlu memeriksa konfigurasi jadwal.', matching.length)
+    throw configurationError(
+      'schedule',
+      'Astra memiliki beberapa jadwal aktif pada tingkat kelas yang berlaku untuk hari ini. Admin sekolah perlu memeriksa konfigurasi jadwal.',
+      matching.length,
+    )
   }
-  return { is_school_day: matching.length === 1, status: matching.length === 1 ? 'scheduled' : 'not_scheduled', reason: null }
+  return {
+    is_school_day: matching.length === 1,
+    status: matching.length === 1 ? 'scheduled' : 'not_scheduled',
+    reason: null,
+  }
 }
 
 export async function getAdiwiyataDashboard(
@@ -188,37 +204,43 @@ export async function getAdiwiyataDashboard(
     academic_period: { id: period.id, name: period.name },
     class: { id: currentClass.id, name: currentClass.name },
     school_day: schoolDay,
-    sites: await Promise.all(visibleSites.map(async ({ id, name, category, class_id, sort_order }) => {
-      const reports = reportsBySite.get(id) ?? []
-      const own = ownBySite.get(id) ?? null
-      const file = own ? await store.getFileRecord(own.file_id) : null
-      return {
-        id,
-        name,
-        category,
-        class_id,
-        sort_order,
-        coverage_status: !schoolDay.is_school_day
-          ? 'not_scheduled' as const
-          : reports.some((report) => report.verified_at !== null)
-            ? 'verified' as const
-            : reports.length > 0
-              ? 'reported' as const
-              : 'missing' as const,
-        own_report: own
-          ? {
-              id: own.id,
-              file_id: own.file_id,
-              report_date: own.report_date,
-              created_at: own.created_at,
-              file_created_at: file?.created_at ?? null,
-              photo_url: file ? await getAdiwiyataReportUrl(file, providers, now.getTime()) : null,
-            }
-          : null,
-        can_report: schoolDay.is_school_day && own === null &&
-          !reports.some((report) => report.verified_at !== null),
-      }
-    })),
+    sites: await Promise.all(
+      visibleSites.map(async ({ id, name, category, class_id, sort_order }) => {
+        const reports = reportsBySite.get(id) ?? []
+        const own = ownBySite.get(id) ?? null
+        const file = own ? await store.getFileRecord(own.file_id) : null
+        return {
+          id,
+          name,
+          category,
+          class_id,
+          sort_order,
+          coverage_status: !schoolDay.is_school_day
+            ? ('not_scheduled' as const)
+            : reports.some((report) => report.verified_at !== null)
+              ? ('verified' as const)
+              : reports.length > 0
+                ? ('reported' as const)
+                : ('missing' as const),
+          own_report: own
+            ? {
+                id: own.id,
+                file_id: own.file_id,
+                report_date: own.report_date,
+                created_at: own.created_at,
+                file_created_at: file?.created_at ?? null,
+                photo_url: file
+                  ? await getAdiwiyataReportUrl(file, providers, now.getTime())
+                  : null,
+              }
+            : null,
+          can_report:
+            schoolDay.is_school_day &&
+            own === null &&
+            !reports.some((report) => report.verified_at !== null),
+        }
+      }),
+    ),
   }
 }
 
@@ -254,7 +276,10 @@ export async function submitAdiwiyataStudentReport(params: {
   }
   const fullName = dashboard.student.full_name?.trim()
   if (!fullName) {
-    throw configurationError('profile_name', 'Profil Siswa yang disetujui harus memiliki nama sebelum mengirim laporan.')
+    throw configurationError(
+      'profile_name',
+      'Profil Siswa yang disetujui harus memiliki nama sebelum mengirim laporan.',
+    )
   }
 
   const jpeg = await createWatermarkedJpeg({
@@ -298,17 +323,21 @@ export async function submitAdiwiyataStudentReport(params: {
   } catch (error) {
     if (commitStarted) {
       try {
-        report = (await params.providers.domainStore.listAdiwiyataReports({
-          siteId: params.siteId,
-          reportedBy: params.userId,
-          reportDate: dashboard.date,
-        })).find((candidate) => candidate.file_id === file.id) ?? null
+        report =
+          (
+            await params.providers.domainStore.listAdiwiyataReports({
+              siteId: params.siteId,
+              reportedBy: params.userId,
+              reportDate: dashboard.date,
+            })
+          ).find((candidate) => candidate.file_id === file.id) ?? null
       } catch {
         throw AppError.internal(
           'Laporan mungkin sudah tersimpan. Muat ulang dashboard sebelum mencoba kembali.',
         )
       }
-      const knownRejection = error instanceof AppError &&
+      const knownRejection =
+        error instanceof AppError &&
         (error.httpStatus < 500 || error.code === ErrorCode.ADIWIYATA_CONFIGURATION_ERROR)
       if (!report && !knownRejection) {
         throw AppError.internal(
@@ -382,7 +411,9 @@ async function validateSiteClass(
     classroom.academic_period_id !== period.id
   ) {
     throw AppError.validationError({
-      fieldErrors: { class_id: ['Kelas harus berasal dari Periode Akademik aktif dan sekolah yang sama.'] },
+      fieldErrors: {
+        class_id: ['Kelas harus berasal dari Periode Akademik aktif dan sekolah yang sama.'],
+      },
     })
   }
 }
@@ -393,7 +424,9 @@ export async function listAdiwiyataAdminSites(params: {
 }): Promise<AdiwiyataAdminSites> {
   requireAdiwiyataAdmin(params.actorRole)
   const period = await getActiveSitePeriod(params.providers)
-  const sites = await params.providers.domainStore.listAdiwiyataSites({ schoolId: period.school_id })
+  const sites = await params.providers.domainStore.listAdiwiyataSites({
+    schoolId: period.school_id,
+  })
   return {
     academic_period: { id: period.id, name: period.name, school_id: period.school_id },
     sites: sites.sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name)),
@@ -434,16 +467,12 @@ export async function updateAdiwiyataAdminSite(params: {
   requireAdiwiyataAdmin(params.actorRole)
   const period = await getActiveSitePeriod(params.providers)
   await validateSiteClass(params.providers, period, params.classId)
-  const site = await params.providers.domainStore.updateAdiwiyataSite(
-    params.id,
-    period.school_id,
-    {
-      name: params.name,
-      category: params.category,
-      classId: params.classId,
-      sortOrder: params.sortOrder,
-    },
-  )
+  const site = await params.providers.domainStore.updateAdiwiyataSite(params.id, period.school_id, {
+    name: params.name,
+    category: params.category,
+    classId: params.classId,
+    sortOrder: params.sortOrder,
+  })
   if (!site) throw AppError.notFound('Adiwiyata Site')
   return site
 }
@@ -455,11 +484,9 @@ export async function deactivateAdiwiyataAdminSite(params: {
 }): Promise<AdiwiyataSite> {
   requireAdiwiyataAdmin(params.actorRole)
   const period = await getActiveSitePeriod(params.providers)
-  const site = await params.providers.domainStore.updateAdiwiyataSite(
-    params.id,
-    period.school_id,
-    { isActive: false },
-  )
+  const site = await params.providers.domainStore.updateAdiwiyataSite(params.id, period.school_id, {
+    isActive: false,
+  })
   if (!site) throw AppError.notFound('Adiwiyata Site')
   return site
 }
@@ -585,28 +612,33 @@ export async function listAdiwiyataAdminEligibility(params: {
     }
   }
 
-  const grantViews = await Promise.all(grants.map(async (grant) => {
-    const view = await buildView(grant.user_id, grouped.get(grant.user_id) ?? [], grant)
-    return {
-      full_name: view.full_name,
-      email: view.email,
-      nis: view.nis,
-      role: view.role,
-      lifecycle_status: view.lifecycle_status,
-      current_class: view.current_class,
-      can_grant: view.can_grant,
-      reason: view.reason,
-      ...grant,
-    }
-  }))
+  const grantViews = await Promise.all(
+    grants.map(async (grant) => {
+      const view = await buildView(grant.user_id, grouped.get(grant.user_id) ?? [], grant)
+      return {
+        full_name: view.full_name,
+        email: view.email,
+        nis: view.nis,
+        role: view.role,
+        lifecycle_status: view.lifecycle_status,
+        current_class: view.current_class,
+        can_grant: view.can_grant,
+        reason: view.reason,
+        ...grant,
+      }
+    }),
+  )
   const query = params.query?.trim().toLocaleLowerCase() ?? ''
   const students = query
     ? await Promise.all(
         [...grouped.entries()]
-          .filter(([, rows]) => rows.some((row) =>
-            [row.full_name, row.email, row.nis, row.user_id]
-              .some((value) => value?.toLocaleLowerCase().includes(query)),
-          ))
+          .filter(([, rows]) =>
+            rows.some((row) =>
+              [row.full_name, row.email, row.nis, row.user_id].some((value) =>
+                value?.toLocaleLowerCase().includes(query),
+              ),
+            ),
+          )
           .map(([userId, rows]) => buildView(userId, rows, grantByUser.get(userId) ?? null)),
       )
     : []
@@ -616,8 +648,9 @@ export async function listAdiwiyataAdminEligibility(params: {
       ? { id: period.id, name: period.name, school_id: period.school_id }
       : null,
     period_warning: period ? null : eligibilityPeriodWarning(periods.length),
-    students: students.sort((a, b) =>
-      (a.full_name ?? '').localeCompare(b.full_name ?? '') || a.user_id.localeCompare(b.user_id),
+    students: students.sort(
+      (a, b) =>
+        (a.full_name ?? '').localeCompare(b.full_name ?? '') || a.user_id.localeCompare(b.user_id),
     ),
     eligibility: grantViews,
   }
@@ -633,10 +666,16 @@ export async function grantAdiwiyataEligibility(params: {
   const store = params.providers.domainStore
   const profile = await store.getUserProfile(params.userId)
   if (profile.role !== 'student') {
-    throw AppError.validationError({ fieldErrors: { user_id: ['Akses hanya dapat diberikan kepada profil Siswa Astra.'] } })
+    throw AppError.validationError({
+      fieldErrors: { user_id: ['Akses hanya dapat diberikan kepada profil Siswa Astra.'] },
+    })
   }
   if (profile.lifecycle_status !== 'approved') {
-    throw AppError.validationError({ fieldErrors: { user_id: ['Profil Siswa Astra harus berstatus approved sebelum diberi akses.'] } })
+    throw AppError.validationError({
+      fieldErrors: {
+        user_id: ['Profil Siswa Astra harus berstatus approved sebelum diberi akses.'],
+      },
+    })
   }
 
   const periods = await store.listAcademicPeriods({ isActive: true })
@@ -654,7 +693,11 @@ export async function grantAdiwiyataEligibility(params: {
     status: 'active',
   })
   if (enrollments.length === 0) {
-    throw AppError.validationError({ fieldErrors: { user_id: ['Siswa belum memiliki enrollment aktif pada Periode Akademik saat ini.'] } })
+    throw AppError.validationError({
+      fieldErrors: {
+        user_id: ['Siswa belum memiliki enrollment aktif pada Periode Akademik saat ini.'],
+      },
+    })
   }
   if (enrollments.length !== 1) {
     throw configurationError(
@@ -684,7 +727,10 @@ export async function revokeAdiwiyataEligibility(params: {
   providers: AppProviders
 }): Promise<AdiwiyataEligibility> {
   requireAdiwiyataAdmin(params.actorRole)
-  const eligibility = await params.providers.domainStore.setAdiwiyataEligibilityActive(params.id, false)
+  const eligibility = await params.providers.domainStore.setAdiwiyataEligibilityActive(
+    params.id,
+    false,
+  )
   if (!eligibility) throw AppError.notFound('Adiwiyata eligibility')
   return eligibility
 }
@@ -754,9 +800,14 @@ export async function listAdiwiyataAdminReports(params: {
   for (const report of allReports) {
     const key = `${report.class_id}:${report.site_id}`
     const pair = pairs.get(key) ?? {
-      class_id: report.class_id, class_name: report.class_name,
-      site_id: report.site_id, site_name: report.site_name, category: report.category,
-      coverage_status: 'reported', photo_count: 0, reason: null,
+      class_id: report.class_id,
+      class_name: report.class_name,
+      site_id: report.site_id,
+      site_name: report.site_name,
+      category: report.category,
+      coverage_status: 'reported',
+      photo_count: 0,
+      reason: null,
     }
     pair.photo_count++
     if (report.verified_at !== null) pair.coverage_status = 'verified'
@@ -772,36 +823,60 @@ export async function listAdiwiyataAdminReports(params: {
     const classes = new Map<string, { id: string; name: string }>()
     for (const student of access.eligibility) {
       if (!student.is_active) continue
-      if (student.reason === 'ambiguous_active_enrollment' || student.reason === 'class_not_in_current_period') {
-        throw configurationError('class_enrollment', 'Enrollment siswa dengan akses Adiwiyata perlu diperbaiki sebelum cakupan harian dapat dihitung.')
+      if (
+        student.reason === 'ambiguous_active_enrollment' ||
+        student.reason === 'class_not_in_current_period'
+      ) {
+        throw configurationError(
+          'class_enrollment',
+          'Enrollment siswa dengan akses Adiwiyata perlu diperbaiki sebelum cakupan harian dapat dihitung.',
+        )
       }
-      if (student.can_grant && student.current_class) classes.set(student.current_class.id, student.current_class)
+      if (student.can_grant && student.current_class)
+        classes.set(student.current_class.id, student.current_class)
     }
     for (const classroom of classes.values()) {
-      const schoolDay = schoolDayForClass(period, classroom.id, schedules, exceptions, params.now ?? new Date())
+      const schoolDay = schoolDayForClass(
+        period,
+        classroom.id,
+        schedules,
+        exceptions,
+        params.now ?? new Date(),
+      )
       for (const site of sites) {
         if (site.class_id !== null && site.class_id !== classroom.id) continue
         const key = `${classroom.id}:${site.id}`
         const existing = pairs.get(key)
         pairs.set(key, {
-          class_id: classroom.id, class_name: classroom.name,
-          site_id: site.id, site_name: site.name, category: site.category,
-          coverage_status: !schoolDay.is_school_day ? 'not_scheduled' : existing?.coverage_status ?? 'missing',
+          class_id: classroom.id,
+          class_name: classroom.name,
+          site_id: site.id,
+          site_name: site.name,
+          category: site.category,
+          coverage_status: !schoolDay.is_school_day
+            ? 'not_scheduled'
+            : (existing?.coverage_status ?? 'missing'),
           photo_count: existing?.photo_count ?? 0,
           reason: schoolDay.reason,
         })
       }
     }
   }
-  const allCoverage = [...pairs.values()].sort((a, b) =>
-    a.class_name.localeCompare(b.class_name, 'id') || a.site_name.localeCompare(b.site_name, 'id'),
+  const allCoverage = [...pairs.values()].sort(
+    (a, b) =>
+      a.class_name.localeCompare(b.class_name, 'id') ||
+      a.site_name.localeCompare(b.site_name, 'id'),
   )
   const filter = (row: { class_id: string; site_id: string }) =>
-    (!params.classId || row.class_id === params.classId) && (!params.siteId || row.site_id === params.siteId)
+    (!params.classId || row.class_id === params.classId) &&
+    (!params.siteId || row.site_id === params.siteId)
   const reports = allReports.filter(filter)
-  const classes = new Map(allCoverage.map(pair => [pair.class_id, pair.class_name]))
-  const sites = new Map(allCoverage.map(pair => [pair.site_id, pair.site_name]))
-  const choices = (names: Map<string, string>) => [...names].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'id'))
+  const classes = new Map(allCoverage.map((pair) => [pair.class_id, pair.class_name]))
+  const sites = new Map(allCoverage.map((pair) => [pair.site_id, pair.site_name]))
+  const choices = (names: Map<string, string>) =>
+    [...names]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'id'))
 
   return {
     date,
@@ -810,31 +885,47 @@ export async function listAdiwiyataAdminReports(params: {
     can_view_photos: canViewPhotos,
     coverage: allCoverage.filter(filter),
     filter_options: { classes: choices(classes), sites: choices(sites) },
-    reports: await Promise.all(reports.map(async (report) => ({
-      id: report.id,
-      site_id: report.site_id,
-      site_name: report.site_name,
-      category: report.category,
-      class_id: report.class_id,
-      class_name: report.class_name,
-      reported_by: report.reported_by,
-      uploader_name: report.uploader_name,
-      file_id: report.file_id,
-      file_created_at: report.photo_file?.created_at ?? null,
-      report_date: report.report_date,
-      created_at: report.created_at,
-      verified_at: report.verified_at,
-      verified_by: report.verified_by,
-      photo_url: canViewPhotos && report.photo_file
-        ? await getAdiwiyataReportUrl(report.photo_file, params.providers, params.now?.getTime())
-        : null,
-    }))),
+    reports: await Promise.all(
+      reports.map(async (report) => ({
+        id: report.id,
+        site_id: report.site_id,
+        site_name: report.site_name,
+        category: report.category,
+        class_id: report.class_id,
+        class_name: report.class_name,
+        reported_by: report.reported_by,
+        uploader_name: report.uploader_name,
+        file_id: report.file_id,
+        file_created_at: report.photo_file?.created_at ?? null,
+        report_date: report.report_date,
+        created_at: report.created_at,
+        verified_at: report.verified_at,
+        verified_by: report.verified_by,
+        photo_url:
+          canViewPhotos && report.photo_file
+            ? await getAdiwiyataReportUrl(
+                report.photo_file,
+                params.providers,
+                params.now?.getTime(),
+              )
+            : null,
+      })),
+    ),
   }
 }
 
 export interface AdiwiyataAdminReportMutation {
-  report: Pick<AdiwiyataReport,
-    'id' | 'site_id' | 'class_id' | 'file_id' | 'report_date' | 'created_at' | 'verified_at' | 'verified_by'>
+  report: Pick<
+    AdiwiyataReport,
+    | 'id'
+    | 'site_id'
+    | 'class_id'
+    | 'file_id'
+    | 'report_date'
+    | 'created_at'
+    | 'verified_at'
+    | 'verified_by'
+  >
   coverage_status: 'reported' | 'verified'
 }
 

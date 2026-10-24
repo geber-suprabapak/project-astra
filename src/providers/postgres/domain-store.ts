@@ -401,17 +401,20 @@ export class PostgresDomainStore implements DomainStore {
         category: row.category,
         class_name: row.class_name,
         uploader_name: row.uploader_name,
-        photo_file: row.file_user_id === null ? null : {
-          id: row.file_id,
-          user_id: row.file_user_id,
-          purpose: row.file_purpose!,
-          object_path: row.file_object_path!,
-          content_type: row.file_content_type!,
-          size_bytes: row.file_size_bytes,
-          lifecycle: row.file_lifecycle!,
-          created_at: row.file_created_at ?? undefined,
-          updated_at: row.file_updated_at ?? undefined,
-        },
+        photo_file:
+          row.file_user_id === null
+            ? null
+            : {
+                id: row.file_id,
+                user_id: row.file_user_id,
+                purpose: row.file_purpose!,
+                object_path: row.file_object_path!,
+                content_type: row.file_content_type!,
+                size_bytes: row.file_size_bytes,
+                lifecycle: row.file_lifecycle!,
+                created_at: row.file_created_at ?? undefined,
+                updated_at: row.file_updated_at ?? undefined,
+              },
       }))
     } catch (err) {
       if (err instanceof AppError) throw err
@@ -425,8 +428,9 @@ export class PostgresDomainStore implements DomainStore {
   ): Promise<AdiwiyataReportVerificationResult | null> {
     try {
       return await this.sql.begin(async (sql) => {
-        const findReport = async (forUpdate: boolean) => forUpdate
-          ? sql<AdiwiyataReportVerificationDbRow[]>`
+        const findReport = async (forUpdate: boolean) =>
+          forUpdate
+            ? sql<AdiwiyataReportVerificationDbRow[]>`
               SELECT r.id, r.site_id, r.class_id, r.reported_by, r.file_id, r.report_date::text,
                      r.created_at::text, r.verified_at::text, r.verified_by, s.school_id
               FROM adiwiyata_reports r
@@ -435,7 +439,7 @@ export class PostgresDomainStore implements DomainStore {
               WHERE r.id = ${params.reportId}::uuid AND s.school_id = ${params.schoolId}::uuid
               FOR UPDATE OF r
             `
-          : sql<AdiwiyataReportVerificationDbRow[]>`
+            : sql<AdiwiyataReportVerificationDbRow[]>`
               SELECT r.id, r.site_id, r.class_id, r.reported_by, r.file_id, r.report_date::text,
                      r.created_at::text, r.verified_at::text, r.verified_by, s.school_id
               FROM adiwiyata_reports r
@@ -447,13 +451,19 @@ export class PostgresDomainStore implements DomainStore {
         const initial = initialRows[0]
         if (!initial) return null
 
-        const lockName = adiwiyataReportLockName(initial.class_id, initial.site_id, initial.report_date)
+        const lockName = adiwiyataReportLockName(
+          initial.class_id,
+          initial.site_id,
+          initial.report_date,
+        )
         await sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockName}, 0))`
         const currentRows = await findReport(true)
         const current = currentRows[0]
         if (!current) return null
 
-        const alreadySet = params.verified ? current.verified_at !== null : current.verified_at === null
+        const alreadySet = params.verified
+          ? current.verified_at !== null
+          : current.verified_at === null
         if (!alreadySet) {
           const verifiedAt = params.verified ? params.at : null
           const verifiedBy = params.verified ? params.actorId : null
@@ -486,7 +496,8 @@ export class PostgresDomainStore implements DomainStore {
             )
             RETURNING id
           `
-          if (!auditRows[0]) throw AppError.internal('Failed to record Adiwiyata verification audit.')
+          if (!auditRows[0])
+            throw AppError.internal('Failed to record Adiwiyata verification audit.')
         }
 
         const coverageRows = await sql<{ has_verified: boolean }[]>`
@@ -525,30 +536,46 @@ export class PostgresDomainStore implements DomainStore {
         const lockName = adiwiyataReportLockName(params.classId, params.siteId, params.reportDate)
         await sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockName}, 0))`
 
-        const profile = await sql<{ full_name: string | null; role: string; lifecycle_status: string }[]>`
+        const profile = await sql<
+          { full_name: string | null; role: string; lifecycle_status: string }[]
+        >`
           SELECT full_name, role, lifecycle_status
           FROM profiles
           WHERE user_id = ${params.userId}
           LIMIT 1
         `
         if (profile[0]?.role !== 'student' || profile[0].lifecycle_status !== 'approved') {
-          throw new AppError(ErrorCode.ADIWIYATA_NOT_ELIGIBLE, 403, 'Akun Siswa tidak lagi memenuhi syarat Adiwiyata.')
+          throw new AppError(
+            ErrorCode.ADIWIYATA_NOT_ELIGIBLE,
+            403,
+            'Akun Siswa tidak lagi memenuhi syarat Adiwiyata.',
+          )
         }
         const eligibility = await sql<{ is_active: boolean }[]>`
           SELECT is_active FROM adiwiyata_eligibility WHERE user_id = ${params.userId} LIMIT 1
         `
         if (!eligibility[0]?.is_active) {
-          throw new AppError(ErrorCode.ADIWIYATA_NOT_ELIGIBLE, 403, 'Akses Adiwiyata tidak lagi aktif.')
+          throw new AppError(
+            ErrorCode.ADIWIYATA_NOT_ELIGIBLE,
+            403,
+            'Akses Adiwiyata tidak lagi aktif.',
+          )
         }
 
         const periods = await sql<{ id: string; school_id: string }[]>`
           SELECT id, school_id FROM academic_periods WHERE is_active = TRUE ORDER BY id
         `
         if (periods.length !== 1) {
-          throw new AppError(ErrorCode.ADIWIYATA_CONFIGURATION_ERROR, 503, 'Astra harus memiliki tepat satu Periode Akademik aktif.')
+          throw new AppError(
+            ErrorCode.ADIWIYATA_CONFIGURATION_ERROR,
+            503,
+            'Astra harus memiliki tepat satu Periode Akademik aktif.',
+          )
         }
         const period = periods[0]!
-        const enrollments = await sql<{ class_id: string; class_name: string; school_id: string; academic_period_id: string }[]>`
+        const enrollments = await sql<
+          { class_id: string; class_name: string; school_id: string; academic_period_id: string }[]
+        >`
           SELECT c.id AS class_id, c.name AS class_name, c.school_id, c.academic_period_id
           FROM class_enrollments ce
           JOIN classes c ON c.id = ce.class_id
@@ -558,14 +585,20 @@ export class PostgresDomainStore implements DomainStore {
           FOR UPDATE OF ce
         `
         if (enrollments.length !== 1 || enrollments[0]!.class_id !== params.classId) {
-          throw AppError.conflict('Enrollment Siswa berubah. Muat ulang dashboard sebelum mengirim foto.')
+          throw AppError.conflict(
+            'Enrollment Siswa berubah. Muat ulang dashboard sebelum mengirim foto.',
+          )
         }
         const enrollment = enrollments[0]!
         if (
-          enrollment.school_id !== period.school_id || enrollment.academic_period_id !== period.id ||
-          enrollment.class_name !== params.className || profile[0].full_name?.trim() !== params.profileName
+          enrollment.school_id !== period.school_id ||
+          enrollment.academic_period_id !== period.id ||
+          enrollment.class_name !== params.className ||
+          profile[0].full_name?.trim() !== params.profileName
         ) {
-          throw AppError.conflict('Profil atau kelas berubah. Muat ulang dashboard sebelum mengirim foto.')
+          throw AppError.conflict(
+            'Profil atau kelas berubah. Muat ulang dashboard sebelum mengirim foto.',
+          )
         }
 
         const sites = await sql<{ id: string }[]>`
@@ -597,14 +630,23 @@ export class PostgresDomainStore implements DomainStore {
             AND is_active = TRUE
         `
         if (Number(scheduleCount[0]?.count ?? 0) === 0) {
-          throw new AppError(ErrorCode.ADIWIYATA_CONFIGURATION_ERROR, 503, 'Belum ada jadwal aktif untuk sekolah dan Periode Akademik ini.')
+          throw new AppError(
+            ErrorCode.ADIWIYATA_CONFIGURATION_ERROR,
+            503,
+            'Belum ada jadwal aktif untuk sekolah dan Periode Akademik ini.',
+          )
         }
         const classSchedules = schedules.filter((schedule) => schedule.class_id === params.classId)
-        const applicableSchedules = classSchedules.length > 0
-          ? classSchedules
-          : schedules.filter((schedule) => schedule.class_id === null)
+        const applicableSchedules =
+          classSchedules.length > 0
+            ? classSchedules
+            : schedules.filter((schedule) => schedule.class_id === null)
         if (applicableSchedules.length > 1) {
-          throw new AppError(ErrorCode.ADIWIYATA_CONFIGURATION_ERROR, 503, 'Ada beberapa jadwal aktif pada tingkat kelas yang berlaku untuk hari ini.')
+          throw new AppError(
+            ErrorCode.ADIWIYATA_CONFIGURATION_ERROR,
+            503,
+            'Ada beberapa jadwal aktif pada tingkat kelas yang berlaku untuk hari ini.',
+          )
         }
         const holidays = await sql<{ id: string }[]>`
           SELECT id
@@ -627,7 +669,9 @@ export class PostgresDomainStore implements DomainStore {
           LIMIT 1
         `
         if (duplicate[0]) {
-          throw AppError.conflict('Siswa sudah mengirim laporan untuk Site ini pada tanggal WIB tersebut.')
+          throw AppError.conflict(
+            'Siswa sudah mengirim laporan untuk Site ini pada tanggal WIB tersebut.',
+          )
         }
         const verified = await sql<{ id: string }[]>`
           SELECT id FROM adiwiyata_reports
@@ -668,15 +712,21 @@ export class PostgresDomainStore implements DomainStore {
           WHERE id = ${params.fileId}::uuid AND lifecycle = 'pending_upload'
           RETURNING id
         `
-        if (!updatedFile[0]) throw AppError.internal('Failed to activate Adiwiyata report file metadata.')
+        if (!updatedFile[0])
+          throw AppError.internal('Failed to activate Adiwiyata report file metadata.')
         return reports[0]
       })
     } catch (err) {
       if (err instanceof AppError) throw err
       if (z.object({ code: z.literal('23505') }).safeParse(err).success) {
-        throw AppError.conflict('Siswa sudah mengirim laporan untuk Site ini pada tanggal WIB tersebut.')
+        throw AppError.conflict(
+          'Siswa sudah mengirim laporan untuk Site ini pada tanggal WIB tersebut.',
+        )
       }
-      logger.error({ err, userId: params.userId, siteId: params.siteId }, 'Failed to submit Adiwiyata report')
+      logger.error(
+        { err, userId: params.userId, siteId: params.siteId },
+        'Failed to submit Adiwiyata report',
+      )
       throw AppError.internal('An unexpected database error occurred.')
     }
   }

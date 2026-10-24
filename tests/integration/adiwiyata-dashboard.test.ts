@@ -170,7 +170,9 @@ async function dashboard(app: ReturnType<typeof createApp>) {
 async function reportImage(): Promise<Buffer> {
   return sharp({
     create: { width: 1, height: 1, channels: 3, background: '#29415d' },
-  }).png().toBuffer()
+  })
+    .png()
+    .toBuffer()
 }
 
 async function submitReport(
@@ -484,7 +486,10 @@ describe('POST /v1/adiwiyata/reports', () => {
 
     const mismatchForm = new FormData()
     mismatchForm.append('site_id', fixtureUuidSiteId)
-    mismatchForm.append('image', new File([await reportImage()], 'garden.jpg', { type: 'image/jpeg' }))
+    mismatchForm.append(
+      'image',
+      new File([await reportImage()], 'garden.jpg', { type: 'image/jpeg' }),
+    )
     const mismatch = await app.request('/v1/adiwiyata/reports', {
       method: 'POST',
       headers: { Authorization: `Bearer ${userId}` },
@@ -524,7 +529,11 @@ describe('POST /v1/adiwiyata/reports', () => {
     })
     expect(body.data.report).not.toHaveProperty('reported_by')
     const file = await domainStore.getFileRecord(body.data.report.file_id)
-    expect(file).toMatchObject({ purpose: 'adiwiyata_report', lifecycle: 'available', content_type: 'image/jpeg' })
+    expect(file).toMatchObject({
+      purpose: 'adiwiyata_report',
+      lifecycle: 'available',
+      content_type: 'image/jpeg',
+    })
     const stored = objectStorage.objects.get(file!.object_path)
     expect(stored?.contentType).toBe('image/jpeg')
     const metadata = await sharp(stored!.buffer).metadata()
@@ -538,11 +547,13 @@ describe('POST /v1/adiwiyata/reports', () => {
     const responses = await Promise.all([submitReport(app), submitReport(app)])
 
     expect(responses.map((response) => response.status).sort()).toEqual([201, 409])
-    expect(await domainStore.listAdiwiyataReports({
-      reportedBy: userId,
-      siteId: fixtureUuidSiteId,
-      reportDate: '2026-09-29',
-    })).toHaveLength(1)
+    expect(
+      await domainStore.listAdiwiyataReports({
+        reportedBy: userId,
+        siteId: fixtureUuidSiteId,
+        reportDate: '2026-09-29',
+      }),
+    ).toHaveLength(1)
     const files = await domainStore.listFiles({ purpose: 'adiwiyata_report' })
     expect(files.filter((file) => file.lifecycle === 'available')).toHaveLength(1)
     expect(files.filter((file) => file.lifecycle === 'deleted')).toHaveLength(1)
@@ -577,14 +588,22 @@ describe('POST /v1/adiwiyata/reports', () => {
     ])
 
     expect(responses.map((response) => response.status)).toEqual([201, 201])
-    expect(await domainStore.listAdiwiyataReports({ siteId: fixtureUuidSiteId, reportDate: '2026-09-29' })).toHaveLength(2)
+    expect(
+      await domainStore.listAdiwiyataReports({
+        siteId: fixtureUuidSiteId,
+        reportDate: '2026-09-29',
+      }),
+    ).toHaveLength(2)
     const classmateDashboard = await app.request('/v1/adiwiyata/dashboard', {
       headers: { Authorization: `Bearer ${classmateId}` },
     })
     const site = (await classmateDashboard.json()).data.sites.find(
       (item: { id: string }) => item.id === fixtureUuidSiteId,
     )
-    expect(site).toMatchObject({ coverage_status: 'reported', own_report: { file_id: expect.any(String) } })
+    expect(site).toMatchObject({
+      coverage_status: 'reported',
+      own_report: { file_id: expect.any(String) },
+    })
     const otherStudentDashboard = await app.request('/v1/adiwiyata/dashboard', {
       headers: { Authorization: `Bearer ${userId}` },
     })
@@ -602,23 +621,32 @@ describe('POST /v1/adiwiyata/reports', () => {
     const { app, domainStore } = createEnvironment()
     const uploaded = await submitReport(app)
     expect(uploaded.status).toBe(201)
-    domainStore.classEnrollments = [{
-      id: 'enrollment-transferred',
-      user_id: userId,
-      class_id: otherClassId,
-      academic_period_id: periodId,
-      status: 'active',
-    }]
-    domainStore.schedules.set('other-class-tuesday', makeSchedule({
-      id: 'other-class-tuesday',
-      class_id: otherClassId,
-    }))
+    domainStore.classEnrollments = [
+      {
+        id: 'enrollment-transferred',
+        user_id: userId,
+        class_id: otherClassId,
+        academic_period_id: periodId,
+        status: 'active',
+      },
+    ]
+    domainStore.schedules.set(
+      'other-class-tuesday',
+      makeSchedule({
+        id: 'other-class-tuesday',
+        class_id: otherClassId,
+      }),
+    )
 
     const currentDashboard = await dashboard(app)
     const site = (await currentDashboard.json()).data.sites.find(
       (item: { id: string }) => item.id === fixtureUuidSiteId,
     )
-    expect(site).toMatchObject({ coverage_status: 'missing', own_report: { file_id: expect.any(String) }, can_report: false })
+    expect(site).toMatchObject({
+      coverage_status: 'missing',
+      own_report: { file_id: expect.any(String) },
+      can_report: false,
+    })
     const retry = await submitReport(app)
     expect(retry.status).toBe(409)
   })
@@ -668,7 +696,9 @@ describe('POST /v1/adiwiyata/reports', () => {
     const response = await submitReport(app)
 
     expect(response.status).toBe(201)
-    expect(await domainStore.listAdiwiyataReports({ siteId: fixtureUuidSiteId, reportedBy: userId })).toHaveLength(1)
+    expect(
+      await domainStore.listAdiwiyataReports({ siteId: fixtureUuidSiteId, reportedBy: userId }),
+    ).toHaveLength(1)
     const [file] = await domainStore.listFiles({ purpose: 'adiwiyata_report' })
     expect(file?.lifecycle).toBe('available')
     expect(objectStorage.objects.has(file!.object_path)).toBe(true)

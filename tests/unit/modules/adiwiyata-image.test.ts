@@ -11,7 +11,9 @@ describe('Adiwiyata image processing', () => {
   it('keeps a permanent visible watermark on a tiny image using a readable canvas', async () => {
     const input = await sharp({
       create: { width: 1, height: 1, channels: 3, background: '#24364b' },
-    }).png().toBuffer()
+    })
+      .png()
+      .toBuffer()
     const decodedImage = await decodeAdiwiyataImage(input, 'image/png')
     const output = await createWatermarkedJpeg({
       decodedImage,
@@ -56,7 +58,9 @@ describe('Adiwiyata image processing', () => {
 
     const pixelBomb = await sharp({
       create: { width: 5000, height: 5000, channels: 3, background: '#fff' },
-    }).png().toBuffer()
+    })
+      .png()
+      .toBuffer()
     await expect(decodeAdiwiyataImage(pixelBomb, 'image/png')).rejects.toThrow()
   })
 })

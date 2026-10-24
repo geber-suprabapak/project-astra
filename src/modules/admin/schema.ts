@@ -7,6 +7,12 @@ import {
   profileLifecycleStatusSchema,
 } from '../../providers/types.js'
 
+// Loose UUID shape (zod 3 `z.string().uuid()` semantics): zod 4's uuid()
+// additionally requires valid version/variant nibbles.
+const looseUuidSchema = z
+  .string()
+  .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)
+
 export const privilegedSessionSchema = z.object({
   user_id: z.string().min(1),
   role: identityRoleSchema.nullable(),
@@ -601,8 +607,12 @@ export const createLocationSchema = z.object({
   school_id: z.string().min(1).nullable().optional(),
   schoolId: z.string().min(1).nullable().optional(),
   name: z.string().min(1, 'Location name is required.'),
-  latitude: z.number({ required_error: 'Latitude is required.' }),
-  longitude: z.number({ required_error: 'Longitude is required.' }),
+  latitude: z.number({
+    error: (iss) => (iss.input === undefined ? 'Latitude is required.' : undefined),
+  }),
+  longitude: z.number({
+    error: (iss) => (iss.input === undefined ? 'Longitude is required.' : undefined),
+  }),
   radius_meters: z.number().positive().default(100.0).optional(),
   radiusMeters: z.number().positive().default(100.0).optional(),
   is_active: z.boolean().default(true).optional(),
@@ -835,8 +845,8 @@ export const createAdminLeaveRequestSchema = z
     category: leaveRequestCategorySchema,
     description: z.string().min(1, 'Description is required').max(1000),
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD required'),
-    file_id: z.string().uuid().optional().nullable(),
-    fileId: z.string().uuid().optional().nullable(),
+    file_id: looseUuidSchema.optional().nullable(),
+    fileId: looseUuidSchema.optional().nullable(),
     // Administrative creation records the student's request only. Approval or
     // rejection must go through the role-checked transition endpoints.
     approval_status: leaveRequestApprovalStatusSchema.default('pending'),
@@ -921,7 +931,7 @@ export const createBackupSchema = z
     start_date: z.string().min(1, 'start_date is required (format: YYYY-MM-DD).'),
     end_date: z.string().min(1, 'end_date is required (format: YYYY-MM-DD).'),
     checksum: z
-      .string({ required_error: 'checksum is required.' })
+      .string({ error: (iss) => (iss.input === undefined ? 'checksum is required.' : undefined) })
       .regex(/^[a-f0-9]{64}$/, 'checksum must be a 64-character lowercase hex SHA-256 hash.'),
     record_count: z
       .number()
@@ -1039,7 +1049,7 @@ export const backupLogDetailsSchema = z
       })
       .optional(),
     checksum: z
-      .string({ required_error: 'checksum is required.' })
+      .string({ error: (iss) => (iss.input === undefined ? 'checksum is required.' : undefined) })
       .regex(/^[a-f0-9]{64}$/, 'checksum must be a 64-character lowercase hex SHA-256 hash.'),
     counts: z.number().int().nonnegative().optional(),
     record_count: z.number().int().nonnegative().optional(),

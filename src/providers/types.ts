@@ -1243,11 +1243,11 @@ export const notificationPayloadValueSchema = z.union([
   z.null(),
   z.undefined(),
   z.array(z.string()),
-  z.record(z.union([z.string(), z.number(), z.boolean(), z.null(), z.undefined()])),
+  z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null(), z.undefined()])),
 ])
 export type NotificationPayloadValue = z.infer<typeof notificationPayloadValueSchema>
 
-export const notificationPayloadSchema = z.record(notificationPayloadValueSchema)
+export const notificationPayloadSchema = z.record(z.string(), notificationPayloadValueSchema)
 export type NotificationPayload = z.infer<typeof notificationPayloadSchema>
 
 export interface NotificationRecord {

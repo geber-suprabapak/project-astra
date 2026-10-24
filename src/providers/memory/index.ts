@@ -463,7 +463,9 @@ export class MemoryDomainStore implements DomainStore {
     const lockName = adiwiyataReportLockName(classId, siteId, reportDate)
     const previous = this.adiwiyataLocks.get(lockName) ?? Promise.resolve()
     let release!: () => void
-    const current = new Promise<void>((resolve) => { release = resolve })
+    const current = new Promise<void>((resolve) => {
+      release = resolve
+    })
     this.adiwiyataLocks.set(lockName, current)
     await previous
     return () => {
@@ -574,8 +576,12 @@ export class MemoryDomainStore implements DomainStore {
     return Array.from(this.adiwiyataReports.values())
       .filter((report) => filter?.classId === undefined || report.class_id === filter.classId)
       .filter((report) => filter?.siteId === undefined || report.site_id === filter.siteId)
-      .filter((report) => filter?.reportedBy === undefined || report.reported_by === filter.reportedBy)
-      .filter((report) => filter?.reportDate === undefined || report.report_date === filter.reportDate)
+      .filter(
+        (report) => filter?.reportedBy === undefined || report.reported_by === filter.reportedBy,
+      )
+      .filter(
+        (report) => filter?.reportDate === undefined || report.report_date === filter.reportDate,
+      )
       .filter((report) => filter?.siteIds === undefined || filter.siteIds.includes(report.site_id))
       .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
       .map((report) => ({ ...report }))
@@ -596,21 +602,30 @@ export class MemoryDomainStore implements DomainStore {
         const classroom = this.classes.find((item) => item.id === report.class_id)
         const file = this.files.get(report.file_id)
         if (
-          !site || site.school_id !== filter.schoolId || !classroom ||
-          classroom.school_id !== filter.schoolId || file?.purpose !== 'adiwiyata_report'
-        ) return []
-        return [{
-          ...report,
-          site_name: site.name,
-          category: site.category,
-          class_name: classroom.name,
-          uploader_name: this.profiles.get(report.reported_by)?.full_name ?? null,
-          photo_file: { ...file },
-        }]
+          !site ||
+          site.school_id !== filter.schoolId ||
+          !classroom ||
+          classroom.school_id !== filter.schoolId ||
+          file?.purpose !== 'adiwiyata_report'
+        )
+          return []
+        return [
+          {
+            ...report,
+            site_name: site.name,
+            category: site.category,
+            class_name: classroom.name,
+            uploader_name: this.profiles.get(report.reported_by)?.full_name ?? null,
+            photo_file: { ...file },
+          },
+        ]
       })
-      .sort((a, b) =>
-        a.site_name.localeCompare(b.site_name) || a.class_name.localeCompare(b.class_name) ||
-        a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id),
+      .sort(
+        (a, b) =>
+          a.site_name.localeCompare(b.site_name) ||
+          a.class_name.localeCompare(b.class_name) ||
+          a.created_at.localeCompare(b.created_at) ||
+          a.id.localeCompare(b.id),
       )
   }
 
@@ -629,15 +644,21 @@ export class MemoryDomainStore implements DomainStore {
       const site = report ? this.adiwiyataSites.get(report.site_id) : null
       const classroom = report ? this.classes.find((item) => item.id === report.class_id) : null
       if (
-        !report || !site || site.school_id !== params.schoolId || !classroom ||
+        !report ||
+        !site ||
+        site.school_id !== params.schoolId ||
+        !classroom ||
         classroom.school_id !== params.schoolId
-      ) return null
+      )
+        return null
 
       const alreadySet = params.verified ? report.verified_at !== null : report.verified_at === null
       if (alreadySet) {
         return {
           report: { ...report },
-          coverage_status: this.adiwiyataReportsForPair(report).some((item) => item.verified_at !== null)
+          coverage_status: this.adiwiyataReportsForPair(report).some(
+            (item) => item.verified_at !== null,
+          )
             ? 'verified'
             : 'reported',
           changed: false,
@@ -668,10 +689,14 @@ export class MemoryDomainStore implements DomainStore {
         })
       } catch (error) {
         this.adiwiyataReports.set(report.id, previous)
-        const failedAuditIndex = this.auditLogs.findIndex((item) =>
-          !existingAuditIds.has(item.id) && item.actor_id === params.actorId &&
-          item.action === action && item.entity_type === 'adiwiyata_report' &&
-          item.entity_id === report.id && JSON.stringify(item.details) === JSON.stringify(details),
+        const failedAuditIndex = this.auditLogs.findIndex(
+          (item) =>
+            !existingAuditIds.has(item.id) &&
+            item.actor_id === params.actorId &&
+            item.action === action &&
+            item.entity_type === 'adiwiyata_report' &&
+            item.entity_id === report.id &&
+            JSON.stringify(item.details) === JSON.stringify(details),
         )
         if (failedAuditIndex >= 0) this.auditLogs.splice(failedAuditIndex, 1)
         throw error
@@ -679,7 +704,9 @@ export class MemoryDomainStore implements DomainStore {
 
       return {
         report: { ...report },
-        coverage_status: this.adiwiyataReportsForPair(report).some((item) => item.verified_at !== null)
+        coverage_status: this.adiwiyataReportsForPair(report).some(
+          (item) => item.verified_at !== null,
+        )
           ? 'verified'
           : 'reported',
         changed: true,
@@ -690,97 +717,156 @@ export class MemoryDomainStore implements DomainStore {
   }
 
   private adiwiyataReportsForPair(report: AdiwiyataReport): AdiwiyataReport[] {
-    return Array.from(this.adiwiyataReports.values()).filter((item) =>
-      item.class_id === report.class_id && item.site_id === report.site_id &&
-      item.report_date === report.report_date,
+    return Array.from(this.adiwiyataReports.values()).filter(
+      (item) =>
+        item.class_id === report.class_id &&
+        item.site_id === report.site_id &&
+        item.report_date === report.report_date,
     )
   }
 
   async submitAdiwiyataReport(params: SubmitAdiwiyataReportParams): Promise<AdiwiyataReport> {
-    const release = await this.lockAdiwiyataReportPair(params.classId, params.siteId, params.reportDate)
+    const release = await this.lockAdiwiyataReportPair(
+      params.classId,
+      params.siteId,
+      params.reportDate,
+    )
 
     try {
       const profile = this.profiles.get(params.userId)
       if (profile?.role !== 'student' || profile.lifecycle_status !== 'approved') {
-        throw new AppError(ErrorCode.ADIWIYATA_NOT_ELIGIBLE, 403, 'Akun Siswa tidak lagi memenuhi syarat Adiwiyata.')
+        throw new AppError(
+          ErrorCode.ADIWIYATA_NOT_ELIGIBLE,
+          403,
+          'Akun Siswa tidak lagi memenuhi syarat Adiwiyata.',
+        )
       }
       if (!this.adiwiyataEligibility.get(params.userId)?.is_active) {
-        throw new AppError(ErrorCode.ADIWIYATA_NOT_ELIGIBLE, 403, 'Akses Adiwiyata tidak lagi aktif.')
+        throw new AppError(
+          ErrorCode.ADIWIYATA_NOT_ELIGIBLE,
+          403,
+          'Akses Adiwiyata tidak lagi aktif.',
+        )
       }
       const periods = this.academicPeriods.filter((period) => period.is_active)
       if (periods.length !== 1) {
-        throw new AppError(ErrorCode.ADIWIYATA_CONFIGURATION_ERROR, 503, 'Astra harus memiliki tepat satu Periode Akademik aktif.')
+        throw new AppError(
+          ErrorCode.ADIWIYATA_CONFIGURATION_ERROR,
+          503,
+          'Astra harus memiliki tepat satu Periode Akademik aktif.',
+        )
       }
       const period = periods[0]!
-      const enrollments = this.classEnrollments.filter((enrollment) =>
-        enrollment.user_id === params.userId &&
-        enrollment.academic_period_id === period.id &&
-        enrollment.status === 'active',
+      const enrollments = this.classEnrollments.filter(
+        (enrollment) =>
+          enrollment.user_id === params.userId &&
+          enrollment.academic_period_id === period.id &&
+          enrollment.status === 'active',
       )
       if (enrollments.length !== 1 || enrollments[0]!.class_id !== params.classId) {
-        throw AppError.conflict('Enrollment Siswa berubah. Muat ulang dashboard sebelum mengirim foto.')
+        throw AppError.conflict(
+          'Enrollment Siswa berubah. Muat ulang dashboard sebelum mengirim foto.',
+        )
       }
       const classroom = this.classes.find((item) => item.id === params.classId)
       if (
-        !classroom || classroom.school_id !== period.school_id ||
-        classroom.academic_period_id !== period.id || classroom.name !== params.className ||
+        !classroom ||
+        classroom.school_id !== period.school_id ||
+        classroom.academic_period_id !== period.id ||
+        classroom.name !== params.className ||
         profile.full_name?.trim() !== params.profileName
       ) {
-        throw AppError.conflict('Profil atau kelas berubah. Muat ulang dashboard sebelum mengirim foto.')
+        throw AppError.conflict(
+          'Profil atau kelas berubah. Muat ulang dashboard sebelum mengirim foto.',
+        )
       }
       const site = this.adiwiyataSites.get(params.siteId)
       if (
-        !site || !site.is_active || site.school_id !== period.school_id ||
+        !site ||
+        !site.is_active ||
+        site.school_id !== period.school_id ||
         (site.class_id !== null && site.class_id !== params.classId)
       ) {
         throw AppError.validationError('Site tidak aktif atau tidak terlihat untuk kelas ini.')
       }
       const dayKey = new Intl.DateTimeFormat('id-ID', { weekday: 'long', timeZone: 'Asia/Jakarta' })
-        .format(new Date(`${params.reportDate}T12:00:00+07:00`)).toLowerCase()
-      const schedules = Array.from(this.schedules.values()).filter((schedule) =>
-        schedule.school_id === period.school_id && schedule.academic_period_id === period.id && schedule.is_active,
+        .format(new Date(`${params.reportDate}T12:00:00+07:00`))
+        .toLowerCase()
+      const schedules = Array.from(this.schedules.values()).filter(
+        (schedule) =>
+          schedule.school_id === period.school_id &&
+          schedule.academic_period_id === period.id &&
+          schedule.is_active,
       )
       if (schedules.length === 0) {
-        throw new AppError(ErrorCode.ADIWIYATA_CONFIGURATION_ERROR, 503, 'Belum ada jadwal aktif untuk sekolah dan Periode Akademik ini.')
+        throw new AppError(
+          ErrorCode.ADIWIYATA_CONFIGURATION_ERROR,
+          503,
+          'Belum ada jadwal aktif untuk sekolah dan Periode Akademik ini.',
+        )
       }
-      const exceptions = Array.from(this.calendarExceptions.values()).some((exception) =>
-        exception.date === params.reportDate && exception.is_holiday &&
-        (exception.school_id === null || exception.school_id === period.school_id) &&
-        (exception.academic_period_id === null || exception.academic_period_id === period.id),
+      const exceptions = Array.from(this.calendarExceptions.values()).some(
+        (exception) =>
+          exception.date === params.reportDate &&
+          exception.is_holiday &&
+          (exception.school_id === null || exception.school_id === period.school_id) &&
+          (exception.academic_period_id === null || exception.academic_period_id === period.id),
       )
-      const matching = schedules.filter((schedule) =>
-        (schedule.day_of_week ?? schedule.hari).toLowerCase() === dayKey,
+      const matching = schedules.filter(
+        (schedule) => (schedule.day_of_week ?? schedule.hari).toLowerCase() === dayKey,
       )
       const classSchedules = matching.filter((schedule) => schedule.class_id === params.classId)
-      const applicable = classSchedules.length > 0
-        ? classSchedules
-        : matching.filter((schedule) => schedule.class_id === null)
+      const applicable =
+        classSchedules.length > 0
+          ? classSchedules
+          : matching.filter((schedule) => schedule.class_id === null)
       if (applicable.length > 1) {
-        throw new AppError(ErrorCode.ADIWIYATA_CONFIGURATION_ERROR, 503, 'Ada beberapa jadwal aktif pada tingkat kelas yang berlaku untuk hari ini.')
+        throw new AppError(
+          ErrorCode.ADIWIYATA_CONFIGURATION_ERROR,
+          503,
+          'Ada beberapa jadwal aktif pada tingkat kelas yang berlaku untuk hari ini.',
+        )
       }
       if (exceptions || applicable.length !== 1) {
         throw AppError.conflict('Laporan hanya dapat dikirim pada hari sekolah yang dijadwalkan.')
       }
-      if (Array.from(this.adiwiyataReports.values()).some((report) =>
-        report.reported_by === params.userId && report.site_id === params.siteId &&
-        report.report_date === params.reportDate,
-      )) {
-        throw AppError.conflict('Siswa sudah mengirim laporan untuk Site ini pada tanggal WIB tersebut.')
+      if (
+        Array.from(this.adiwiyataReports.values()).some(
+          (report) =>
+            report.reported_by === params.userId &&
+            report.site_id === params.siteId &&
+            report.report_date === params.reportDate,
+        )
+      ) {
+        throw AppError.conflict(
+          'Siswa sudah mengirim laporan untuk Site ini pada tanggal WIB tersebut.',
+        )
       }
-      if (Array.from(this.adiwiyataReports.values()).some((report) =>
-        report.class_id === params.classId && report.site_id === params.siteId &&
-        report.report_date === params.reportDate && report.verified_at !== null,
-      )) {
+      if (
+        Array.from(this.adiwiyataReports.values()).some(
+          (report) =>
+            report.class_id === params.classId &&
+            report.site_id === params.siteId &&
+            report.report_date === params.reportDate &&
+            report.verified_at !== null,
+        )
+      ) {
         throw AppError.conflict('Laporan kelas untuk Site ini sudah diverifikasi dan ditutup.')
       }
       const file = this.files.get(params.fileId)
       if (
-        !file || file.user_id !== params.userId || file.purpose !== 'adiwiyata_report' ||
+        !file ||
+        file.user_id !== params.userId ||
+        file.purpose !== 'adiwiyata_report' ||
         file.lifecycle !== 'pending_upload'
       ) {
         throw AppError.internal('Metadata foto laporan tidak tersedia.')
       }
-      if (Array.from(this.adiwiyataReports.values()).some((report) => report.file_id === params.fileId)) {
+      if (
+        Array.from(this.adiwiyataReports.values()).some(
+          (report) => report.file_id === params.fileId,
+        )
+      ) {
         throw AppError.conflict('Metadata foto ini sudah digunakan oleh laporan lain.')
       }
 
@@ -1862,8 +1948,11 @@ export class MemoryDomainStore implements DomainStore {
         for (let i = this.auditLogs.length - 1; i >= 0; i--) {
           const item = this.auditLogs[i]
           if (
-            item && !existingAuditIds.has(item.id) && item.actor_id === audit.actorId &&
-            item.entity_type === 'leave_request' && item.entity_id === params.id
+            item &&
+            !existingAuditIds.has(item.id) &&
+            item.actor_id === audit.actorId &&
+            item.entity_type === 'leave_request' &&
+            item.entity_id === params.id
           ) {
             this.auditLogs.splice(i, 1)
           }
@@ -3182,10 +3271,7 @@ export class MemoryObjectStorage implements ObjectStorage {
     this.objects.set(path, { buffer: file, contentType: 'image/jpeg' })
   }
 
-  async getSignedAdiwiyataReportUrl(
-    path: string,
-    expiresInSeconds = 900,
-  ): Promise<string | null> {
+  async getSignedAdiwiyataReportUrl(path: string, expiresInSeconds = 900): Promise<string | null> {
     if (!path || expiresInSeconds <= 0) return null
     return `https://storage.local/signed/${encodeURIComponent(path)}?expires=${expiresInSeconds}`
   }

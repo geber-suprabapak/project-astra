@@ -4,8 +4,12 @@ import { base64ByteSize } from './mapper.js'
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 export const PrecheckBodySchema = z.object({
-  latitude: z.number({ required_error: 'latitude is required.' }),
-  longitude: z.number({ required_error: 'longitude is required.' }),
+  latitude: z.number({
+    error: (iss) => (iss.input === undefined ? 'latitude is required.' : undefined),
+  }),
+  longitude: z.number({
+    error: (iss) => (iss.input === undefined ? 'longitude is required.' : undefined),
+  }),
 })
 
 export const SubmitBodySchema = z.object({

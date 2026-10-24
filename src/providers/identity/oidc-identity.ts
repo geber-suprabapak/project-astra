@@ -190,7 +190,12 @@ export class OidcIdentityProvider implements IdentityProvider {
         issuer: this.legacyIssuer,
         requiredClaims: ['exp', 'sub'],
       })
-      const parsedSub = z.string().uuid().safeParse(payload.sub)
+      // Loose UUID shape (zod 3 `z.string().uuid()` semantics): zod 4's uuid()
+      // additionally requires valid version/variant nibbles.
+      const parsedSub = z
+        .string()
+        .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)
+        .safeParse(payload.sub)
       if (!parsedSub.success) {
         throw AppError.authInvalid('Legacy token has an invalid subject claim.')
       }

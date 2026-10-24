@@ -230,14 +230,16 @@ describe('S3ObjectStorage', () => {
       await storage.deleteObject('adiwiyata_report', path)
 
       const [uploadUrl, uploadInit] = fetchMock.mock.calls[0]!
-      expect(new URL(String(uploadUrl)).toString())
-        .toBe('http://localhost:9000/adiwiyata/reports/report-1.jpg')
+      expect(new URL(String(uploadUrl)).toString()).toBe(
+        'http://localhost:9000/adiwiyata/reports/report-1.jpg',
+      )
       expect(new Headers(uploadInit?.headers).get('content-type')).toBe('image/jpeg')
       expect(signedUrl).toContain('http://localhost:3354/adiwiyata/reports/report-1.jpg?')
       expect(signedUrl).toContain('X-Amz-Expires=123')
       const [deleteUrl, deleteInit] = fetchMock.mock.calls[1]!
-      expect(new URL(String(deleteUrl)).toString())
-        .toBe('http://localhost:9000/adiwiyata/reports/report-1.jpg')
+      expect(new URL(String(deleteUrl)).toString()).toBe(
+        'http://localhost:9000/adiwiyata/reports/report-1.jpg',
+      )
       expect(deleteInit?.method).toBe('DELETE')
     })
   })
@@ -257,7 +259,9 @@ describe('S3ObjectStorage', () => {
 
       expect(stat).toEqual({ sizeBytes: 16, contentType: 'image/jpeg' })
       const [url, init] = fetchMock.mock.calls[0]!
-      expect(new URL(String(url)).toString()).toBe('http://localhost:9000/avatars/user-1/avatar.jpg')
+      expect(new URL(String(url)).toString()).toBe(
+        'http://localhost:9000/avatars/user-1/avatar.jpg',
+      )
       expect(init?.method).toBe('HEAD')
     })
 
@@ -277,7 +281,9 @@ describe('S3ObjectStorage', () => {
       await storage.statObject('permit_attachment', 'user-1/permit.pdf')
       await storage.statObject('adiwiyata_report', 'reports/report-1.jpg')
 
-      expect(new URL(String(fetchMock.mock.calls[0]![0])).pathname).toBe('/perizinan/user-1/permit.pdf')
+      expect(new URL(String(fetchMock.mock.calls[0]![0])).pathname).toBe(
+        '/perizinan/user-1/permit.pdf',
+      )
       expect(new URL(String(fetchMock.mock.calls[1]![0])).pathname).toBe(
         '/adiwiyata/reports/report-1.jpg',
       )
@@ -313,7 +319,9 @@ describe('S3ObjectStorage', () => {
     it('throws dependency unavailable when HEAD succeeds without usable content-length', async () => {
       globalThis.fetch = vi
         .fn()
-        .mockResolvedValue(new Response(null, { status: 200, headers: { 'content-type': 'image/jpeg' } }))
+        .mockResolvedValue(
+          new Response(null, { status: 200, headers: { 'content-type': 'image/jpeg' } }),
+        )
       const storage = new S3ObjectStorage(storageOptions)
 
       await expect(storage.statObject('avatar', 'user-1/avatar.jpg')).rejects.toMatchObject({
