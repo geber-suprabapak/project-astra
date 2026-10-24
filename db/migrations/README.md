@@ -42,3 +42,22 @@ invalid active legacy enrollments before its first DDL statement. It adds
 missing `student_bindings` foreign keys as `NOT VALID` so existing orphan rows
 remain reviewable, while rejecting any wrongly named or mapped binding FK. It
 does not normalize or invent legacy data.
+
+Migration `0002_adiwiyata.sql` adds Adiwiyata Site, eligibility, report, and
+file-purpose schema. Before an operator runs it, take and verify a fresh
+PostgreSQL backup and review the five-second lock timeout in a maintenance
+window. It has not been run as part of this code change. The migration preserves
+report/file metadata on application rollback; use a forward repair instead of
+dropping evidence.
+
+Report submission and Ticket 06 verify/unverify serialize on the same
+transaction advisory lock:
+
+```text
+pg_advisory_xact_lock(hashtextextended("adiwiyata-report:{classId}:{siteId}:{YYYY-MM-DD}", 0))
+```
+
+The file metadata row is created as `pending_upload` before object storage PUT;
+the report insert and transition to `available` commit in one database
+transaction under that lock. If object cleanup after a failed submission cannot
+be confirmed, keep the pending row as the object tracking record.

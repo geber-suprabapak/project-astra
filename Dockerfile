@@ -21,6 +21,8 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
+RUN apk add --no-cache fontconfig ttf-dejavu
+
 # Copy built output and package manifests
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./

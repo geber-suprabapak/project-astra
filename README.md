@@ -209,9 +209,9 @@ Bootstrap and student account operations enforce strict role separation:
 
 ## Health Semantics
 
-- `/live`: process is running; no downstream checks.
-- `/ready`: checks PostgreSQL (`database`), S3 (`objectStorage`), OIDC/Logto (`identity`), Robin (`mlService`), and Redis (`redis`); returns `503` when any required dependency is unavailable.
-- `/v1/mobile/health`: mobile-safe health response with `status: "healthy"` or `status: "unhealthy"` without leaking provider internals.
+- `/live`: process is running; no downstream checks. It never touches PostgreSQL, Robin, Redis, or object storage.
+- `/ready`: checks PostgreSQL (`database`), S3 (`objectStorage`), OIDC/Logto (`identity`), Robin (`mlService`), and Redis (`redis`); returns `503` when any required dependency is unavailable. Every check is a side-effect-free read (no collection creation, index build, or write), and the whole probe is bounded by `READINESS_DEADLINE_MS` (default `5000`): any check still pending when the deadline fires reports `fail` and `/ready` returns `503` within the deadline.
+- `/v1/mobile/health`: mobile-safe health response with `status: "healthy"` or `status: "unhealthy"` without leaking provider internals. It always returns HTTP `200` with the standard success envelope; clients must treat `data.status` as authoritative — `status: "unhealthy"` is paired with the message `Service unhealthy.`, and the HTTP `503` mapping is only on `/ready`.
 
 ## Environment Variables
 
@@ -291,6 +291,7 @@ All configuration is parsed and validated at boot via `src/config/env.ts`.
 | -------------------------------- | ------- | --------------------------------------- |
 | `DB_QUERY_TIMEOUT_MS`            | `5000`  | PostgreSQL query execution              |
 | `STORAGE_UPLOAD_TIMEOUT_MS`      | `15000` | S3 object storage upload operations     |
+| `READINESS_DEADLINE_MS`          | `5000`  | Aggregate `/ready` dependency deadline  |
 | `ROBIN_READY_TIMEOUT_MS`         | `3000`  | Robin `/ready` health probe             |
 | `ROBIN_IDENTIFY_TIMEOUT_MS`      | `30000` | Robin `/v1/face/identify` endpoint      |
 | `ROBIN_ENROLL_TIMEOUT_MS`        | `60000` | Robin `/v1/face/enroll` endpoint        |
