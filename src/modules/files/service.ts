@@ -20,6 +20,28 @@ export interface UploadIntentResult {
   expires_in_seconds: number
 }
 
+const ADIWIYATA_REPORT_RETENTION_MS = 365 * 24 * 60 * 60 * 1000
+const ADIWIYATA_REPORT_URL_TTL_SECONDS = 900
+
+export async function getAdiwiyataReportUrl(
+  fileRecord: FileRecord,
+  providers: AppProviders,
+  now = Date.now(),
+): Promise<string | null> {
+  if (fileRecord.lifecycle !== 'available' || !fileRecord.created_at) return null
+  const deadline = Date.parse(fileRecord.created_at) + ADIWIYATA_REPORT_RETENTION_MS
+  const secondsLeft = Math.floor((deadline - now) / 1000)
+  if (!Number.isFinite(secondsLeft) || secondsLeft <= 0) return null
+  try {
+    return await providers.objectStorage.getSignedAdiwiyataReportUrl(
+      fileRecord.object_path,
+      Math.min(ADIWIYATA_REPORT_URL_TTL_SECONDS, secondsLeft),
+    )
+  } catch {
+    return null
+  }
+}
+
 function validateFileConstraints(purpose: FilePurpose, contentType: string, sizeBytes?: number) {
   if (purpose === 'avatar') {
     if (!ALLOWED_AVATAR_MIME.includes(contentType)) {
@@ -67,6 +89,10 @@ export async function createUploadIntent(params: {
   providers?: AppProviders
 }): Promise<UploadIntentResult> {
   const providers = params.providers ?? defaultProviders
+
+  if (params.purpose === 'adiwiyata_report') {
+    throw AppError.validationError('Adiwiyata evidence must be sent through the report endpoint.')
+  }
 
   const profile = await providers.domainStore.getUserProfile(params.userId)
   if (profile.lifecycle_status !== 'approved') {
@@ -130,8 +156,50 @@ export async function confirmFileUpload(params: {
   if (fileRecord.user_id !== params.userId) {
     throw AppError.forbidden('Cannot confirm files owned by another user.')
   }
+  if (fileRecord.purpose === 'adiwiyata_report') {
+    throw AppError.conflict('Adiwiyata report files are activated only by the report transaction.')
+  }
   if (fileRecord.lifecycle !== 'pending_upload') {
     return fileRecord
+  }
+
+  // Explicit upload-verification lifecycle rule (A06):
+  // - provider cannot verify (no statObject, or storage error): File stays pending_upload;
+  //   the confirmation fails closed and never yields a download URL.
+  // - object missing: File stays pending_upload; the client may complete the upload
+  //   against the still-valid intent and confirm again.
+  // - stored content-type or size mismatch: the stored object can never satisfy the
+  //   recorded upload constraints, so the File is rejected; a new intent is required.
+  // - object verified: the File becomes available (idempotent re-confirmation returns it).
+  const statObject = providers.objectStorage.statObject
+  if (!statObject) {
+    throw AppError.conflict(
+      'Upload verification is unavailable for this storage provider; file remains pending.',
+    )
+  }
+
+  let objectStat: { sizeBytes: number; contentType: string } | null
+  try {
+    objectStat = await statObject.call(providers.objectStorage, fileRecord.purpose, fileRecord.object_path)
+  } catch (err) {
+    if (err instanceof AppError) throw err
+    throw AppError.dependencyUnavailable('object storage')
+  }
+
+  if (!objectStat) {
+    throw AppError.conflict(
+      'Upload has not completed; file remains pending until the object exists in storage.',
+    )
+  }
+  if (objectStat.contentType !== fileRecord.content_type) {
+    await providers.domainStore.updateFileLifecycle(params.fileId, 'rejected')
+    throw AppError.conflict(
+      'Uploaded object content type does not match the upload intent; file rejected.',
+    )
+  }
+  if (fileRecord.size_bytes != null && objectStat.sizeBytes !== fileRecord.size_bytes) {
+    await providers.domainStore.updateFileLifecycle(params.fileId, 'rejected')
+    throw AppError.conflict('Uploaded object size does not match the upload intent; file rejected.')
   }
 
   const updated = await providers.domainStore.updateFileLifecycle(params.fileId, 'available')
@@ -156,7 +224,19 @@ export async function getFile(params: {
   if (!isOwner && !isPrivileged) {
     throw AppError.forbidden('You do not have permission to view this file.')
   }
+  if (fileRecord.purpose === 'adiwiyata_report' && !isOwner) {
+    const profile = await providers.domainStore.getUserProfile(params.userId)
+    if (
+      profile.lifecycle_status !== 'approved' ||
+      (profile.role !== 'school_admin' && profile.role !== 'platform_admin')
+    ) {
+      throw AppError.forbidden('Only approved Astra administrators can view another student’s Adiwiyata report.')
+    }
+  }
 
+  if (fileRecord.lifecycle === 'pending_upload') {
+    throw AppError.conflict('File upload is not confirmed yet; download is unavailable.')
+  }
   if (fileRecord.lifecycle === 'deleted' || fileRecord.lifecycle === 'rejected') {
     throw AppError.notFound('File is no longer available.')
   }
@@ -168,6 +248,8 @@ export async function getFile(params: {
     downloadUrl = await providers.objectStorage.getSignedPermitUrl(fileRecord.object_path)
   } else if (fileRecord.purpose === 'face_enrollment') {
     downloadUrl = await providers.objectStorage.getSignedFaceEnrollmentUrl(fileRecord.object_path)
+  } else if (fileRecord.purpose === 'adiwiyata_report') {
+    downloadUrl = await getAdiwiyataReportUrl(fileRecord, providers)
   }
 
   return { file: fileRecord, download_url: downloadUrl }
@@ -190,6 +272,10 @@ export async function deleteFile(params: {
   const isPrivileged = hasScope(params.userScopes, logtoScopes.filesDeleteAny)
   if (!isOwner && !isPrivileged) {
     throw AppError.forbidden('You do not have permission to delete this file.')
+  }
+
+  if (fileRecord.purpose === 'adiwiyata_report') {
+    throw AppError.conflict('Adiwiyata report evidence cannot be deleted through the file endpoint.')
   }
 
   await providers.objectStorage.deleteObject(fileRecord.purpose, fileRecord.object_path)

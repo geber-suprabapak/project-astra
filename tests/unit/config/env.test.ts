@@ -20,6 +20,7 @@ describe('env config', () => {
     expect(env.robinEnrollStatusTimeoutMs).toBeDefined()
     expect(env.dbQueryTimeoutMs).toBeDefined()
     expect(env.storageUploadTimeoutMs).toBeDefined()
+    expect(env.readinessDeadlineMs).toBeDefined()
   })
 
   it('has default timeout values matching plan', () => {
@@ -29,6 +30,15 @@ describe('env config', () => {
     expect(env.robinEnrollStatusTimeoutMs).toBe(5000)
     expect(env.dbQueryTimeoutMs).toBe(5000)
     expect(env.storageUploadTimeoutMs).toBe(15000)
+    expect(env.readinessDeadlineMs).toBe(5000)
+  })
+
+  it('parses and validates the readiness deadline', () => {
+    const parsed = parseEnv({ ...baseEnv, READINESS_DEADLINE_MS: '2500' })
+    expect(parsed.success && parsed.data.READINESS_DEADLINE_MS).toBe(2500)
+
+    const rejected = parseEnv({ ...baseEnv, READINESS_DEADLINE_MS: '0' })
+    expect(rejected.success).toBe(false)
   })
 
   it('has tenant config', () => {
@@ -38,6 +48,11 @@ describe('env config', () => {
 
   it('has business timezone', () => {
     expect(env.businessTimezone).toBe('Asia/Jakarta')
+  })
+
+  it('defaults the dedicated Adiwiyata bucket name', () => {
+    const parsed = parseEnv(baseEnv)
+    expect(parsed.success && parsed.data.S3_BUCKET_ADIWIYATA).toBe('adiwiyata')
   })
 
   it('requires REDIS_URL in production', () => {

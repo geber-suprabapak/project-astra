@@ -23,7 +23,7 @@ const robinClient: RobinClient = {
     message: 'Enrollment complete.',
   }),
   identify: async () => ({
-    status: 'match',
+    status: 'ok',
     candidateId: 'student-1',
     confidence: 0.95,
     threshold: 0.7,

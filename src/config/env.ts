@@ -28,12 +28,15 @@ export const envSchema = z
     DATABASE_CONNECT_TIMEOUT_SECONDS: positiveInt.default(5),
     DB_QUERY_TIMEOUT_MS: positiveInt.default(5000),
 
+    READINESS_DEADLINE_MS: positiveInt.default(5000),
+
     S3_ENDPOINT: z.string().url().default('http://localhost:9000'),
     S3_REGION: z.string().min(1).default('us-east-1'),
     S3_ACCESS_KEY_ID: z.string().min(1).default('minioadmin'),
     S3_SECRET_ACCESS_KEY: z.string().min(1).default('minioadmin'),
     S3_BUCKET_AVATARS: z.string().min(1).default('avatars'),
     S3_BUCKET_PERMITS: z.string().min(1).default('perizinan'),
+    S3_BUCKET_ADIWIYATA: z.string().min(1).default('adiwiyata'),
     S3_FORCE_PATH_STYLE: z
       .union([z.boolean(), z.string().transform((s) => s.toLowerCase() === 'true')])
       .default(true),
@@ -161,6 +164,7 @@ export const env = {
   databaseIdleTimeoutSeconds: raw.DATABASE_IDLE_TIMEOUT_SECONDS,
   databaseConnectTimeoutSeconds: raw.DATABASE_CONNECT_TIMEOUT_SECONDS,
   dbQueryTimeoutMs: raw.DB_QUERY_TIMEOUT_MS,
+  readinessDeadlineMs: raw.READINESS_DEADLINE_MS,
 
   s3Endpoint: raw.S3_ENDPOINT,
   s3Region: raw.S3_REGION,
@@ -168,6 +172,7 @@ export const env = {
   s3SecretAccessKey: raw.S3_SECRET_ACCESS_KEY,
   s3BucketAvatars: raw.S3_BUCKET_AVATARS,
   s3BucketPermits: raw.S3_BUCKET_PERMITS,
+  s3BucketAdiwiyata: raw.S3_BUCKET_ADIWIYATA,
   s3ForcePathStyle: raw.S3_FORCE_PATH_STYLE,
   s3PublicUrl: raw.S3_PUBLIC_URL,
   storageUploadTimeoutMs: raw.STORAGE_UPLOAD_TIMEOUT_MS,

@@ -450,11 +450,7 @@ export async function submit(
     throw err
   }
 
-  const isMatch =
-    !identifyResult.status ||
-    identifyResult.status === 'ok' ||
-    identifyResult.status === 'match' ||
-    identifyResult.status === 'success'
+  const isMatch = identifyResult.status === 'ok'
 
   const processTimeMs = identifyResult.processTimeMs ?? Date.now() - startMs
 
@@ -474,19 +470,6 @@ export async function submit(
     throw AppError.attendanceBlocked(reason)
   }
 
-  // Record successful attempt
-  await actualProviders.domainStore.recordAttendanceAttempt({
-    userId: params.userId,
-    actionType: params.actionType,
-    status: 'success',
-    reason: identifyResult.message || 'Face verified successfully',
-    confidence: identifyResult.confidence,
-    qualityScore: identifyResult.qualityScore,
-    latitude: params.latitude,
-    longitude: params.longitude,
-    processTimeMs,
-  })
-
   // Persist attendance through DomainStore
   const saveResult = await actualProviders.domainStore.saveAttendanceRecord({
     userId: params.userId,
@@ -500,6 +483,20 @@ export async function submit(
       `Failed to save attendance record: ${saveResult.message ?? 'Unknown error.'}`,
     )
   }
+
+  // A successful face result is not a successful Attendance Attempt until the
+  // corresponding Attendance record has been persisted.
+  await actualProviders.domainStore.recordAttendanceAttempt({
+    userId: params.userId,
+    actionType: params.actionType,
+    status: 'success',
+    reason: identifyResult.message || 'Face verified successfully',
+    confidence: identifyResult.confidence,
+    qualityScore: identifyResult.qualityScore,
+    latitude: params.latitude,
+    longitude: params.longitude,
+    processTimeMs,
+  })
 
   const insertStatus = computeInsertStatus(params.actionType, gate.isLate)
 

@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 // Observed from mobile CameraAttendance.tsx FaceRecogResponse interface
 export const RobinIdentifyResponseSchema = z.object({
-  status: z.string(),
+  status: z.enum(['ok', 'not_found']),
   student_id: z.string().nullish(),
   student_name: z.string().nullish(),
   confidence: z.number().nullish(),

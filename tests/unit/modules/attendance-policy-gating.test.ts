@@ -32,7 +32,7 @@ function createGatedEnvironment(): GatedEnvironment {
       message: 'Done',
     }),
     identify: async () => ({
-      status: 'match',
+      status: 'ok',
       candidateId: 'u1',
       confidence: 0.9,
       threshold: 0.7,

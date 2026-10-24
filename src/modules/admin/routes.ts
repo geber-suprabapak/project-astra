@@ -7,6 +7,7 @@ import { AppError } from '../../lib/errors/app-error.js'
 import { defaultProviders } from '../../providers/index.js'
 import type { AppProviders } from '../../providers/types.js'
 import type { AppEnv } from '../../types/context.js'
+import { createAdiwiyataAdminRouter } from '../adiwiyata/admin-routes.js'
 import {
   bootstrapSchoolSchema,
   classEnrollmentStatusSchema,
@@ -143,6 +144,7 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
   router.use('*', auth)
   router.use('*', privilegedAuth)
   router.use('*', rateLimits.adminSession)
+  router.route('/adiwiyata', createAdiwiyataAdminRouter({ providers: deps.providers }))
 
   // GET /v1/admin/session
   router.get('/session', (c) =>

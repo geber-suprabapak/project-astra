@@ -213,4 +213,112 @@ describe('S3ObjectStorage', () => {
       expect(mockRedis.del).toHaveBeenCalledWith('astra:signed_permit:user-1/permit.png')
     })
   })
+
+  describe('Adiwiyata evidence bucket', () => {
+    it('writes and deletes through the private endpoint and signs reads on the public URL', async () => {
+      const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 200 }))
+      globalThis.fetch = fetchMock
+      const storage = new S3ObjectStorage({
+        ...storageOptions,
+        bucketAdiwiyata: 'adiwiyata',
+        publicUrl: 'http://localhost:3354',
+      })
+      const path = 'reports/report-1.jpg'
+
+      await storage.uploadAdiwiyataReport(path, Buffer.from('jpeg bytes'))
+      const signedUrl = await storage.getSignedAdiwiyataReportUrl(path, 123)
+      await storage.deleteObject('adiwiyata_report', path)
+
+      const [uploadUrl, uploadInit] = fetchMock.mock.calls[0]!
+      expect(new URL(String(uploadUrl)).toString())
+        .toBe('http://localhost:9000/adiwiyata/reports/report-1.jpg')
+      expect(new Headers(uploadInit?.headers).get('content-type')).toBe('image/jpeg')
+      expect(signedUrl).toContain('http://localhost:3354/adiwiyata/reports/report-1.jpg?')
+      expect(signedUrl).toContain('X-Amz-Expires=123')
+      const [deleteUrl, deleteInit] = fetchMock.mock.calls[1]!
+      expect(new URL(String(deleteUrl)).toString())
+        .toBe('http://localhost:9000/adiwiyata/reports/report-1.jpg')
+      expect(deleteInit?.method).toBe('DELETE')
+    })
+  })
+
+  describe('statObject metadata verification', () => {
+    it('returns size and content type from a successful HEAD against the purpose bucket', async () => {
+      const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(null, {
+          status: 200,
+          headers: { 'content-length': '16', 'content-type': 'image/jpeg' },
+        }),
+      )
+      globalThis.fetch = fetchMock
+      const storage = new S3ObjectStorage(storageOptions)
+
+      const stat = await storage.statObject('avatar', 'user-1/avatar.jpg')
+
+      expect(stat).toEqual({ sizeBytes: 16, contentType: 'image/jpeg' })
+      const [url, init] = fetchMock.mock.calls[0]!
+      expect(new URL(String(url)).toString()).toBe('http://localhost:9000/avatars/user-1/avatar.jpg')
+      expect(init?.method).toBe('HEAD')
+    })
+
+    it('routes statObject requests to the permit and adiwiyata buckets by purpose', async () => {
+      const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(null, {
+          status: 200,
+          headers: { 'content-length': '1', 'content-type': 'application/pdf' },
+        }),
+      )
+      globalThis.fetch = fetchMock
+      const storage = new S3ObjectStorage({
+        ...storageOptions,
+        bucketAdiwiyata: 'adiwiyata',
+      })
+
+      await storage.statObject('permit_attachment', 'user-1/permit.pdf')
+      await storage.statObject('adiwiyata_report', 'reports/report-1.jpg')
+
+      expect(new URL(String(fetchMock.mock.calls[0]![0])).pathname).toBe('/perizinan/user-1/permit.pdf')
+      expect(new URL(String(fetchMock.mock.calls[1]![0])).pathname).toBe(
+        '/adiwiyata/reports/report-1.jpg',
+      )
+    })
+
+    it('returns null when the object does not exist (404)', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 404 }))
+      const storage = new S3ObjectStorage(storageOptions)
+
+      const stat = await storage.statObject('avatar', 'user-1/missing.jpg')
+
+      expect(stat).toBeNull()
+    })
+
+    it('throws dependency unavailable on unexpected S3 error status without metadata', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }))
+      const storage = new S3ObjectStorage(storageOptions)
+
+      await expect(storage.statObject('avatar', 'user-1/avatar.jpg')).rejects.toMatchObject({
+        code: ErrorCode.DEPENDENCY_UNAVAILABLE,
+      })
+    })
+
+    it('throws dependency unavailable when the network request fails', async () => {
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error('Connection refused'))
+      const storage = new S3ObjectStorage(storageOptions)
+
+      await expect(storage.statObject('avatar', 'user-1/avatar.jpg')).rejects.toMatchObject({
+        code: ErrorCode.DEPENDENCY_UNAVAILABLE,
+      })
+    })
+
+    it('throws dependency unavailable when HEAD succeeds without usable content-length', async () => {
+      globalThis.fetch = vi
+        .fn()
+        .mockResolvedValue(new Response(null, { status: 200, headers: { 'content-type': 'image/jpeg' } }))
+      const storage = new S3ObjectStorage(storageOptions)
+
+      await expect(storage.statObject('avatar', 'user-1/avatar.jpg')).rejects.toMatchObject({
+        code: ErrorCode.DEPENDENCY_UNAVAILABLE,
+      })
+    })
+  })
 })

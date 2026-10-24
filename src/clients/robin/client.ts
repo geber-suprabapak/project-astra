@@ -13,16 +13,22 @@ import {
 
 const ENROLL_STATUS_TIMEOUT_MS = () => env.robinEnrollStatusTimeoutMs
 
+// Robin's private v1 contract requires this header on every authenticated Astra→Robin call.
+const ASTRA_CONTRACT_VERSION_HEADER = 'X-Astra-Contract-Version'
+const ASTRA_CONTRACT_VERSION = 'v1'
+
 export interface RobinRequestHeaders {
   [key: string]: string
   'Content-Type': string
   Accept: string
+  'X-Astra-Contract-Version': string
 }
 
 export interface RobinUploadHeaders {
   [key: string]: string
   Authorization: string
   'X-Request-ID': string
+  'X-Astra-Contract-Version': string
 }
 
 async function fetchWithTimeout(
@@ -64,6 +70,7 @@ function robinHeaders(token?: string, requestId?: string, userId?: string): Robi
     'Content-Type': 'application/json',
     Accept: 'application/json',
     Authorization: `Bearer ${env.robinServiceToken}`,
+    [ASTRA_CONTRACT_VERSION_HEADER]: ASTRA_CONTRACT_VERSION,
   }
   const resolvedUserId = userId ?? userIdFromToken(token)
   if (resolvedUserId) headers['X-Astra-User-Id'] = resolvedUserId
@@ -210,6 +217,7 @@ export class RobinClient {
       Authorization: `Bearer ${env.robinServiceToken}`,
       'X-Request-ID': requestId,
       'X-Astra-User-Id': userId,
+      [ASTRA_CONTRACT_VERSION_HEADER]: ASTRA_CONTRACT_VERSION,
     }
 
     let res: Response
@@ -245,23 +253,20 @@ export class RobinClient {
   }
 
   async deleteEnrollment(token?: string, requestId?: string, userId?: string): Promise<void> {
-    try {
-      const headers = robinHeaders(token, requestId, userId)
-      const res = await fetchWithTimeout(
-        `${this.baseUrl}/v1/enroll`,
-        { method: 'DELETE', headers },
-        env.robinEnrollTimeoutMs,
-      )
-      if (res.ok || res.status === 404) assertRobinContract(res)
-      if (!res.ok && res.status !== 404) {
-        logger.warn({ status: res.status }, 'Robin delete enrollment returned non-ok status')
-      }
-    } catch (err) {
-      if (err instanceof AppError && err.code === 'UPSTREAM_TIMEOUT') {
-        logger.warn('Robin delete enrollment timed out')
-        return
-      }
-      logger.warn({ err }, 'Robin delete enrollment request failed')
+    // A07: delete failures propagate so callers never continue Astra-side
+    // cleanup or report a deletion Robin did not perform. 404 counts as
+    // already-deleted so retries stay idempotent.
+    const headers = robinHeaders(token, requestId, userId)
+    const res = await fetchWithTimeout(
+      `${this.baseUrl}/v1/enroll`,
+      { method: 'DELETE', headers },
+      env.robinEnrollTimeoutMs,
+    )
+    if (res.ok || res.status === 404) assertRobinContract(res)
+    if (res.status === 404) return
+    if (!res.ok) {
+      logger.warn({ status: res.status }, 'Robin delete enrollment returned non-ok status')
+      throw AppError.dependencyUnavailable('Robin')
     }
   }
 }

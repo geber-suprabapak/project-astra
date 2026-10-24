@@ -93,6 +93,179 @@ function setupTestEnvironment() {
 }
 
 describe('Admin Leave Requests Service', () => {
+  it('keeps a Leave Request pending when the approval audit write fails', async () => {
+    const { domainStore, providers } = setupTestEnvironment()
+    const permit = await domainStore.createLeaveRequest({
+      user_id: 'student-1',
+      category: 'sakit',
+      description: 'Synthetic audit failure case',
+      date: '2026-08-21T00:00:00+07:00',
+      approval_status: 'pending',
+    })
+    domainStore.insertAuditLog = async () => {
+      throw new Error('synthetic audit failure')
+    }
+
+    await expect(
+      approveLeaveRequest({
+        id: permit.id,
+        actorRole: 'school_admin',
+        actorId: 'admin-1',
+        durationDays: 3,
+        providers,
+      }),
+    ).rejects.toThrow('synthetic audit failure')
+
+    expect(await domainStore.getLeaveRequestById(permit.id)).toMatchObject({
+      approval_status: 'pending',
+      status: false,
+      original_end_date: null,
+      effective_end_date: null,
+    })
+    expect(await domainStore.getAuditLogs('leave_request', permit.id)).toHaveLength(0)
+  })
+
+  it('keeps a Leave Request pending when the rejection audit write fails', async () => {
+    const { domainStore, providers } = setupTestEnvironment()
+    const permit = await domainStore.createLeaveRequest({
+      user_id: 'student-1',
+      category: 'sakit',
+      description: 'Synthetic audit failure case',
+      date: '2026-08-21T00:00:00+07:00',
+      approval_status: 'pending',
+    })
+    domainStore.insertAuditLog = async () => {
+      throw new Error('synthetic audit failure')
+    }
+
+    await expect(
+      rejectLeaveRequest({
+        id: permit.id,
+        reason: 'Synthetic rejection reason',
+        actorRole: 'school_admin',
+        actorId: 'admin-1',
+        providers,
+      }),
+    ).rejects.toThrow('synthetic audit failure')
+
+    expect(await domainStore.getLeaveRequestById(permit.id)).toMatchObject({
+      approval_status: 'pending',
+      status: false,
+      rejection_reason: null,
+      rejected_at: null,
+    })
+    expect(await domainStore.getAuditLogs('leave_request', permit.id)).toHaveLength(0)
+  })
+
+  it('preserves a rejected Leave Request when its reopen audit write fails', async () => {
+    const { domainStore, providers } = setupTestEnvironment()
+    const permit = await domainStore.createLeaveRequest({
+      user_id: 'student-1',
+      category: 'sakit',
+      description: 'Synthetic audit failure case',
+      date: '2026-08-21T00:00:00+07:00',
+      approval_status: 'pending',
+    })
+    const rejectedAt = '2026-08-22T12:00:00.000Z'
+    await domainStore.updateLeaveRequestStatus({
+      id: permit.id,
+      approvalStatus: 'rejected',
+      rejectionReason: 'Synthetic rejection reason',
+      rejectedAt,
+    })
+    domainStore.insertAuditLog = async () => {
+      throw new Error('synthetic audit failure')
+    }
+
+    await expect(
+      reopenLeaveRequest({
+        id: permit.id,
+        actorRole: 'school_admin',
+        actorId: 'admin-1',
+        providers,
+      }),
+    ).rejects.toThrow('synthetic audit failure')
+
+    expect(await domainStore.getLeaveRequestById(permit.id)).toMatchObject({
+      approval_status: 'rejected',
+      status: false,
+      rejection_reason: 'Synthetic rejection reason',
+      rejected_at: rejectedAt,
+    })
+    expect(await domainStore.getAuditLogs('leave_request', permit.id)).toHaveLength(0)
+  })
+
+  it('discards partially written audit rows when the approval audit write fails mid-write', async () => {
+    const { domainStore, providers } = setupTestEnvironment()
+    const permit = await domainStore.createLeaveRequest({
+      user_id: 'student-1',
+      category: 'sakit',
+      description: 'Synthetic mid-write audit failure case',
+      date: '2026-08-21T00:00:00+07:00',
+      approval_status: 'pending',
+    })
+    const originalInsertAuditLog = domainStore.insertAuditLog.bind(domainStore)
+    domainStore.insertAuditLog = async (entry) => {
+      await originalInsertAuditLog(entry)
+      await originalInsertAuditLog({ ...entry, action: `${entry.action}_duplicate` })
+      throw new Error('synthetic audit failure after persist')
+    }
+
+    await expect(
+      approveLeaveRequest({
+        id: permit.id,
+        actorRole: 'school_admin',
+        actorId: 'admin-1',
+        durationDays: 3,
+        providers,
+      }),
+    ).rejects.toThrow('synthetic audit failure after persist')
+
+    expect(await domainStore.getLeaveRequestById(permit.id)).toMatchObject({
+      approval_status: 'pending',
+      status: false,
+      original_end_date: null,
+      effective_end_date: null,
+      duration_days: null,
+    })
+    expect(await domainStore.getAuditLogs('leave_request', permit.id)).toHaveLength(0)
+    expect(await domainStore.getAuditLogs()).toHaveLength(0)
+    domainStore.insertAuditLog = originalInsertAuditLog
+  })
+
+  it('does not duplicate the audit log when a repeated decision conflicts', async () => {
+    const { domainStore, providers } = setupTestEnvironment()
+    const permit = await domainStore.createLeaveRequest({
+      user_id: 'student-1',
+      category: 'sakit',
+      description: 'Synthetic repeated decision case',
+      date: '2026-08-21T00:00:00+07:00',
+      approval_status: 'pending',
+    })
+    await approveLeaveRequest({
+      id: permit.id,
+      actorRole: 'school_admin',
+      actorId: 'admin-1',
+      durationDays: 3,
+      providers,
+    })
+
+    await expect(
+      approveLeaveRequest({
+        id: permit.id,
+        actorRole: 'school_admin',
+        actorId: 'admin-1',
+        durationDays: 3,
+        providers,
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' })
+
+    const logs = await domainStore.getAuditLogs('leave_request', permit.id)
+    expect(logs).toHaveLength(1)
+    expect(logs[0].action).toBe('approve_leave_request')
+    expect(logs[0].actor_id).toBe('admin-1')
+  })
+
   it('does not shorten the Leave Period when its required audit insert fails', async () => {
     const { domainStore, providers } = setupTestEnvironment()
     const permit = await domainStore.createLeaveRequest({
@@ -262,6 +435,16 @@ describe('Admin Leave Requests Service', () => {
     expect(logs).toHaveLength(1)
     expect(logs[0].action).toBe('approve_leave_request')
     expect(logs[0].actor_id).toBe('admin-1')
+    expect(logs[0].details).toMatchObject({
+      previous_status: 'pending',
+      student_user_id: 'student-1',
+      category: 'sakit',
+      date: '2026-08-21',
+      duration_days: 3,
+      requested_start_date: '2026-08-21',
+      original_end_date: '2026-08-23',
+      effective_end_date: '2026-08-23',
+    })
   })
 
   it('rejects approval when its duration intersects another approved Leave Period', async () => {
@@ -475,6 +658,12 @@ describe('Admin Leave Requests Service', () => {
     expect(logs).toHaveLength(1)
     expect(logs[0].action).toBe('reject_leave_request')
     expect(logs[0].actor_id).toBe('admin-1')
+    expect(logs[0].details).toMatchObject({
+      previous_status: 'pending',
+      student_user_id: 'student-1',
+      category: 'pergi',
+      rejection_reason: 'Izin liburan pribadi tidak dapat disetujui saat hari efektif KBM',
+    })
   })
 
   it('reopens a rejected leave request to pending, resets rejection fields, records audit log and enqueues notification', async () => {

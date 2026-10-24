@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   createUploadIntent,
   confirmFileUpload,
@@ -12,6 +12,7 @@ import {
 } from '../../../src/providers/memory/index.js'
 import type { AppProviders } from '../../../src/providers/types.js'
 import { ErrorCode } from '../../../src/lib/errors/codes.js'
+import { AppError } from '../../../src/lib/errors/app-error.js'
 
 function createTestProviders(): AppProviders {
   const domainStore = new MemoryDomainStore()
@@ -147,16 +148,32 @@ describe('files service', () => {
         code: ErrorCode.VALIDATION_ERROR,
       })
     })
+
+    it('rejects generic Adiwiyata evidence upload intents', async () => {
+      const providers = createTestProviders()
+      await expect(
+        createUploadIntent({
+          userId: 'student-1',
+          purpose: 'adiwiyata_report',
+          contentType: 'image/jpeg',
+          providers,
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR })
+    })
   })
 
   describe('confirmFileUpload', () => {
-    it('confirms file upload and updates lifecycle to available', async () => {
+    it('confirms file upload and updates lifecycle to available after the object exists', async () => {
       const providers = createTestProviders()
       const intent = await createUploadIntent({
         userId: 'student-1',
         purpose: 'permit_attachment',
         contentType: 'image/jpeg',
         providers,
+      })
+      providers.objectStorage.objects.set(intent.object_path, {
+        buffer: Buffer.from('uploaded-bytes'),
+        contentType: 'image/jpeg',
       })
 
       const confirmed = await confirmFileUpload({
@@ -166,6 +183,167 @@ describe('files service', () => {
       })
 
       expect(confirmed.lifecycle).toBe('available')
+    })
+
+    it('is idempotent when the owner confirms an already available file again', async () => {
+      const providers = createTestProviders()
+      const intent = await createUploadIntent({
+        userId: 'student-1',
+        purpose: 'permit_attachment',
+        contentType: 'image/jpeg',
+        providers,
+      })
+      providers.objectStorage.objects.set(intent.object_path, {
+        buffer: Buffer.from('uploaded-bytes'),
+        contentType: 'image/jpeg',
+      })
+      await confirmFileUpload({ userId: 'student-1', fileId: intent.file_id, providers })
+
+      const second = await confirmFileUpload({
+        userId: 'student-1',
+        fileId: intent.file_id,
+        providers,
+      })
+
+      expect(second.lifecycle).toBe('available')
+    })
+
+    it('keeps the file pending and never promotes it when no object was uploaded', async () => {
+      const providers = createTestProviders()
+      const intent = await createUploadIntent({
+        userId: 'student-1',
+        purpose: 'avatar',
+        contentType: 'image/jpeg',
+        providers,
+      })
+
+      await expect(
+        confirmFileUpload({ userId: 'student-1', fileId: intent.file_id, providers }),
+      ).rejects.toMatchObject({ code: ErrorCode.CONFLICT })
+
+      const record = await providers.domainStore.getFileRecord(intent.file_id)
+      expect(record?.lifecycle).toBe('pending_upload')
+      expect(providers.objectStorage.objects.has(intent.object_path)).toBe(false)
+    })
+
+    it('rejects the file when the stored content type does not match the intent', async () => {
+      const providers = createTestProviders()
+      const intent = await createUploadIntent({
+        userId: 'student-1',
+        purpose: 'permit_attachment',
+        contentType: 'application/pdf',
+        providers,
+      })
+      providers.objectStorage.objects.set(intent.object_path, {
+        buffer: Buffer.from('not-a-pdf'),
+        contentType: 'image/jpeg',
+      })
+
+      await expect(
+        confirmFileUpload({ userId: 'student-1', fileId: intent.file_id, providers }),
+      ).rejects.toMatchObject({ code: ErrorCode.CONFLICT })
+
+      const record = await providers.domainStore.getFileRecord(intent.file_id)
+      expect(record?.lifecycle).toBe('rejected')
+    })
+
+    it('returns a rejected record unchanged on re-confirmation and keeps its download denied', async () => {
+      const providers = createTestProviders()
+      const intent = await createUploadIntent({
+        userId: 'student-1',
+        purpose: 'permit_attachment',
+        contentType: 'application/pdf',
+        providers,
+      })
+      providers.objectStorage.objects.set(intent.object_path, {
+        buffer: Buffer.from('not-a-pdf'),
+        contentType: 'image/jpeg',
+      })
+      await expect(
+        confirmFileUpload({ userId: 'student-1', fileId: intent.file_id, providers }),
+      ).rejects.toMatchObject({ code: ErrorCode.CONFLICT })
+
+      // Explicit lifecycle rule: re-confirmation never promotes a rejected record —
+      // it echoes the stored 'rejected' state (HTTP 200 to the caller) and the object
+      // check is not re-run. Download stays denied; a new intent is required.
+      const reconfirmed = await confirmFileUpload({
+        userId: 'student-1',
+        fileId: intent.file_id,
+        providers,
+      })
+      expect(reconfirmed.lifecycle).toBe('rejected')
+
+      await expect(
+        getFile({ userId: 'student-1', fileId: intent.file_id, userScopes: [], providers }),
+      ).rejects.toMatchObject({ code: ErrorCode.RESOURCE_NOT_FOUND })
+      const record = await providers.domainStore.getFileRecord(intent.file_id)
+      expect(record?.lifecycle).toBe('rejected')
+    })
+
+    it('rejects the file when the stored size does not match the intent', async () => {
+      const providers = createTestProviders()
+      const intent = await createUploadIntent({
+        userId: 'student-1',
+        purpose: 'avatar',
+        contentType: 'image/jpeg',
+        sizeBytes: 1000,
+        providers,
+      })
+      providers.objectStorage.objects.set(intent.object_path, {
+        buffer: Buffer.alloc(512),
+        contentType: 'image/jpeg',
+      })
+
+      await expect(
+        confirmFileUpload({ userId: 'student-1', fileId: intent.file_id, providers }),
+      ).rejects.toMatchObject({ code: ErrorCode.CONFLICT })
+
+      const record = await providers.domainStore.getFileRecord(intent.file_id)
+      expect(record?.lifecycle).toBe('rejected')
+    })
+
+    it('keeps the file pending when the provider cannot verify objects (no statObject)', async () => {
+      const providers = createTestProviders()
+      const intent = await createUploadIntent({
+        userId: 'student-1',
+        purpose: 'avatar',
+        contentType: 'image/jpeg',
+        providers,
+      })
+      providers.objectStorage.objects.set(intent.object_path, {
+        buffer: Buffer.from('uploaded-bytes'),
+        contentType: 'image/jpeg',
+      })
+      // SAFETY: shadows the prototype method with an own undefined property so the
+      // optional verification capability is absent and confirmation fails closed.
+      Object.defineProperty(providers.objectStorage, 'statObject', { value: undefined })
+
+      await expect(
+        confirmFileUpload({ userId: 'student-1', fileId: intent.file_id, providers }),
+      ).rejects.toMatchObject({ code: ErrorCode.CONFLICT })
+
+      const record = await providers.domainStore.getFileRecord(intent.file_id)
+      expect(record?.lifecycle).toBe('pending_upload')
+    })
+
+    it('keeps the file pending when storage verification fails with a dependency error', async () => {
+      const providers = createTestProviders()
+      const intent = await createUploadIntent({
+        userId: 'student-1',
+        purpose: 'avatar',
+        contentType: 'image/jpeg',
+        providers,
+      })
+      providers.objectStorage.statObject = async () => {
+        throw AppError.dependencyUnavailable('object storage')
+      }
+
+      await expect(
+        confirmFileUpload({ userId: 'student-1', fileId: intent.file_id, providers }),
+      ).rejects.toMatchObject({ code: ErrorCode.DEPENDENCY_UNAVAILABLE })
+
+      const record = await providers.domainStore.getFileRecord(intent.file_id)
+      expect(record?.lifecycle).toBe('pending_upload')
     })
 
     it('rejects confirming file owned by another user', async () => {
@@ -187,6 +365,35 @@ describe('files service', () => {
         code: ErrorCode.FORBIDDEN,
       })
     })
+
+    it('keeps pending Adiwiyata metadata under report-transaction control', async () => {
+      const providers = createTestProviders()
+      const file = await providers.domainStore.createFileRecord({
+        userId: 'student-1',
+        purpose: 'adiwiyata_report',
+        objectPath: 'reports/pending.jpg',
+        contentType: 'image/jpeg',
+        lifecycle: 'pending_upload',
+      })
+      providers.objectStorage.objects.set(file.object_path, {
+        buffer: Buffer.from('evidence'),
+        contentType: 'image/jpeg',
+      })
+
+      await expect(confirmFileUpload({
+        userId: 'student-1',
+        fileId: file.id,
+        providers,
+      })).rejects.toMatchObject({ code: ErrorCode.CONFLICT })
+      await expect(deleteFile({
+        userId: 'student-1',
+        fileId: file.id,
+        providers,
+      })).rejects.toMatchObject({ code: ErrorCode.CONFLICT })
+
+      expect((await providers.domainStore.getFileRecord(file.id))?.lifecycle).toBe('pending_upload')
+      expect(providers.objectStorage.objects.has(file.object_path)).toBe(true)
+    })
   })
 
   describe('getFile and deleteFile', () => {
@@ -197,6 +404,10 @@ describe('files service', () => {
         purpose: 'avatar',
         contentType: 'image/jpeg',
         providers,
+      })
+      providers.objectStorage.objects.set(intent.object_path, {
+        buffer: Buffer.from('uploaded-bytes'),
+        contentType: 'image/jpeg',
       })
       await confirmFileUpload({
         userId: 'student-1',
@@ -222,6 +433,49 @@ describe('files service', () => {
       expect(staffView.file.id).toBe(intent.file_id)
     })
 
+    it('denies download for a pending file instead of issuing a URL', async () => {
+      const providers = createTestProviders()
+      const intent = await createUploadIntent({
+        userId: 'student-1',
+        purpose: 'avatar',
+        contentType: 'image/jpeg',
+        providers,
+      })
+      providers.objectStorage.objects.set(intent.object_path, {
+        buffer: Buffer.from('uploaded-bytes'),
+        contentType: 'image/jpeg',
+      })
+
+      await expect(
+        getFile({ userId: 'student-1', fileId: intent.file_id, userScopes: [], providers }),
+      ).rejects.toMatchObject({ code: ErrorCode.CONFLICT })
+
+      const record = await providers.domainStore.getFileRecord(intent.file_id)
+      expect(record?.lifecycle).toBe('pending_upload')
+    })
+
+    it('denies download for a rejected file', async () => {
+      const providers = createTestProviders()
+      const intent = await createUploadIntent({
+        userId: 'student-1',
+        purpose: 'avatar',
+        contentType: 'image/jpeg',
+        sizeBytes: 1000,
+        providers,
+      })
+      providers.objectStorage.objects.set(intent.object_path, {
+        buffer: Buffer.alloc(512),
+        contentType: 'image/jpeg',
+      })
+      await expect(
+        confirmFileUpload({ userId: 'student-1', fileId: intent.file_id, providers }),
+      ).rejects.toMatchObject({ code: ErrorCode.CONFLICT })
+
+      await expect(
+        getFile({ userId: 'student-1', fileId: intent.file_id, userScopes: [], providers }),
+      ).rejects.toMatchObject({ code: ErrorCode.RESOURCE_NOT_FOUND })
+    })
+
     it('deletes file and marks lifecycle as deleted', async () => {
       const providers = createTestProviders()
       const intent = await createUploadIntent({
@@ -230,14 +484,14 @@ describe('files service', () => {
         contentType: 'image/jpeg',
         providers,
       })
+      providers.objectStorage.objects.set(intent.object_path, {
+        buffer: Buffer.from('fixture'),
+        contentType: 'image/jpeg',
+      })
       await confirmFileUpload({
         userId: 'student-1',
         fileId: intent.file_id,
         providers,
-      })
-      providers.objectStorage.objects.set(intent.object_path, {
-        buffer: Buffer.from('fixture'),
-        contentType: 'image/jpeg',
       })
 
       await deleteFile({
@@ -250,6 +504,98 @@ describe('files service', () => {
       const record = await providers.domainStore.getFileRecord(intent.file_id)
       expect(record?.lifecycle).toBe('deleted')
       expect(providers.objectStorage.objects.has(intent.object_path)).toBe(false)
+    })
+
+    it('allows only an owner or an approved Astra administrator with scope to read Adiwiyata evidence', async () => {
+      const providers = createTestProviders()
+      providers.domainStore.profiles.set('teacher-1', {
+        user_id: 'teacher-1',
+        full_name: 'Teacher',
+        role: 'teacher',
+        lifecycle_status: 'approved',
+      })
+      providers.domainStore.profiles.set('school-admin-1', {
+        user_id: 'school-admin-1',
+        full_name: 'School Admin',
+        role: 'school_admin',
+        lifecycle_status: 'approved',
+      })
+      providers.domainStore.profiles.set('platform-admin-pending', {
+        user_id: 'platform-admin-pending',
+        full_name: 'Pending Admin',
+        role: 'platform_admin',
+        lifecycle_status: 'pending',
+      })
+      const file = await providers.domainStore.createFileRecord({
+        userId: 'student-1',
+        purpose: 'adiwiyata_report',
+        objectPath: 'reports/private.jpg',
+        contentType: 'image/jpeg',
+        lifecycle: 'available',
+      })
+
+      providers.objectStorage.getSignedAdiwiyataReportUrl = async () => 'https://storage.local/private'
+      const owner = await getFile({ userId: 'student-1', fileId: file.id, providers })
+      expect(owner.download_url).toBe('https://storage.local/private')
+
+      await expect(getFile({
+        userId: 'teacher-1',
+        fileId: file.id,
+        userScopes: ['files:read:any'],
+        providers,
+      })).rejects.toMatchObject({ code: ErrorCode.FORBIDDEN })
+      await expect(getFile({
+        userId: 'school-admin-1',
+        fileId: file.id,
+        userScopes: ['files:read:any'],
+        providers,
+      })).resolves.toMatchObject({ file: { id: file.id }, download_url: 'https://storage.local/private' })
+      await expect(getFile({
+        userId: 'platform-admin-pending',
+        fileId: file.id,
+        userScopes: ['files:read:any'],
+        providers,
+      })).rejects.toMatchObject({ code: ErrorCode.FORBIDDEN })
+    })
+
+    it('does not issue a report URL after the file retention deadline', async () => {
+      const providers = createTestProviders()
+      const file = await providers.domainStore.createFileRecord({
+        userId: 'student-1',
+        purpose: 'adiwiyata_report',
+        objectPath: 'reports/expired.jpg',
+        contentType: 'image/jpeg',
+        lifecycle: 'available',
+      })
+      providers.domainStore.files.get(file.id)!.created_at = '2024-01-01T00:00:00.000Z'
+      const signedUrl = vi.fn(async () => 'https://storage.local/expired')
+      providers.objectStorage.getSignedAdiwiyataReportUrl = signedUrl
+
+      const result = await getFile({ userId: 'student-1', fileId: file.id, providers })
+
+      expect(result.download_url).toBeNull()
+      expect(signedUrl).not.toHaveBeenCalled()
+    })
+
+    it('caps a photo URL at the exact 365-day file deadline and preserves metadata afterward', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      try {
+        const providers = createTestProviders()
+        const file = await providers.domainStore.createFileRecord({ userId: 'student-1', purpose: 'adiwiyata_report', objectPath: 'reports/deadline.jpg', contentType: 'image/jpeg', lifecycle: 'available' })
+        providers.domainStore.files.get(file.id)!.created_at = '2025-09-30T00:00:00.000Z'
+        const signedUrl = vi.fn(async () => 'https://storage.local/bounded')
+        providers.objectStorage.getSignedAdiwiyataReportUrl = signedUrl
+        vi.setSystemTime(new Date('2026-09-29T23:59:58.500Z'))
+        expect((await getFile({ userId: 'student-1', fileId: file.id, providers })).download_url).toBe('https://storage.local/bounded')
+        expect(signedUrl).toHaveBeenLastCalledWith(file.object_path, 1)
+        vi.setSystemTime(new Date('2026-09-30T00:00:00.000Z'))
+        const expired = await getFile({ userId: 'student-1', fileId: file.id, providers })
+        expect(expired.download_url).toBeNull()
+        expect(expired.file.lifecycle).toBe('available')
+        expect(signedUrl).toHaveBeenCalledTimes(1)
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })

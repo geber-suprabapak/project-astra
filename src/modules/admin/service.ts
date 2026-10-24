@@ -2228,23 +2228,7 @@ export async function approveLeaveRequest(params: {
     approvalStatus: 'approved',
     status: true,
     durationDays,
-  })
-
-  await params.providers.domainStore.insertAuditLog({
-    actor_id: params.actorId,
-    action: 'approve_leave_request',
-    entity_type: 'leave_request',
-    entity_id: params.id,
-    details: {
-      previous_status: lr.approval_status,
-      student_user_id: lr.user_id,
-      category: lr.category,
-      date: lr.date,
-      duration_days: durationDays,
-      requested_start_date: updated.requested_start_date,
-      original_end_date: updated.original_end_date,
-      effective_end_date: updated.effective_end_date,
-    },
+    audit: { actorId: params.actorId, action: 'approve_leave_request' },
   })
 
   await params.providers.domainStore.enqueueNotification({
@@ -2311,20 +2295,7 @@ export async function rejectLeaveRequest(params: {
     status: false,
     rejectionReason: params.reason ?? null,
     rejectedAt: new Date().toISOString(),
-  })
-
-  await params.providers.domainStore.insertAuditLog({
-    actor_id: params.actorId,
-    action: 'reject_leave_request',
-    entity_type: 'leave_request',
-    entity_id: params.id,
-    details: {
-      previous_status: lr.approval_status,
-      student_user_id: lr.user_id,
-      category: lr.category,
-      date: lr.date,
-      rejection_reason: params.reason ?? null,
-    },
+    audit: { actorId: params.actorId, action: 'reject_leave_request' },
   })
 
   await params.providers.domainStore.enqueueNotification({
@@ -2369,19 +2340,7 @@ export async function reopenLeaveRequest(params: {
     status: false,
     rejectionReason: null,
     rejectedAt: null,
-  })
-
-  await params.providers.domainStore.insertAuditLog({
-    actor_id: params.actorId,
-    action: 'reopen_leave_request',
-    entity_type: 'leave_request',
-    entity_id: params.id,
-    details: {
-      previous_status: lr.approval_status,
-      student_user_id: lr.user_id,
-      category: lr.category,
-      date: lr.date,
-    },
+    audit: { actorId: params.actorId, action: 'reopen_leave_request' },
   })
 
   await params.providers.domainStore.enqueueNotification({

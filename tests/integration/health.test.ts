@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createApp } from '../../src/app.js'
 import { ErrorCode } from '../../src/lib/errors/codes.js'
+import { getReadiness } from '../../src/modules/health/service.js'
 import {
   MemoryDomainStore,
   MemoryIdentityProvider,
@@ -220,6 +221,7 @@ describe('integration: runtime health & readiness probes', () => {
     expect(res.status).toBe(200)
     expect(body.success).toBe(true)
     expect(body.data.status).toBe('unhealthy')
+    expect(body.message).toBe('Service unhealthy.')
     expect(body.meta.request_id).toBeTruthy()
     // Verify no provider names or internal database keys exist in response body
     const bodyStr = JSON.stringify(body)
@@ -230,6 +232,103 @@ describe('integration: runtime health & readiness probes', () => {
     expect(bodyStr).not.toContain('redis')
     expect(bodyStr).not.toContain('postgres')
     expect(bodyStr).not.toContain('supabase')
+  })
+
+  it('pairs the mobile health message with a healthy status when every dependency is ready', async () => {
+    const domainStore = new MemoryDomainStore()
+    const objectStorage = new MemoryObjectStorage()
+    const identityProvider = new MemoryIdentityProvider()
+    const robinClient = createMockRobinClient(true)
+
+    const app = createApp({
+      providers: { domainStore, objectStorage, identityProvider, robinClient },
+    })
+
+    const res = await app.request('/v1/mobile/health')
+    // SAFETY: /v1/mobile/health returns standard success envelope with health status
+    const body = (await res.json()) as {
+      success: boolean
+      data: { status: 'healthy' | 'unhealthy' }
+      message: string
+    }
+
+    expect(res.status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.data.status).toBe('healthy')
+    expect(body.message).toBe('Service healthy.')
+  })
+
+  it('keeps /live process-only: 200 even when every dependency is unhealthy', async () => {
+    const domainStore = new MemoryDomainStore()
+    domainStore.isHealthy = false
+    const objectStorage = new MemoryObjectStorage()
+    objectStorage.isHealthy = false
+    const identityProvider = new MemoryIdentityProvider()
+    identityProvider.isHealthy = false
+    const robinClient = createMockRobinClient(false)
+
+    const app = createApp({
+      providers: { domainStore, objectStorage, identityProvider, robinClient },
+    })
+
+    const res = await app.request('/live')
+    // SAFETY: /live endpoint returns standard JSON status object
+    const body = (await res.json()) as { status: string }
+
+    expect(res.status).toBe(200)
+    expect(body).toEqual({ status: 'ok' })
+  })
+
+  it('returns 503 on /ready within the aggregate deadline when a dependency hangs', async () => {
+    const domainStore = new MemoryDomainStore()
+    // SAFETY: simulated hung PostgreSQL readiness probe; never settles.
+    domainStore.checkHealth = () => new Promise<boolean>(() => {})
+    const objectStorage = new MemoryObjectStorage()
+    const identityProvider = new MemoryIdentityProvider()
+    const robinClient = createMockRobinClient(true)
+
+    const providers = { domainStore, objectStorage, identityProvider, robinClient }
+    const app = createApp({
+      providers,
+      getReadiness: () => getReadiness(providers, { deadlineMs: 50 }),
+    })
+
+    const start = Date.now()
+    const res = await app.request('/ready')
+    const elapsedMs = Date.now() - start
+    // SAFETY: /ready endpoint returns ReadinessResult shape
+    const body = (await res.json()) as { healthy: boolean; checks: { database: string } }
+
+    expect(elapsedMs).toBeLessThan(2000)
+    expect(res.status).toBe(503)
+    expect(body.healthy).toBe(false)
+    expect(body.checks.database).toBe('fail')
+  })
+
+  it('keeps /v1/mobile/health truthful and sanitized when a dependency hangs', async () => {
+    const domainStore = new MemoryDomainStore()
+    // SAFETY: simulated hung PostgreSQL readiness probe; never settles.
+    domainStore.checkHealth = () => new Promise<boolean>(() => {})
+    const objectStorage = new MemoryObjectStorage()
+    const identityProvider = new MemoryIdentityProvider()
+    const robinClient = createMockRobinClient(true)
+
+    const providers = { domainStore, objectStorage, identityProvider, robinClient }
+    const app = createApp({
+      providers,
+      getReadiness: () => getReadiness(providers, { deadlineMs: 50 }),
+    })
+
+    const res = await app.request('/v1/mobile/health')
+    // SAFETY: /v1/mobile/health returns standard success envelope with health status
+    const body = (await res.json()) as { data: { status: string }; message: string }
+
+    expect(res.status).toBe(200)
+    expect(body.data.status).toBe('unhealthy')
+    expect(body.message).toBe('Service unhealthy.')
+    const bodyStr = JSON.stringify(body)
+    expect(bodyStr).not.toContain('database')
+    expect(bodyStr).not.toContain('postgres')
   })
 
   it('enforces auth on protected endpoints', async () => {

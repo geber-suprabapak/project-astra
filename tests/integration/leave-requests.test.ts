@@ -473,6 +473,46 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     expect(adminDeleteRes.status).toBe(200)
   })
 
+  it('does not expose an approved Leave Request when its required audit write fails', async () => {
+    const { domainStore, identityProvider, app } = createIntegrationEnvironment()
+    await setupTestUsers(domainStore, identityProvider)
+    const adminToken = tokenFor({
+      sub: 'admin-1',
+      roles: ['school_admin'],
+      scope: 'openid profile admin:read leave:read leave:approve',
+      mfa_verified: true,
+      must_change_password: false,
+    })
+    const permit = await domainStore.createLeaveRequest({
+      user_id: 'student-1',
+      category: 'sakit',
+      description: 'Synthetic audit-failure route case',
+      date: '2026-08-21T00:00:00+07:00',
+      approval_status: 'pending',
+    })
+    domainStore.insertAuditLog = async () => {
+      throw new Error('synthetic audit failure')
+    }
+
+    const response = await app.request(`/v1/admin/leave-requests/${permit.id}/approve`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ duration_days: 3 }),
+    })
+
+    expect(response.status).toBe(500)
+    expect(await domainStore.getLeaveRequestById(permit.id)).toMatchObject({
+      approval_status: 'pending',
+      status: false,
+      original_end_date: null,
+      effective_end_date: null,
+    })
+    expect(await domainStore.getAuditLogs('leave_request', permit.id)).toHaveLength(0)
+  })
+
   it('Student submits a leave request and administrator updates it via PATCH', async () => {
     const { domainStore, identityProvider, app } = createIntegrationEnvironment()
     await setupTestUsers(domainStore, identityProvider)

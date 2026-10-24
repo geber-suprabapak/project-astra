@@ -35,10 +35,12 @@ export function createMobileHealthRouter(deps: HealthRouterDeps = {}) {
   router.get('/', async (c) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const result = deps.getReadiness ? await deps.getReadiness() : await getReadiness(providers)
+    // SAFETY: the human-readable message must agree with the machine status so
+    // Mobile never sees a healthy message for an unhealthy service.
     return successResponse(
       c,
       { status: result.healthy ? 'healthy' : 'unhealthy' },
-      'Service healthy.',
+      result.healthy ? 'Service healthy.' : 'Service unhealthy.',
     )
   })
 

@@ -198,6 +198,111 @@ describe('Attendance Face Verification & Attempts (Ticket 09)', () => {
     expect(attendances).toHaveLength(0)
   })
 
+  it('malformed empty Robin status never creates a successful Attempt or Attendance', async () => {
+    const { domainStore, providers } = createTestEnvironment({
+      identify: async () => ({
+        status: '',
+        processTimeMs: 12,
+        message: 'Malformed synthetic result',
+      }),
+    })
+    await setupStudentAttendance(domainStore, 'student-1')
+
+    await expect(
+      submit({
+        userId: 'student-1',
+        actionType: 'check_in',
+        imageBase64: 'data:image/jpeg;base64,dGVzdA==',
+        latitude: -6.2,
+        longitude: 106.816666,
+        token: 'jwt-student-token',
+        requestId: 'req-malformed-robin-1',
+        providers,
+      }),
+    ).rejects.toThrow()
+
+    const attempts = await domainStore.listAttendanceAttempts({ userId: 'student-1' })
+    expect(attempts).toHaveLength(1)
+    expect(attempts[0].status).not.toBe('success')
+
+    const attendances = await domainStore.listAttendances({ userId: 'student-1' })
+    expect(attendances).toHaveLength(0)
+  })
+
+  it('replayed check-in after a committed check-in does not create a second Attendance', async () => {
+    let robinCalls = 0
+    const { domainStore, providers } = createTestEnvironment({
+      identify: async () => {
+        robinCalls += 1
+        return {
+          status: 'ok',
+          confidence: 0.95,
+          processTimeMs: 12,
+          message: 'Face verified successfully',
+        }
+      },
+    })
+    await setupStudentAttendance(domainStore, 'student-1')
+
+    const first = await submit({
+      userId: 'student-1',
+      actionType: 'check_in',
+      imageBase64: 'data:image/jpeg;base64,dGVzdA==',
+      latitude: -6.2,
+      longitude: 106.816666,
+      token: 'jwt-student-token',
+      requestId: 'req-replay-first',
+      providers,
+    })
+
+    await expect(
+      submit({
+        userId: 'student-1',
+        actionType: 'check_in',
+        imageBase64: 'data:image/jpeg;base64,dGVzdA==',
+        latitude: -6.2,
+        longitude: 106.816666,
+        token: 'jwt-student-token',
+        requestId: 'req-replay-second',
+        providers,
+      }),
+    ).rejects.toThrow("Expected action type 'check_out', got 'check_in'.")
+
+    const attempts = await domainStore.listAttendanceAttempts({ userId: 'student-1' })
+    const attendances = await domainStore.listAttendances({ userId: 'student-1' })
+    expect(first.attendance_type).toBe('check_in')
+    expect(robinCalls).toBe(1)
+    expect(attempts).toHaveLength(1)
+    expect(attendances).toHaveLength(1)
+  })
+
+  it('Attendance save failure never leaves a successful Attempt without a record', async () => {
+    const { domainStore, providers } = createTestEnvironment()
+    await setupStudentAttendance(domainStore, 'student-1')
+    domainStore.saveAttendanceRecord = async () => ({
+      success: false,
+      message: 'Synthetic persistence failure',
+    })
+
+    await expect(
+      submit({
+        userId: 'student-1',
+        actionType: 'check_in',
+        imageBase64: 'data:image/jpeg;base64,dGVzdA==',
+        latitude: -6.2,
+        longitude: 106.816666,
+        token: 'jwt-student-token',
+        requestId: 'req-save-failure',
+        providers,
+      }),
+    ).rejects.toThrow('Failed to save attendance record: Synthetic persistence failure')
+
+    const attempts = await domainStore.listAttendanceAttempts({ userId: 'student-1' })
+    const attendances = await domainStore.listAttendances({ userId: 'student-1' })
+    expect(attempts.some((attempt) => attempt.status === 'success')).toBe(false)
+    expect(attendances).toHaveLength(0)
+  })
+
   it('Robin 400 Bad Request (low quality / no face) creates Attendance Attempt (status: failed) and NEVER creates Attendance', async () => {
     const { domainStore, providers } = createTestEnvironment({
       identify: async () => {
