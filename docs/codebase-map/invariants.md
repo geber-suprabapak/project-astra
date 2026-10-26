@@ -2,7 +2,7 @@
 
 ## INV-ASTRA-010 — Monthly attendance counts days
 
-**Rule:** Present, late and absent monthly totals count the aggregated daily calendar items. Repeated attendance records and checkout on the same date do not add days.
+**Rule:** Monthly totals count days, not requests. Present, late and absent use aggregated daily attendance; approved leave expands inclusively through its effective end, clipped to the selected month, with legacy approvals treated as one day. Historical date filters reach the DomainStore before its collection limit. Repeated attendance records and checkout on the same date do not add days.
 **Evidence:** `src/modules/attendance/service.ts`, `tests/integration/profile-history.test.ts`.
 
 ## INV-ASTRA-008 — Identity success precedes student approval

@@ -242,6 +242,74 @@ async function setupTestScenario(
 }
 
 describe('Show Student Profile and Attendance History Integration (Ticket 12)', () => {
+  it.each([
+    ['2026-10-29T17:00:00Z', '2026-11-03', '2026-11-01', 2026, 10, ['2026-10-30', '2026-10-31']],
+    ['2026-10-29T17:00:00Z', '2026-11-03', '2026-11-01', 2026, 11, ['2026-11-01']],
+    ['2026-10-29T17:00:00Z', '2026-11-03', '2026-11-01', 2026, 12, []],
+    ['2028-02-28', '2028-03-01', null, 2028, 2, ['2028-02-28', '2028-02-29']],
+    ['2028-02-28', '2028-03-01', null, 2028, 3, ['2028-03-01']],
+  ] as const)(
+    'clips effective leave period starting %s to the selected month',
+    async (date, originalEnd, effectiveEnd, year, month, expectedDates) => {
+      const { domainStore, identityProvider, app } = createIntegrationEnvironment()
+      await setupTestScenario(domainStore, identityProvider)
+      domainStore.permits.push({
+        id: 'multi-day',
+        user_id: 'student-1',
+        kategori_izin: 'sakit',
+        deskripsi: 'Recovery',
+        status: true,
+        link_foto: null,
+        tanggal: date,
+        approval_status: 'approved',
+        original_end_date: originalEnd,
+        effective_end_date: effectiveEnd,
+      })
+      const response = await app.request(
+        `/v1/mobile/attendance/calendar?year=${year}&month=${month}`,
+        {
+          headers: { Authorization: `Bearer ${tokenFor({ sub: 'student-1' })}` },
+        },
+      )
+      expect(response.status).toBe(200)
+      const body = await response.json()
+      expect(body.data.items.map((item: { date: string }) => item.date)).toEqual(expectedDates)
+      expect(body.data.stats.sakit).toBe(expectedDates.length)
+    },
+  )
+
+  it('filters historical dates before the attendance collection limit', async () => {
+    const { domainStore, identityProvider, app } = createIntegrationEnvironment()
+    await setupTestScenario(domainStore, identityProvider)
+    for (let day = 0; day < 105; day++) {
+      const date = new Date(Date.UTC(2026, 8, 1 + day)).toISOString()
+      domainStore.attendancesList.push({
+        ...domainStore.attendancesList[0],
+        id: `newer-${day}`,
+        date: date.slice(0, 10),
+        created_at: date,
+      })
+    }
+    const headers = { Authorization: `Bearer ${tokenFor({ sub: 'student-1' })}` }
+    for (const path of ['/v1/mobile/attendance', '/v1/mobile/attendance/history']) {
+      const response = await app.request(`${path}?start_date=2026-08-01&end_date=2026-08-31`, {
+        headers,
+      })
+      expect(response.status).toBe(200)
+      const body = await response.json()
+      expect(body.data.total).toBe(3)
+      expect(
+        body.data.items.every((item: { date: string }) => item.date.startsWith('2026-08-')),
+      ).toBe(true)
+    }
+    const response = await app.request('/v1/mobile/attendance/calendar?year=2026&month=8', {
+      headers,
+    })
+    const body = await response.json()
+    expect(body.data.stats.hadir).toBe(1)
+    expect(body.data.stats.terlambat).toBe(1)
+  })
+
   it('counts all distinct attendance days in monthly statistics', async () => {
     const { domainStore, identityProvider, app } = createIntegrationEnvironment()
     await setupTestScenario(domainStore, identityProvider)

@@ -2,6 +2,7 @@ import { AppError } from '../../lib/errors/app-error.js'
 import { ErrorCode } from '../../lib/errors/codes.js'
 import { defaultProviders } from '../../providers/index.js'
 import type { AppProviders, AttendanceRecord, Schedule } from '../../providers/types.js'
+import { getLeavePeriodFields } from '../../providers/types.js'
 import {
   getDayKeyWIB,
   getTodayWIB,
@@ -528,18 +529,15 @@ export async function getAttendanceHistory(params: {
 
   const all = await params.providers.domainStore.listAttendances({
     userId: params.userId,
+    startDate: params.startDate,
+    endDate: params.endDate,
     limit: 100,
-  })
-  const filtered = all.filter((record) => {
-    if (params.startDate && record.date < params.startDate) return false
-    if (params.endDate && record.date > params.endDate) return false
-    return true
   })
   const limit = Math.min(Math.max(params.limit ?? 100, 1), 100)
 
   return {
-    items: filtered.slice(0, limit),
-    total: filtered.length,
+    items: all.slice(0, limit),
+    total: all.length,
   }
 }
 
@@ -580,19 +578,19 @@ export async function getAttendanceCalendar(params: {
   const endDate = `${params.year}-${String(params.month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
 
   const [attendance, permits, exceptions] = await Promise.all([
-    params.providers.domainStore.listAttendances({ userId: params.userId, limit: 100 }),
+    params.providers.domainStore.listAttendances({
+      userId: params.userId,
+      startDate,
+      endDate,
+      limit: 100,
+    }),
     params.providers.domainStore.getPermitHistory(params.userId),
     params.providers.domainStore.listCalendarExceptions({ startDate, endDate }),
   ])
   const monthAttendance = attendance.filter(
     (record) => record.date >= startDate && record.date <= endDate,
   )
-  const approvedPermits = permits.filter(
-    (permit) =>
-      permit.approval_status === 'approved' &&
-      permit.tanggal.slice(0, 10) >= startDate &&
-      permit.tanggal.slice(0, 10) <= endDate,
-  )
+  const approvedPermits = permits.filter((permit) => permit.approval_status === 'approved')
 
   const items: Array<{
     date: string
@@ -634,15 +632,23 @@ export async function getAttendanceCalendar(params: {
   }
 
   for (const permit of approvedPermits) {
-    const date = permit.tanggal.slice(0, 10)
+    const period = getLeavePeriodFields({ ...permit, date: permit.tanggal })
+    const firstDate =
+      period.requested_start_date < startDate ? startDate : period.requested_start_date
+    const effectiveEnd = period.effective_end_date ?? period.requested_start_date
+    const lastDate = effectiveEnd > endDate ? endDate : effectiveEnd
+    if (firstDate > lastDate) continue
     const attachmentUrl = permit.link_foto
       ? await params.providers.objectStorage.getSignedPermitUrl(permit.link_foto)
       : null
-    items.push({
-      date,
-      status: permit.kategori_izin === 'sakit' ? 'sick' : 'leave',
-      attachment_url: attachmentUrl,
-    })
+    const end = Date.parse(`${lastDate}T00:00:00Z`)
+    for (let day = Date.parse(`${firstDate}T00:00:00Z`); day <= end; day += 86_400_000) {
+      items.push({
+        date: new Date(day).toISOString().slice(0, 10),
+        status: permit.kategori_izin === 'sakit' ? 'sick' : 'leave',
+        attachment_url: attachmentUrl,
+      })
+    }
   }
 
   for (const exception of exceptions) {
@@ -664,8 +670,8 @@ export async function getAttendanceCalendar(params: {
       hadir: items.filter((item) => item.status === 'present').length,
       terlambat: items.filter((item) => item.status === 'late').length,
       alpha: items.filter((item) => item.status === 'absent').length,
-      sakit: approvedPermits.filter((permit) => permit.kategori_izin === 'sakit').length,
-      izin: approvedPermits.filter((permit) => permit.kategori_izin !== 'sakit').length,
+      sakit: items.filter((item) => item.status === 'sick').length,
+      izin: items.filter((item) => item.status === 'leave').length,
     },
     items: items.sort((a, b) => a.date.localeCompare(b.date)),
   }
