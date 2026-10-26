@@ -242,6 +242,31 @@ async function setupTestScenario(
 }
 
 describe('Show Student Profile and Attendance History Integration (Ticket 12)', () => {
+  it('counts all distinct attendance days in monthly statistics', async () => {
+    const { domainStore, identityProvider, app } = createIntegrationEnvironment()
+    await setupTestScenario(domainStore, identityProvider)
+    for (const [id, date, status] of [
+      ['present-two', '2026-08-12', 'Hadir'],
+      ['present-duplicate', '2026-08-12', 'Hadir'],
+      ['late-two', '2026-08-13', 'Terlambat'],
+      ['absent-one', '2026-08-14', 'Alpha'],
+      ['absent-two', '2026-08-16', 'Alpha'],
+    ] as const) {
+      domainStore.attendancesList.push({
+        ...domainStore.attendancesList[0],
+        id,
+        date,
+        status,
+      })
+    }
+    const response = await app.request('/v1/mobile/attendance/calendar?year=2026&month=8', {
+      headers: { Authorization: `Bearer ${tokenFor({ sub: 'student-1' })}` },
+    })
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.data.stats).toEqual({ hadir: 2, terlambat: 2, alpha: 2, sakit: 1, izin: 0 })
+  })
+
   it('GET /v1/mobile/profile returns authorized profile with class enrollment and lifecycle context', async () => {
     const { domainStore, identityProvider, app } = createIntegrationEnvironment()
     await setupTestScenario(domainStore, identityProvider)

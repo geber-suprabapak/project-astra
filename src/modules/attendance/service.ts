@@ -661,18 +661,9 @@ export async function getAttendanceCalendar(params: {
     start_date: startDate,
     end_date: endDate,
     stats: {
-      hadir:
-        monthAttendance.filter(
-          (record) =>
-            record.status === 'Hadir' ||
-            // SAFETY: Legacy records may have unnormalized status 'Datang'
-            (record.status as string) === 'Datang',
-        ).length > 0
-          ? 1
-          : 0,
-      terlambat:
-        monthAttendance.filter((record) => record.status === 'Terlambat').length > 0 ? 1 : 0,
-      alpha: monthAttendance.filter((record) => record.status === 'Alpha').length > 0 ? 1 : 0,
+      hadir: items.filter((item) => item.status === 'present').length,
+      terlambat: items.filter((item) => item.status === 'late').length,
+      alpha: items.filter((item) => item.status === 'absent').length,
       sakit: approvedPermits.filter((permit) => permit.kategori_izin === 'sakit').length,
       izin: approvedPermits.filter((permit) => permit.kategori_izin !== 'sakit').length,
     },

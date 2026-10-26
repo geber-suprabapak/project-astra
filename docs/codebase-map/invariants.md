@@ -1,5 +1,10 @@
 # Invariants
 
+## INV-ASTRA-010 — Monthly attendance counts days
+
+**Rule:** Present, late and absent monthly totals count the aggregated daily calendar items. Repeated attendance records and checkout on the same date do not add days.
+**Evidence:** `src/modules/attendance/service.ts`, `tests/integration/profile-history.test.ts`.
+
 ## INV-ASTRA-008 — Identity success precedes student approval
 
 **Rule:** Assign the student role and activate the identity before writing the approved profile lifecycle. Identity failures leave the previous lifecycle and do not emit approval audit/notification success. Retry repeats idempotent identity operations; Astra's profile gate remains authoritative if the final database write fails. This ordering does not provide a distributed transaction or atomic audit/outbox publication.
