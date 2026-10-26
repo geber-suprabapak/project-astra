@@ -215,6 +215,96 @@ describe('OidcIdentityProvider', () => {
       jwtSecret: 'test-secret-at-least-32-chars-long-12345',
     })
 
+    it.each(['assignUserRole', 'revokeUserRole'] as const)(
+      '%s resolves names to Logto role IDs',
+      async (operation) => {
+        const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+          if (url.endsWith('/oidc/token')) return Response.json({ access_token: 'm2m-test-token' })
+          if (url.includes('/api/roles?'))
+            return Response.json([{ id: 'opaque-student-id', name: 'student' }])
+          if (
+            operation === 'assignUserRole' &&
+            options?.body === JSON.stringify({ roleIds: ['opaque-student-id'] })
+          ) {
+            return new Response(null, { status: 201 })
+          }
+          if (operation === 'revokeUserRole' && url.endsWith('/roles/opaque-student-id')) {
+            return new Response(null, { status: 204 })
+          }
+          return new Response(null, { status: 400 })
+        })
+        globalThis.fetch = fetchMock
+        await expect(configuredProvider[operation]('user-1', 'student')).resolves.toBeUndefined()
+      },
+    )
+
+    it('does not mutate user roles when the requested role is missing', async () => {
+      const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+        if (url.endsWith('/oidc/token')) return Response.json({ access_token: 'm2m-test-token' })
+        return Response.json([])
+      })
+      globalThis.fetch = fetchMock
+      await expect(configuredProvider.assignUserRole('user-1', 'student')).rejects.toThrow()
+      expect(fetchMock.mock.calls.every(([url]) => !String(url).includes('/api/users/'))).toBe(true)
+    })
+
+    it('creates student identities and assigns IDs through the supported roles endpoint', async () => {
+      const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+        if (url.endsWith('/oidc/token')) return Response.json({ access_token: 'm2m-test-token' })
+        if (url.includes('/api/roles?'))
+          return Response.json([{ id: 'student-id', name: 'student' }])
+        if (url.endsWith('/api/users')) return Response.json({ id: 'new-user' })
+        if (
+          url.endsWith('/api/users/new-user/roles') &&
+          options?.body === JSON.stringify({ roleIds: ['student-id'] })
+        ) {
+          return new Response(null, { status: 204 })
+        }
+        return new Response(null, { status: 400 })
+      })
+      globalThis.fetch = fetchMock
+      await expect(
+        configuredProvider.createStudentIdentity({
+          username: '24002',
+          email: 'dummy@example.test',
+          password: 'test-password',
+          name: 'Dummy',
+          roles: ['student'],
+        }),
+      ).resolves.toEqual({ userId: 'new-user' })
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:3001/api/users',
+        expect.objectContaining({
+          body: expect.not.stringContaining('roleNames'),
+        }),
+      )
+    })
+
+    it('reports bulk role assignment failure rather than returning success', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.endsWith('/oidc/token')) return Response.json({ access_token: 'm2m-test-token' })
+        if (url.includes('/api/roles?'))
+          return Response.json([{ id: 'student-id', name: 'student' }])
+        return new Response(null, { status: 500 })
+      })
+      await expect(configuredProvider.assignRoles('user-1', ['student'])).rejects.toThrow(
+        'Failed to assign roles',
+      )
+    })
+
+    it('resolves a role on a later result page', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.endsWith('/oidc/token')) return Response.json({ access_token: 'm2m-test-token' })
+        if (url.endsWith('&page=1'))
+          return Response.json(
+            Array.from({ length: 100 }, (_, i) => ({ id: `role-${i}`, name: `other-${i}` })),
+          )
+        if (url.endsWith('&page=2')) return Response.json([{ id: 'student-id', name: 'student' }])
+        return new Response(null, { status: 201 })
+      })
+      await expect(configuredProvider.assignUserRole('user-1', 'student')).resolves.toBeUndefined()
+    })
+
     it('verifyPassword succeeds when Logto verification endpoint returns 200', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
 

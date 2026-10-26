@@ -2884,9 +2884,10 @@ export class PostgresDomainStore implements DomainStore {
     try {
       const rowsJson = JSON.stringify(params.rows)
       const rejectedJson = JSON.stringify(params.rejectedItems)
+      // Bind serialized JSON as text so postgres.js does not JSON-encode it again.
       const rows = await this.sql<RosterReport[]>`
         INSERT INTO roster_reports (school_id, academic_period_id, total_rows, valid_rows, rejected_rows, status, review_state, rows, rejected_items)
-        VALUES (${params.schoolId ?? null}, ${params.academicPeriodId ?? null}, ${params.totalRows}, ${params.validRows}, ${params.rejectedRows}, ${params.status}, ${params.reviewState}, ${rowsJson}::jsonb, ${rejectedJson}::jsonb)
+        VALUES (${params.schoolId ?? null}, ${params.academicPeriodId ?? null}, ${params.totalRows}, ${params.validRows}, ${params.rejectedRows}, ${params.status}, ${params.reviewState}, ${rowsJson}::text::jsonb, ${rejectedJson}::text::jsonb)
         RETURNING id, school_id, academic_period_id, total_rows, valid_rows, rejected_rows, status, review_state, rows, rejected_items, accepted_at::text, accepted_by, created_at::text, updated_at::text
       `
       if (!rows || rows.length === 0) {
@@ -2903,7 +2904,10 @@ export class PostgresDomainStore implements DomainStore {
   async getRosterReport(id: string): Promise<RosterReport | null> {
     try {
       const rows = await this.sql<RosterReport[]>`
-        SELECT id, school_id, academic_period_id, total_rows, valid_rows, rejected_rows, status, review_state, rows, rejected_items, accepted_at::text, accepted_by, created_at::text, updated_at::text
+        SELECT id, school_id, academic_period_id, total_rows, valid_rows, rejected_rows, status, review_state,
+          CASE WHEN jsonb_typeof(rows) = 'string' THEN (rows #>> '{}')::jsonb ELSE rows END AS rows,
+          CASE WHEN jsonb_typeof(rejected_items) = 'string' THEN (rejected_items #>> '{}')::jsonb ELSE rejected_items END AS rejected_items,
+          accepted_at::text, accepted_by, created_at::text, updated_at::text
         FROM roster_reports
         WHERE id = ${id}
         LIMIT 1
@@ -3026,7 +3030,10 @@ export class PostgresDomainStore implements DomainStore {
       const hasSchoolAdmin = Number(schoolAdminRows[0]?.count ?? 0) > 0
 
       const reportRows = await this.sql<RosterReport[]>`
-        SELECT id, school_id, academic_period_id, total_rows, valid_rows, rejected_rows, status, review_state, rows, rejected_items, accepted_at::text, accepted_by, created_at::text, updated_at::text
+        SELECT id, school_id, academic_period_id, total_rows, valid_rows, rejected_rows, status, review_state,
+          CASE WHEN jsonb_typeof(rows) = 'string' THEN (rows #>> '{}')::jsonb ELSE rows END AS rows,
+          CASE WHEN jsonb_typeof(rejected_items) = 'string' THEN (rejected_items #>> '{}')::jsonb ELSE rejected_items END AS rejected_items,
+          accepted_at::text, accepted_by, created_at::text, updated_at::text
         FROM roster_reports
         ORDER BY created_at DESC
         LIMIT 1

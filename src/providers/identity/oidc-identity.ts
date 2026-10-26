@@ -33,7 +33,6 @@ type LogtoCreateUserPayload = {
   password?: string
   name?: string
   isSuspended: boolean
-  roleNames: readonly IdentityRole[]
   customData: { nis?: string }
 }
 
@@ -398,14 +397,15 @@ export class OidcIdentityProvider implements IdentityProvider {
     }
   }
 
-  async assignRoles(userId: string, roles: string[]): Promise<void> {
+  async assignRoles(userId: string, roles: readonly string[]): Promise<void> {
     if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
       return
     }
 
     try {
       const token = await this.getManagementToken()
-      await fetch(
+      const roleIds = await this.getRoleIds(roles, token)
+      const response = await fetch(
         `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/roles`,
         {
           method: 'PUT',
@@ -413,12 +413,35 @@ export class OidcIdentityProvider implements IdentityProvider {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ roleNames: roles }),
+          body: JSON.stringify({ roleIds }),
         },
       )
+      if (!response.ok) throw AppError.internal('Failed to assign roles in identity provider.')
     } catch (err) {
       logger.warn({ err, userId, roles }, 'Logto role assignment error')
+      throw AppError.internal('Failed to assign roles in identity provider.')
     }
+  }
+
+  private async getRoleIds(names: readonly string[], token: string): Promise<string[]> {
+    const ids = new Map<string, string>()
+    for (let page = 1; names.some((name) => !ids.has(name)); page++) {
+      const response = await fetch(
+        `${this.logtoEndpoint?.replace(/\/$/, '')}/api/roles?type=User&page_size=100&page=${page}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      )
+      if (!response.ok) throw AppError.internal('Failed to retrieve identity provider roles.')
+      const roles = z
+        .array(z.object({ id: z.string(), name: z.string() }))
+        .parse(await response.json())
+      for (const role of roles) ids.set(role.name, role.id)
+      if (roles.length < 100) break
+    }
+    return names.map((name) => {
+      const id = ids.get(name)
+      if (!id) throw AppError.internal(`Identity provider role is not configured: ${name}`)
+      return id
+    })
   }
 
   private m2mToken: string | null = null
@@ -467,7 +490,6 @@ export class OidcIdentityProvider implements IdentityProvider {
         password: params.password,
         name: params.name,
         isSuspended: params.suspended ?? true,
-        roleNames: params.roles ?? ['student'],
         customData: params.username ? { nis: params.username } : {},
       }
 
@@ -490,6 +512,7 @@ export class OidcIdentityProvider implements IdentityProvider {
 
       // SAFETY: Logto user creation response contains an id field.
       const data = (await response.json()) as { id: string }
+      await this.assignRoles(data.id, params.roles ?? ['student'])
       return { userId: data.id }
     } catch (err) {
       if (err instanceof AppError) throw err
@@ -533,6 +556,7 @@ export class OidcIdentityProvider implements IdentityProvider {
 
     try {
       const token = await this.getManagementToken()
+      const roleIds = await this.getRoleIds([role], token)
       const response = await fetch(
         `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/roles`,
         {
@@ -541,7 +565,7 @@ export class OidcIdentityProvider implements IdentityProvider {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ roleNames: [role] }),
+          body: JSON.stringify({ roleIds }),
         },
       )
       if (!response.ok) {
@@ -561,8 +585,9 @@ export class OidcIdentityProvider implements IdentityProvider {
 
     try {
       const token = await this.getManagementToken()
+      const [roleId] = await this.getRoleIds([role], token)
       const response = await fetch(
-        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/roles/${encodeURIComponent(role)}`,
+        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/roles/${encodeURIComponent(roleId)}`,
         {
           method: 'DELETE',
           headers: {
