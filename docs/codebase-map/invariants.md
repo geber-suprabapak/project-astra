@@ -1,5 +1,15 @@
 # Invariants
 
+## INV-ASTRA-008 — Identity success precedes student approval
+
+**Rule:** Assign the student role and activate the identity before writing the approved profile lifecycle. Identity failures leave the previous lifecycle and do not emit approval audit/notification success. Retry repeats idempotent identity operations; Astra's profile gate remains authoritative if the final database write fails. This ordering does not provide a distributed transaction or atomic audit/outbox publication.
+**Evidence:** `src/modules/admin/service.ts`, `tests/unit/modules/admin-student-service.test.ts`, `src/middleware/auth.ts`.
+
+## INV-ASTRA-009 — Serialized JSON persists as structured JSONB
+
+**Rule:** Bind serialized audit details and outbox payloads as text before casting to JSONB, so postgres.js cannot encode them into JSON strings. Read legacy double-encoded audit/outbox records without rewriting durable state. Rejection/reopening clear period fields as SQL nulls in the same transaction as the required audit insert.
+**Evidence:** `src/providers/postgres/domain-store.ts`, `tests/integration/postgres-leave-lifecycle.test.ts`.
+
 ## INV-ADIWIYATA-001 — Coverage uses current obligations only for today
 
 **Rule:** Today's expected Class–Site pairs require an approved eligible student with one valid current enrollment and an active visible Site. Exact-Class schedules override period-wide schedules for the scoped WIB weekday; holidays suppress obligations. A general Site occurs once per eligible Class. Historical dates contain only actual reported/verified pairs, preserving old Classes and inactive Sites without creating retrospective missing obligations.

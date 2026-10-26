@@ -4,7 +4,7 @@ import { env } from '../../config/env.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { ErrorCode } from '../../lib/errors/codes.js'
 import { logger } from '../../lib/logging/logger.js'
-import { normalizeAttendanceRecord } from '../types.js'
+import { normalizeAttendanceRecord, notificationPayloadSchema } from '../types.js'
 import { getLeavePeriodFields } from '../types.js'
 import type {
   Absence,
@@ -62,7 +62,6 @@ import type {
   ListNotificationsFilter,
   Location,
   NotificationChannel,
-  NotificationPayload,
   NotificationRecord,
   NotificationStatus,
   PasswordResetCode,
@@ -97,6 +96,11 @@ import type {
   UserProfile,
 } from '../types.js'
 import { adiwiyataReportLockName } from '../adiwiyata-lock.js'
+
+const storedNotificationPayloadSchema = z.union([
+  notificationPayloadSchema,
+  z.string().transform((value) => notificationPayloadSchema.parse(JSON.parse(value))),
+])
 
 interface AdiwiyataAdminReportDbRow extends AdiwiyataReport {
   site_name: string
@@ -492,7 +496,7 @@ export class PostgresDomainStore implements DomainStore {
                 prior_verified_by: current.verified_by,
                 next_verified_at: report.verified_at,
                 next_verified_by: report.verified_by,
-              })}::jsonb
+              })}::text::jsonb
             )
             RETURNING id
           `
@@ -1308,7 +1312,7 @@ export class PostgresDomainStore implements DomainStore {
                   requested_start_date: period.requested_start_date,
                   original_end_date: period.original_end_date,
                   effective_end_date: period.effective_end_date,
-                })}::jsonb
+                })}::text::jsonb
               )
               RETURNING id
             `
@@ -1345,7 +1349,6 @@ export class PostgresDomainStore implements DomainStore {
 
     try {
       const statusValue = params.status !== undefined ? params.status : false
-      const durationDays = params.durationDays ?? 1
       const updated = await this.sql.begin(async (sql) => {
         const current = await sql<LeaveRequest[]>`
           SELECT id, user_id, category, description, status,
@@ -1362,9 +1365,9 @@ export class PostgresDomainStore implements DomainStore {
           UPDATE leave_requests
           SET approval_status = ${params.approvalStatus},
               status = ${statusValue},
-              original_end_date = CASE WHEN ${params.approvalStatus} = 'approved' THEN date::date + (${durationDays} - 1) ELSE NULL END,
-              effective_end_date = CASE WHEN ${params.approvalStatus} = 'approved' THEN date::date + (${durationDays} - 1) ELSE NULL END,
-              duration_days = CASE WHEN ${params.approvalStatus} = 'approved' THEN ${durationDays} ELSE NULL END,
+              original_end_date = NULL,
+              effective_end_date = NULL,
+              duration_days = NULL,
               rejection_reason = ${params.rejectionReason ?? null},
               rejected_at = ${params.rejectedAt ? params.rejectedAt : params.approvalStatus === 'rejected' ? sql`NOW()` : null},
               updated_at = NOW()
@@ -1393,7 +1396,7 @@ export class PostgresDomainStore implements DomainStore {
               ${params.audit.action},
               'leave_request',
               ${params.id},
-              ${JSON.stringify(auditDetails)}::jsonb
+              ${JSON.stringify(auditDetails)}::text::jsonb
             )
             RETURNING id
           `
@@ -1491,7 +1494,7 @@ export class PostgresDomainStore implements DomainStore {
               previous_effective_end_date: current[0].effective_end_date,
               effective_end_date: target,
               reason: params.reason,
-            })}::jsonb
+            })}::text::jsonb
           )
           RETURNING id
         `
@@ -3066,7 +3069,7 @@ export class PostgresDomainStore implements DomainStore {
       const detailsJson = entry.details ? JSON.stringify(entry.details) : null
       const rows = await this.sql<AuditLog[]>`
         INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, details)
-        VALUES (${entry.actor_id ?? null}, ${entry.action}, ${entry.entity_type}, ${entry.entity_id ?? null}, ${detailsJson}::jsonb)
+        VALUES (${entry.actor_id ?? null}, ${entry.action}, ${entry.entity_type}, ${entry.entity_id ?? null}, ${detailsJson}::text::jsonb)
         RETURNING id, actor_id, action, entity_type, entity_id, details, created_at::text
       `
       const inserted = rows[0]
@@ -3085,7 +3088,8 @@ export class PostgresDomainStore implements DomainStore {
     try {
       if (entityType && entityId) {
         const rows = await this.sql<AuditLog[]>`
-          SELECT id, actor_id, action, entity_type, entity_id, details, created_at::text
+          SELECT id, actor_id, action, entity_type, entity_id,
+                 CASE WHEN jsonb_typeof(details) = 'string' THEN (details #>> '{}')::jsonb ELSE details END AS details, created_at::text
           FROM audit_logs
           WHERE entity_type = ${entityType} AND entity_id = ${entityId}
           ORDER BY created_at DESC
@@ -3094,7 +3098,8 @@ export class PostgresDomainStore implements DomainStore {
       }
       if (entityType) {
         const rows = await this.sql<AuditLog[]>`
-          SELECT id, actor_id, action, entity_type, entity_id, details, created_at::text
+          SELECT id, actor_id, action, entity_type, entity_id,
+                 CASE WHEN jsonb_typeof(details) = 'string' THEN (details #>> '{}')::jsonb ELSE details END AS details, created_at::text
           FROM audit_logs
           WHERE entity_type = ${entityType}
           ORDER BY created_at DESC
@@ -3102,7 +3107,8 @@ export class PostgresDomainStore implements DomainStore {
         return rows ?? []
       }
       const rows = await this.sql<AuditLog[]>`
-        SELECT id, actor_id, action, entity_type, entity_id, details, created_at::text
+        SELECT id, actor_id, action, entity_type, entity_id,
+                 CASE WHEN jsonb_typeof(details) = 'string' THEN (details #>> '{}')::jsonb ELSE details END AS details, created_at::text
         FROM audit_logs
         ORDER BY created_at DESC
       `
@@ -3991,7 +3997,7 @@ export class PostgresDomainStore implements DomainStore {
         VALUES (
           ${params.userId},
           ${params.channel},
-          ${payloadJson}::jsonb,
+          ${payloadJson}::text::jsonb,
           ${params.status ?? 'pending'},
           0,
           ${nextRetryAtVal ? this.sql`${nextRetryAtVal}::timestamptz` : null}
@@ -4184,8 +4190,8 @@ export class PostgresDomainStore implements DomainStore {
   }
 
   private mapNotificationRow(row: any): NotificationRecord {
-    // SAFETY: payload is stored as JSONB and returned as object
-    const payload = (row.payload ?? {}) as NotificationPayload
+    // Older writes stored serialized JSON inside a JSONB string; validate both forms.
+    const payload = storedNotificationPayloadSchema.parse(row.payload ?? {})
     return {
       id: row.id,
       user_id: row.user_id,

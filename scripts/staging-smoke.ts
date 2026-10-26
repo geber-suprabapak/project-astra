@@ -25,7 +25,8 @@ interface PrecheckChecks {
 
 interface PrecheckData {
   allowed: boolean
-  action_type: string
+  action_type: 'check_in' | 'check_out' | null
+  blocking_reason: string | null
   checks: PrecheckChecks
 }
 
@@ -83,6 +84,7 @@ assert(Number.isFinite(longitude), 'SMOKE_LONGITUDE must be a valid number.')
 const authHeaders = {
   Authorization: `Bearer ${accessToken}`,
   Accept: 'application/json',
+  'X-Astra-Contract-Version': 'v1',
 }
 
 const live = await expectJson<{ status: string }>(`${baseUrl}/live`, { method: 'GET' }, 200)
@@ -97,7 +99,7 @@ assert(ready.healthy === true, 'Expected /ready to report healthy=true.')
 
 const mobileHealth = await expectJson<SuccessEnvelope<{ status: string }>>(
   `${baseUrl}/v1/mobile/health`,
-  { method: 'GET' },
+  { method: 'GET', headers: { 'X-Astra-Contract-Version': 'v1' } },
   200,
 )
 assert(mobileHealth.success === true, 'Expected mobile health success=true.')
@@ -137,7 +139,20 @@ assert(
   precheck.data?.allowed === true || precheck.data?.allowed === false,
   'Expected attendance precheck allowed boolean.',
 )
-assert(Boolean(precheck.data?.action_type), 'Expected attendance precheck action_type string.')
+assert(
+  precheck.data.action_type === null ||
+    precheck.data.action_type === 'check_in' ||
+    precheck.data.action_type === 'check_out',
+  'Expected a supported attendance action or null for a blocked precheck.',
+)
+assert(
+  !precheck.data.allowed || precheck.data.action_type !== null,
+  'An allowed attendance precheck must specify an action.',
+)
+assert(
+  precheck.data.allowed || Boolean(precheck.data.blocking_reason),
+  'A blocked attendance precheck must explain its blocking reason.',
+)
 
 console.log(
   JSON.stringify(

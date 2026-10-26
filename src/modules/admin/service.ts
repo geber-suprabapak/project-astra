@@ -852,17 +852,18 @@ export async function approveStudent(params: {
     throw AppError.notFound('Student profile')
   }
 
+  // Keep Astra's access gate closed until every identity operation succeeds; retries are safe.
+  if (params.providers.identityProvider.assignUserRole) {
+    await params.providers.identityProvider.assignUserRole(params.userId, 'student')
+  }
+  if (params.providers.identityProvider.setUserSuspended) {
+    await params.providers.identityProvider.setUserSuspended(params.userId, false)
+  }
+
   const updated = await params.providers.domainStore.updateProfileLifecycle(
     params.userId,
     'approved',
   )
-
-  if (params.providers.identityProvider.setUserSuspended) {
-    await params.providers.identityProvider.setUserSuspended(params.userId, false)
-  }
-  if (params.providers.identityProvider.assignUserRole) {
-    await params.providers.identityProvider.assignUserRole(params.userId, 'student')
-  }
 
   await params.providers.domainStore.insertAuditLog({
     actor_id: params.actorId,
