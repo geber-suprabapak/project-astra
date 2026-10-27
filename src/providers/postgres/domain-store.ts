@@ -1106,14 +1106,7 @@ export class PostgresDomainStore implements DomainStore {
           duration_days: created.duration_days,
         }),
       )
-      const profile = await this.getUserProfile(created.user_id).catch(() => null)
-      if (profile) {
-        created.student_name = profile.full_name ?? null
-        created.student_nis = profile.nis ?? null
-        created.student_class = profile.class_name ?? null
-        created.absence_number = profile.absence_number ?? null
-      }
-      return created
+      return this.enrichLeaveRequest(created)
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, data }, 'Failed to insert leave request')
@@ -1122,50 +1115,60 @@ export class PostgresDomainStore implements DomainStore {
   }
 
   async getLeaveRequestById(id: string): Promise<LeaveRequest | null> {
-    try {
-      const rows = await this.sql<LeaveRequest[]>`
-        SELECT lr.id, lr.user_id, lr.category, lr.description, lr.status,
-               lr.attachment_url, (lr.date AT TIME ZONE 'Asia/Jakarta')::date::text AS date, lr.approval_status,
-               lr.original_end_date::text, lr.effective_end_date::text, lr.duration_days,
-               lr.rejection_reason, lr.rejected_at::text, lr.created_at::text, lr.updated_at::text,
-               p.full_name AS student_name, p.nis AS student_nis, p.class_name AS student_class,
-               p.absence_number
-        FROM leave_requests lr
-        LEFT JOIN profiles p ON lr.user_id = p.user_id
-        WHERE lr.id = ${id}
-        LIMIT 1
-      `
-      const row = rows[0]
-      if (!row) return null
-      return {
-        ...row,
-        ...getLeavePeriodFields({
-          date: row.date,
-          approval_status: row.approval_status,
-          original_end_date: row.original_end_date,
-          effective_end_date: row.effective_end_date,
-          duration_days: row.duration_days,
-        }),
-      }
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      logger.error({ err, id }, 'Failed to get leave request by ID')
-      throw AppError.internal('An unexpected database error occurred.')
+    if (!id) throw AppError.validationError('Leave request ID is required.')
+    const rows = await this.readLeaveRequests({ limit: 1 }, id)
+    return rows[0] ?? null
+  }
+
+  private async enrichLeaveRequest(row: LeaveRequest): Promise<LeaveRequest> {
+    // Profile enrichment remains best effort after the write has committed.
+    const profile = await this.getLeaveRequestById(row.id).catch(() => null)
+    if (!profile) return row
+    return {
+      ...row,
+      student_name: profile.student_name ?? null,
+      student_nis: profile.student_nis ?? null,
+      student_class: profile.student_class ?? null,
+      absence_number: profile.absence_number ?? null,
     }
   }
 
   async listLeaveRequests(filter?: ListLeaveRequestsFilter): Promise<LeaveRequest[]> {
+    return this.readLeaveRequests(filter)
+  }
+
+  private async readLeaveRequests(
+    filter?: ListLeaveRequestsFilter,
+    id?: string,
+  ): Promise<LeaveRequest[]> {
     try {
       const rows = await this.sql<LeaveRequest[]>`
         SELECT lr.id, lr.user_id, lr.category, lr.description, lr.status,
                lr.attachment_url, (lr.date AT TIME ZONE 'Asia/Jakarta')::date::text AS date, lr.approval_status,
                lr.original_end_date::text, lr.effective_end_date::text, lr.duration_days,
                lr.rejection_reason, lr.rejected_at::text, lr.created_at::text, lr.updated_at::text,
-               p.full_name AS student_name, p.nis AS student_nis, p.class_name AS student_class,
-               p.absence_number
+               CASE WHEN canonical.student_id IS NOT NULL THEN canonical.full_name ELSE p.full_name END AS student_name,
+               p.nis AS student_nis,
+               CASE WHEN canonical.student_id IS NOT NULL THEN canonical.class_name ELSE p.class_name END AS student_class,
+               CASE WHEN canonical.student_id IS NOT NULL THEN canonical.absence_number ELSE p.absence_number END AS absence_number
         FROM leave_requests lr
         LEFT JOIN profiles p ON lr.user_id = p.user_id
+        LEFT JOIN LATERAL (
+          SELECT s.id AS student_id, s.full_name, c.name AS class_name, ce.absence_number
+          FROM student_bindings sb
+          JOIN students s ON s.id = sb.student_id
+          LEFT JOIN LATERAL (
+            SELECT e.class_id, e.absence_number
+            FROM class_enrollments e
+            WHERE e.student_id = s.id AND e.status = 'active'
+            ORDER BY e.created_at DESC NULLS LAST
+            LIMIT 1
+          ) ce ON true
+          LEFT JOIN classes c ON c.id = ce.class_id
+          WHERE sb.user_id = lr.user_id AND p.role = 'student' AND s.nis = p.nis AND p.nis <> ''
+        ) canonical ON true
         WHERE 1=1
+          ${id !== undefined ? this.sql`AND lr.id = ${id}` : this.sql``}
           ${filter?.userId ? this.sql`AND lr.user_id = ${filter.userId}` : this.sql``}
           ${filter?.approvalStatus ? this.sql`AND lr.approval_status = ${filter.approvalStatus}` : this.sql``}
           ${filter?.category ? this.sql`AND lr.category = ${filter.category}` : this.sql``}
@@ -1196,7 +1199,7 @@ export class PostgresDomainStore implements DomainStore {
       }))
     } catch (err) {
       if (err instanceof AppError) throw err
-      logger.error({ err, filter }, 'Failed to list leave requests')
+      logger.error({ err, filter, id }, 'Failed to list leave requests')
       throw AppError.internal('An unexpected database error occurred.')
     }
   }
@@ -1323,14 +1326,7 @@ export class PostgresDomainStore implements DomainStore {
           return rows[0]
         })
 
-        const profile = await this.getUserProfile(updated.user_id).catch(() => null)
-        if (profile) {
-          updated.student_name = profile.full_name ?? null
-          updated.student_nis = profile.nis ?? null
-          updated.student_class = profile.class_name ?? null
-          updated.absence_number = profile.absence_number ?? null
-        }
-        return {
+        return this.enrichLeaveRequest({
           ...updated,
           ...getLeavePeriodFields({
             date: updated.date,
@@ -1339,7 +1335,7 @@ export class PostgresDomainStore implements DomainStore {
             effective_end_date: updated.effective_end_date,
             duration_days: updated.duration_days,
           }),
-        }
+        })
       } catch (err) {
         if (err instanceof AppError) throw err
         logger.error({ err, params }, 'Failed to approve leave request')
@@ -1407,14 +1403,7 @@ export class PostgresDomainStore implements DomainStore {
 
         return rows[0]
       })
-      const profile = await this.getUserProfile(updated.user_id).catch(() => null)
-      if (profile) {
-        updated.student_name = profile.full_name ?? null
-        updated.student_nis = profile.nis ?? null
-        updated.student_class = profile.class_name ?? null
-        updated.absence_number = profile.absence_number ?? null
-      }
-      return {
+      return this.enrichLeaveRequest({
         ...updated,
         ...getLeavePeriodFields({
           date: updated.date,
@@ -1423,7 +1412,7 @@ export class PostgresDomainStore implements DomainStore {
           effective_end_date: updated.effective_end_date,
           duration_days: updated.duration_days,
         }),
-      }
+      })
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, params }, 'Failed to update leave request status')
@@ -1502,14 +1491,7 @@ export class PostgresDomainStore implements DomainStore {
         return rows[0]
       })
 
-      const profile = await this.getUserProfile(updated.user_id).catch(() => null)
-      if (profile) {
-        updated.student_name = profile.full_name ?? null
-        updated.student_nis = profile.nis ?? null
-        updated.student_class = profile.class_name ?? null
-        updated.absence_number = profile.absence_number ?? null
-      }
-      return {
+      return this.enrichLeaveRequest({
         ...updated,
         ...getLeavePeriodFields({
           date: updated.date,
@@ -1518,7 +1500,7 @@ export class PostgresDomainStore implements DomainStore {
           effective_end_date: updated.effective_end_date,
           duration_days: updated.duration_days,
         }),
-      }
+      })
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, params }, 'Failed to force-finish leave request')

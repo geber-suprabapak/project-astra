@@ -1636,6 +1636,27 @@ export class MemoryDomainStore implements DomainStore {
     }
   }
 
+  private async leaveStudentFields(
+    userId: string,
+  ): Promise<
+    Pick<LeaveRequest, 'student_name' | 'student_nis' | 'student_class' | 'absence_number'>
+  > {
+    const profile = this.profiles.get(userId)
+    const roster =
+      profile?.role === 'student' && profile.nis
+        ? await this.getRosterStudentByNis(profile.nis)
+        : null
+    const canonical = roster?.student_id && roster.user_id === userId ? roster : null
+    return {
+      student_name: canonical ? canonical.full_name : (profile?.full_name ?? null),
+      student_nis: profile?.nis ?? null,
+      student_class: canonical ? canonical.class_name || null : (profile?.class_name ?? null),
+      absence_number: canonical
+        ? (canonical.absence_number ?? null)
+        : (profile?.absence_number ?? null),
+    }
+  }
+
   async createLeaveRequest(data: CreateLeaveRequestData): Promise<LeaveRequest> {
     const approvalStatus = data.approval_status ?? 'approved'
     const status = data.status !== undefined ? data.status : approvalStatus === 'approved'
@@ -1691,7 +1712,7 @@ export class MemoryDomainStore implements DomainStore {
     }
     this.permits.push(permit)
 
-    const profile = this.profiles.get(data.user_id)
+    const studentFields = await this.leaveStudentFields(data.user_id)
     return {
       id,
       user_id: data.user_id,
@@ -1705,10 +1726,7 @@ export class MemoryDomainStore implements DomainStore {
       rejected_at: null,
       created_at: now,
       updated_at: now,
-      student_name: profile?.full_name ?? null,
-      student_nis: profile?.nis ?? null,
-      student_class: profile?.class_name ?? null,
-      absence_number: profile?.absence_number ?? null,
+      ...studentFields,
       ...getLeavePeriodFields({
         date: data.date,
         approval_status: approvalStatus,
@@ -1719,7 +1737,7 @@ export class MemoryDomainStore implements DomainStore {
   async getLeaveRequestById(id: string): Promise<LeaveRequest | null> {
     const p = this.permits.find((item) => item.id === id)
     if (!p) return null
-    const profile = this.profiles.get(p.user_id)
+    const studentFields = await this.leaveStudentFields(p.user_id)
     return {
       id: p.id,
       user_id: p.user_id,
@@ -1733,10 +1751,7 @@ export class MemoryDomainStore implements DomainStore {
       rejected_at: p.rejected_at ?? null,
       created_at: p.created_at,
       updated_at: p.updated_at ?? p.created_at,
-      student_name: profile?.full_name ?? null,
-      student_nis: profile?.nis ?? null,
-      student_class: profile?.class_name ?? null,
-      absence_number: profile?.absence_number ?? null,
+      ...studentFields,
       ...getLeavePeriodFields({
         date: p.tanggal,
         approval_status: p.approval_status,
@@ -1774,34 +1789,33 @@ export class MemoryDomainStore implements DomainStore {
     if (filter?.limit) {
       items = items.slice(0, filter.limit)
     }
-    return items.map((p) => {
-      const profile = this.profiles.get(p.user_id)
-      return {
-        id: p.id,
-        user_id: p.user_id,
-        category: p.kategori_izin,
-        description: p.deskripsi,
-        status: p.status,
-        attachment_url: p.link_foto,
-        date: toWibDate(p.tanggal),
-        approval_status: p.approval_status,
-        rejection_reason: p.rejection_reason ?? null,
-        rejected_at: p.rejected_at ?? null,
-        created_at: p.created_at,
-        updated_at: p.updated_at ?? p.created_at,
-        student_name: profile?.full_name ?? null,
-        student_nis: profile?.nis ?? null,
-        student_class: profile?.class_name ?? null,
-        absence_number: profile?.absence_number ?? null,
-        ...getLeavePeriodFields({
-          date: p.tanggal,
+    return Promise.all(
+      items.map(async (p) => {
+        const studentFields = await this.leaveStudentFields(p.user_id)
+        return {
+          id: p.id,
+          user_id: p.user_id,
+          category: p.kategori_izin,
+          description: p.deskripsi,
+          status: p.status,
+          attachment_url: p.link_foto,
+          date: toWibDate(p.tanggal),
           approval_status: p.approval_status,
-          original_end_date: p.original_end_date,
-          effective_end_date: p.effective_end_date,
-          duration_days: p.duration_days,
-        }),
-      }
-    })
+          rejection_reason: p.rejection_reason ?? null,
+          rejected_at: p.rejected_at ?? null,
+          created_at: p.created_at,
+          updated_at: p.updated_at ?? p.created_at,
+          ...studentFields,
+          ...getLeavePeriodFields({
+            date: p.tanggal,
+            approval_status: p.approval_status,
+            original_end_date: p.original_end_date,
+            effective_end_date: p.effective_end_date,
+            duration_days: p.duration_days,
+          }),
+        }
+      }),
+    )
   }
 
   async updateLeaveRequestStatus(params: UpdateLeaveRequestStatusParams): Promise<LeaveRequest> {
@@ -1962,7 +1976,7 @@ export class MemoryDomainStore implements DomainStore {
       }
     }
 
-    const profile = this.profiles.get(p.user_id)
+    const studentFields = await this.leaveStudentFields(p.user_id)
     return {
       id: p.id,
       user_id: p.user_id,
@@ -1976,10 +1990,7 @@ export class MemoryDomainStore implements DomainStore {
       rejected_at: p.rejected_at ?? null,
       created_at: p.created_at,
       updated_at: p.updated_at,
-      student_name: profile?.full_name ?? null,
-      student_nis: profile?.nis ?? null,
-      student_class: profile?.class_name ?? null,
-      absence_number: profile?.absence_number ?? null,
+      ...studentFields,
       ...getLeavePeriodFields({
         date: p.tanggal,
         approval_status: p.approval_status,
@@ -2026,7 +2037,7 @@ export class MemoryDomainStore implements DomainStore {
     permit.original_end_date = originalEndDate
     permit.effective_end_date = effectiveEndDate
     permit.updated_at = new Date().toISOString()
-    const profile = this.profiles.get(permit.user_id)
+    const studentFields = await this.leaveStudentFields(permit.user_id)
     return {
       id: permit.id,
       user_id: permit.user_id,
@@ -2040,10 +2051,7 @@ export class MemoryDomainStore implements DomainStore {
       rejected_at: permit.rejected_at ?? null,
       created_at: permit.created_at,
       updated_at: permit.updated_at,
-      student_name: profile?.full_name ?? null,
-      student_nis: profile?.nis ?? null,
-      student_class: profile?.class_name ?? null,
-      absence_number: profile?.absence_number ?? null,
+      ...studentFields,
       ...getLeavePeriodFields({
         date: permit.tanggal,
         approval_status: permit.approval_status,

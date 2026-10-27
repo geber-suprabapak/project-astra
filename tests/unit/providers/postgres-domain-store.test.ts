@@ -1733,6 +1733,39 @@ describe('PostgresDomainStore (Greenfield)', () => {
     expect(queries.some((query) => query.includes('DELETE FROM attendances'))).toBe(true)
   })
 
+  it('preserves a committed write when optional profile enrichment fails but propagates read failures', async () => {
+    let committed = false
+    const row = {
+      id: 'leave-projection',
+      user_id: 'projection-user',
+      category: 'sakit',
+      description: 'Projection test',
+      date: '2035-02-01',
+      status: false,
+      approval_status: 'pending',
+    }
+    const mockSql = createMockSql((strings: TemplateStringsArray) => {
+      const query = strings.join('?')
+      if (query.includes('INSERT INTO leave_requests')) {
+        committed = true
+        return [row]
+      }
+      if (committed && query.includes('FROM leave_requests'))
+        throw new Error('Projection unavailable')
+      return []
+    })
+    const store = new PostgresDomainStore({ sql: mockSql })
+    expect(
+      await store.createLeaveRequest({
+        user_id: row.user_id,
+        category: 'sakit',
+        description: row.description,
+        date: row.date,
+      }),
+    ).toMatchObject({ id: row.id, status: false, approval_status: 'pending' })
+    await expect(store.getLeaveRequestById(row.id)).rejects.toThrow()
+  })
+
   it('getLeaveRequestById, listLeaveRequests, updateLeaveRequestStatus, and deleteLeaveRequest operate on leave_requests table', async () => {
     const mockSql = createMockSql((strings: TemplateStringsArray) => {
       const query = strings.join('?')

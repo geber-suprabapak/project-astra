@@ -1,5 +1,10 @@
 # Invariants
 
+## INV-ASTRA-015 — Leave student fields follow the verified canonical binding
+
+**Rule:** Leave detail, collection and write responses project name, class and absence number from the canonical Student only when its binding, User ID and profile NIS agree for a student profile. The latest active enrollment supplies class/absence; a bound student without an active enrollment clears stale legacy class/absence. Legacy-only and mismatched bindings retain legacy fields. PostgreSQL collections use one query without per-row roster reads; reads do not rewrite profiles or enrollments. Write enrichment preserves the committed leave snapshot and remains best effort if its subsequent read fails.
+**Evidence:** `src/providers/postgres/domain-store.ts`, `src/providers/memory/index.ts`, `tests/unit/providers/leave-profile-projection.test.ts`, `tests/unit/providers/postgres-domain-store.test.ts`, `tests/integration/postgres-leave-lifecycle.test.ts`.
+
 ## INV-ASTRA-014 — Staff session revocation retains a token-time cutoff
 
 **Rule:** Authentication passes only the verified identity provider's `issuedAt` into the revocation query. Retained `revoked_at` rows reject tokens issued at/before the latest cutoff; missing, malformed or future timing remains denied when a marker exists. JWT second precision conservatively rejects the entire cutoff second. Staff role changes/re-enable revoke Logto sessions and all associated grants before domain publication, then write a new cutoff in the profile transaction. Disabling/rejecting restricts the profile first so an IdP outage cannot leave access enabled; subsequent revocation failure returns an error without a success audit. Logto sessions are listed with the supported API and deleted by `payload.uid` with `revokeGrantsTarget=all`; failures propagate and prevent profile/audit success. Revocation rows are never cleared to re-enable an account. Issuer/database clock consistency is required; this is not a distributed transaction or proof of every concurrent session race.
