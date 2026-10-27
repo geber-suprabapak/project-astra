@@ -47,7 +47,7 @@ export function createAuthMiddleware(options: { profileRejected?: () => AppError
       throw AppError.forbidden()
     }
 
-    const isRevoked = await providers.domainStore.isSessionRevoked(userId)
+    const isRevoked = await providers.domainStore.isSessionRevoked(userId, identityUser.issuedAt)
     if (isRevoked) {
       throw AppError.authInvalid('Session has been revoked.')
     }

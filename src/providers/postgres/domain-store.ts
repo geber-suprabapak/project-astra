@@ -3530,9 +3530,9 @@ export class PostgresDomainStore implements DomainStore {
         }
 
         if (
-          updates.lifecycleStatus === 'disabled' ||
-          updates.lifecycleStatus === 'rejected' ||
-          (updates.role && updates.role !== existing.role)
+          updates.lifecycleStatus !== undefined ||
+          updates.role !== undefined ||
+          updates.roles !== undefined
         ) {
           await sql`
             INSERT INTO revoked_sessions (user_id)
@@ -3562,10 +3562,19 @@ export class PostgresDomainStore implements DomainStore {
     }
   }
 
-  async isSessionRevoked(userId: string): Promise<boolean> {
+  async isSessionRevoked(userId: string, issuedAt?: number): Promise<boolean> {
     try {
+      // JWT iat has second precision; tokens from the revocation second stay revoked.
+      const tokenTime =
+        issuedAt !== undefined &&
+        Number.isSafeInteger(issuedAt) &&
+        issuedAt >= 0 &&
+        issuedAt <= Math.floor(Date.now() / 1000)
+          ? issuedAt
+          : null
       const rows = await this.sql<{ count: string }[]>`
         SELECT COUNT(*) as count FROM revoked_sessions WHERE user_id = ${userId}
+          AND (${tokenTime}::double precision IS NULL OR revoked_at >= to_timestamp(${tokenTime}::double precision))
       `
       return Number(rows[0]?.count ?? 0) > 0
     } catch (err) {

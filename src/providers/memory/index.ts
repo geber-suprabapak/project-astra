@@ -232,6 +232,7 @@ const DEFAULT_ROLES: Role[] = [
 const identityTokenPayloadSchema = z
   .object({
     sub: z.string().min(1),
+    iat: z.number().int().nonnegative().optional(),
     email: z.string().nullable().optional(),
     roles: z.array(identityRoleSchema).optional(),
     scope: z.string().min(1).optional(),
@@ -424,7 +425,7 @@ export class MemoryDomainStore implements DomainStore {
   public roles = new Map<string, Role>()
   public permissions = new Map<string, Permission>()
   public userRoles = new Map<string, Set<string>>()
-  public revokedSessions = new Set<string>()
+  public revokedSessions = new Map<string, number>()
   public resetCodes: PasswordResetCode[] = []
   public files = new Map<string, FileRecord>()
   public faceEnrollments = new Map<string, FaceEnrollmentRecord>()
@@ -2795,20 +2796,32 @@ export class MemoryDomainStore implements DomainStore {
     }
     if (updates.lifecycleStatus !== undefined) {
       profile.lifecycle_status = updates.lifecycleStatus
-      if (updates.lifecycleStatus === 'disabled' || updates.lifecycleStatus === 'rejected') {
-        this.revokedSessions.add(userId)
-      }
+    }
+    if (
+      updates.lifecycleStatus !== undefined ||
+      updates.role !== undefined ||
+      updates.roles !== undefined
+    ) {
+      await this.revokeUserSessions(userId)
     }
     this.profiles.set(userId, profile)
     return { ...profile }
   }
 
   async revokeUserSessions(userId: string): Promise<void> {
-    this.revokedSessions.add(userId)
+    this.revokedSessions.set(userId, Date.now())
   }
 
-  async isSessionRevoked(userId: string): Promise<boolean> {
-    return this.revokedSessions.has(userId)
+  async isSessionRevoked(userId: string, issuedAt?: number): Promise<boolean> {
+    const revokedAt = this.revokedSessions.get(userId)
+    if (revokedAt === undefined) return false
+    return (
+      issuedAt === undefined ||
+      !Number.isSafeInteger(issuedAt) ||
+      issuedAt < 0 ||
+      issuedAt > Math.floor(Date.now() / 1000) ||
+      issuedAt * 1000 <= revokedAt
+    )
   }
 
   async getRosterStudentByNis(nis: string): Promise<RosterStudent | null> {
@@ -3401,6 +3414,7 @@ export class MemoryIdentityProvider implements IdentityProvider {
           const { data } = parsedPayload
           return {
             userId: data.sub,
+            issuedAt: data.iat,
             email: data.email,
             roles: data.roles ?? [],
             scopes: data.scope?.split(' ').filter(Boolean) ?? [],

@@ -45,6 +45,7 @@ export interface StudentBinding {
 
 export interface IdentityUser {
   userId: string
+  issuedAt?: number
   authSource?: 'logto' | 'legacy_supabase'
   legacyUserId?: string
   email?: string | null
@@ -1043,7 +1044,7 @@ export interface DomainStore {
 
   // Session revocation
   revokeUserSessions(userId: string): Promise<void>
-  isSessionRevoked(userId: string): Promise<boolean>
+  isSessionRevoked(userId: string, issuedAt?: number): Promise<boolean>
 
   // Student Onboarding & Account Recovery methods
   getRosterStudentByNis(nis: string): Promise<RosterStudent | null>

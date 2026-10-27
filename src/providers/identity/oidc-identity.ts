@@ -146,9 +146,11 @@ export class OidcIdentityProvider implements IdentityProvider {
       const parsedMfa = z.boolean().safeParse(payload.mfa_verified)
       const parsedAmr = z.array(z.string().min(1)).safeParse(payload.amr)
       const parsedMustChangePassword = z.boolean().safeParse(payload.must_change_password)
+      const issuedAt = z.number().int().nonnegative().safeParse(payload.iat)
 
       return {
         userId: parsedSub.data,
+        issuedAt: issuedAt.success ? issuedAt.data : undefined,
         authSource: 'logto',
         email: parsedEmail.success ? parsedEmail.data : null,
         roles: parsedRoles.success ? parsedRoles.data : [],
@@ -378,22 +380,32 @@ export class OidcIdentityProvider implements IdentityProvider {
 
   async revokeUserSessions(userId: string): Promise<void> {
     if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
-      return
+      throw AppError.internal('Identity provider management API is not configured.')
     }
 
     try {
       const token = await this.getManagementToken()
-      await fetch(
-        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/sign-out`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      )
+      const url = `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/sessions`
+      const headers = { Authorization: `Bearer ${token}` }
+      const response = await fetch(url, { headers })
+      if (!response.ok) throw AppError.internal('Failed to list identity provider sessions.')
+      const { sessions } = z
+        .object({
+          sessions: z.array(z.object({ payload: z.object({ uid: z.string().min(1) }) })),
+        })
+        .parse(await response.json())
+      for (const session of sessions) {
+        const revoked = await fetch(
+          `${url}/${encodeURIComponent(session.payload.uid)}?revokeGrantsTarget=all`,
+          { method: 'DELETE', headers },
+        )
+        if (!revoked.ok && revoked.status !== 404) {
+          throw AppError.internal('Failed to revoke identity provider session.')
+        }
+      }
     } catch (err) {
       logger.warn({ err, userId }, 'Logto sign-out error during session revocation')
+      throw AppError.internal('Failed to revoke identity provider sessions.')
     }
   }
 

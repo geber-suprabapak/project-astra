@@ -63,6 +63,7 @@ describe('OidcIdentityProvider', () => {
       await expect(provider.verifyToken(token)).resolves.toEqual({
         userId: 'platform-admin-1',
         authSource: 'logto',
+        issuedAt: expect.any(Number),
         email: 'admin@school.sch.id',
         roles: ['platform_admin'],
         scopes: ['openid', 'profile', 'mobile:access', 'admin:read'],
@@ -176,6 +177,14 @@ describe('OidcIdentityProvider', () => {
   })
 
   describe('unconfigured Logto operations fail strictly without fake success', () => {
+    it('session revocation rejects missing management credentials', async () => {
+      const provider = new OidcIdentityProvider({
+        jwtSecret: 'test-secret-at-least-32-chars-long-12345',
+      })
+      await expect(provider.revokeUserSessions('user-1')).rejects.toThrow(
+        'Identity provider management API is not configured.',
+      )
+    })
     it('bulk role assignment rejects missing management credentials', async () => {
       const provider = new OidcIdentityProvider({
         jwtSecret: 'test-secret-at-least-32-chars-long-12345',
@@ -223,6 +232,53 @@ describe('OidcIdentityProvider', () => {
       logtoAppSecret: 'test-app-secret',
       jwtSecret: 'test-secret-at-least-32-chars-long-12345',
     })
+
+    it.each([204, 404])(
+      'revokes each session by UID and all associated grants, accepting HTTP %i',
+      async (status) => {
+        const mock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+          if (url.endsWith('/oidc/token')) return Response.json({ access_token: 'm2m-test-token' })
+          if (url.endsWith('/sessions') && !options?.method)
+            return Response.json({
+              sessions: [
+                { payload: { uid: 'session/one', jti: 'not-the-session-uid' } },
+                { payload: { uid: 'session-two' } },
+              ],
+            })
+          if (options?.method === 'DELETE' && url.includes('revokeGrantsTarget=all'))
+            return new Response(null, { status })
+          return new Response(null, { status: 404 })
+        })
+        globalThis.fetch = mock
+        await expect(configuredProvider.revokeUserSessions('user-1')).resolves.toBeUndefined()
+        expect(mock).toHaveBeenCalledWith(
+          'http://localhost:3001/api/users/user-1/sessions/session%2Fone?revokeGrantsTarget=all',
+          expect.objectContaining({ method: 'DELETE' }),
+        )
+        expect(mock.mock.calls.filter(([, options]) => options?.method === 'DELETE')).toHaveLength(
+          2,
+        )
+      },
+    )
+
+    it.each(['list', 'delete', 'malformed'])(
+      'propagates session revocation %s failure rather than reporting success',
+      async (stage) => {
+        globalThis.fetch = vi
+          .fn()
+          .mockImplementation(async (url: string, options?: RequestInit) => {
+            if (url.endsWith('/oidc/token'))
+              return Response.json({ access_token: 'm2m-test-token' })
+            if (options?.method === 'DELETE') return new Response(null, { status: 503 })
+            return stage === 'list'
+              ? new Response(null, { status: 503 })
+              : Response.json(
+                  stage === 'malformed' ? {} : { sessions: [{ payload: { uid: 'session-one' } }] },
+                )
+          })
+        await expect(configuredProvider.revokeUserSessions('user-1')).rejects.toThrow()
+      },
+    )
 
     it.each(['assignUserRole', 'revokeUserRole'] as const)(
       '%s resolves names to Logto role IDs',

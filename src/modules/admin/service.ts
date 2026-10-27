@@ -742,6 +742,19 @@ export async function updateStaff(params: {
     await params.providers.identityProvider.assignRoles(params.userId, assignedRoles)
   }
 
+  const affectsSessions =
+    params.lifecycleStatus !== undefined || params.role !== undefined || params.roles !== undefined
+  const revokeSessions = affectsSessions
+    ? params.providers.identityProvider.revokeUserSessions?.bind(params.providers.identityProvider)
+    : undefined
+  if (affectsSessions && !revokeSessions) {
+    throw AppError.internal('Identity provider session revocation is not configured.')
+  }
+  const restrictsAccess =
+    params.lifecycleStatus !== undefined && params.lifecycleStatus !== 'approved'
+  // Restrict access before contacting Logto; re-enable only after revocation succeeds.
+  if (!restrictsAccess) await revokeSessions?.(params.userId)
+
   const updated = await params.providers.domainStore.updateStaffProfile(params.userId, {
     fullName: params.fullName,
     role: params.role,
@@ -749,15 +762,7 @@ export async function updateStaff(params: {
     lifecycleStatus: params.lifecycleStatus,
     gender: params.gender,
   })
-
-  if (
-    params.lifecycleStatus === 'disabled' ||
-    params.lifecycleStatus === 'rejected' ||
-    params.role ||
-    params.roles
-  ) {
-    await params.providers.identityProvider.revokeUserSessions?.(params.userId)
-  }
+  if (restrictsAccess) await revokeSessions?.(params.userId)
 
   await params.providers.domainStore.insertAuditLog({
     actor_id: params.actorId,

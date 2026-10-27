@@ -1148,6 +1148,23 @@ describe('PostgresDomainStore (Greenfield)', () => {
     expect(await store.isSessionRevoked('user-1')).toBe(true)
   })
 
+  it('binds verified token time to the retained revocation cutoff, failing closed for unknown time', async () => {
+    const calls: { query: string; values: readonly unknown[] }[] = []
+    const mockSql = createMockSql((strings, ...values) => {
+      calls.push({ query: strings.join('?'), values })
+      return [{ count: '1' }]
+    })
+    const store = new PostgresDomainStore({ sql: mockSql })
+    const issuedAt = Math.floor(Date.now() / 1000) - 10
+    await store.isSessionRevoked('user-1', issuedAt)
+    expect(calls[0].query).toContain('revoked_at >= to_timestamp(')
+    expect(calls[0].values).toEqual(['user-1', issuedAt, issuedAt])
+    for (const time of [undefined, NaN, -1, 1.5, Date.now()]) {
+      expect(await store.isSessionRevoked('user-1', time)).toBe(true)
+      expect(calls.at(-1)?.values).toEqual(['user-1', null, null])
+    }
+  })
+
   it('manages academic periods with getActiveAcademicPeriod, create, update, setActive', async () => {
     let activePeriodId = 'period-1'
     const mockSql = createMockSql((strings: TemplateStringsArray) => {
