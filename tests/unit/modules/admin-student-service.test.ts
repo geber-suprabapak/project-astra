@@ -16,6 +16,7 @@ import {
 } from '../../../src/providers/memory/index.js'
 import type { RobinClient } from '../../../src/clients/robin/client.js'
 import type { AppProviders } from '../../../src/providers/types.js'
+import { getProfile } from '../../../src/modules/profile/service.js'
 
 const mockRobinClient: RobinClient = {
   checkReadiness: async () => ({ healthy: true, modelReady: true, qdrantConnected: true }),
@@ -55,6 +56,93 @@ function createTestProviders(
 }
 
 describe('unit: admin student management service', () => {
+  it('projects canonical roster fields consistently for admin and mobile without rewriting profiles', async () => {
+    const domainStore = new MemoryDomainStore()
+    const providers = createTestProviders(domainStore)
+    const legacy = {
+      user_id: 's1',
+      nis: '1001',
+      full_name: 'Legacy Name',
+      email: 'account@example.invalid',
+      class_name: 'Old Class',
+      absence_number: null,
+      gender: null,
+      role: 'student' as const,
+      lifecycle_status: 'approved' as const,
+    }
+    domainStore.profiles.set('s1', legacy)
+    const student = await domainStore.createStudent({
+      nis: '1001',
+      fullName: 'Canonical Name',
+      gender: 'P',
+    })
+    await domainStore.bindStudentToUser({ studentId: student.id, userId: 's1' })
+    const period = await domainStore.createAcademicPeriod({
+      name: 'Current',
+      startDate: '2026-07-01',
+      endDate: '2027-06-30',
+      isActive: true,
+    })
+    const cls = await domainStore.createClass({ name: 'X PPLG 1', academicPeriodId: period.id })
+    domainStore.classEnrollments.push({
+      id: 'enrollment',
+      student_id: student.id,
+      user_id: 's1',
+      class_id: cls.id,
+      academic_period_id: period.id,
+      status: 'active',
+      absence_number: '6',
+    })
+    for (const result of [
+      await getStudent({ userId: 's1', actorRole: 'school_admin', providers }),
+      await getProfile('s1', providers),
+    ]) {
+      expect(result).toMatchObject({
+        user_id: 's1',
+        nis: '1001',
+        full_name: 'Canonical Name',
+        class_name: 'X PPLG 1',
+        absence_number: '6',
+        gender: 'P',
+        email: legacy.email,
+        role: 'student',
+        lifecycle_status: 'approved',
+      })
+    }
+    expect(domainStore.profiles.get('s1')).toEqual(legacy)
+  })
+
+  it('retains legacy details when a canonical roster is absent or belongs to another identity', async () => {
+    const domainStore = new MemoryDomainStore()
+    const providers = createTestProviders(domainStore)
+    const legacy = {
+      user_id: 's1',
+      nis: '1001',
+      full_name: 'Legacy Student',
+      class_name: 'Legacy Class',
+      absence_number: '4',
+      gender: 'L',
+      role: 'student' as const,
+      lifecycle_status: 'pending' as const,
+    }
+    domainStore.profiles.set('s1', legacy)
+    const params = { userId: 's1', actorRole: 'school_admin' as const, providers }
+    expect(await getStudent(params)).toEqual(legacy)
+    const canonical = await domainStore.createStudent({
+      nis: '1001',
+      fullName: 'Other Identity',
+      gender: 'P',
+    })
+    await domainStore.bindStudentToUser({ studentId: canonical.id, userId: 'other-user' })
+    expect(await getStudent(params)).toEqual(legacy)
+    const read = vi
+      .spyOn(domainStore, 'getRosterStudentByNis')
+      .mockRejectedValueOnce(new Error('Roster unavailable'))
+    await expect(getStudent(params)).rejects.toThrow('Roster unavailable')
+    read.mockRestore()
+    expect(domainStore.profiles.get('s1')).toEqual(legacy)
+  })
+
   it('lists student profiles with and without lifecycle filter', async () => {
     const domainStore = new MemoryDomainStore()
     const providers = createTestProviders(domainStore)

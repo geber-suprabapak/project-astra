@@ -6,6 +6,7 @@ import type {
 } from '../../providers/types.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { ALLOWED_AVATAR_TYPES, MAX_AVATAR_SIZE_BYTES } from './schema.js'
+import { getCanonicalProfile } from './canonical-profile.js'
 
 export interface ProfileResponse {
   user_id: string
@@ -25,7 +26,7 @@ export async function getProfile(
   userId: string,
   providers: AppProviders = defaultProviders,
 ): Promise<ProfileResponse> {
-  const profile = await providers.domainStore.getUserProfile(userId)
+  const profile = await getCanonicalProfile(userId, providers)
   const avatarUrl = profile.avatar_url
     ? await providers.objectStorage.getSignedAvatarUrl(profile.avatar_url)
     : null
@@ -43,7 +44,7 @@ export async function getProfile(
     email: profile.email,
     nis: profile.nis,
     class_name: activeEnrollment?.class_name ?? profile.class_name,
-    absence_number: profile.absence_number,
+    absence_number: activeEnrollment?.absence_number ?? profile.absence_number,
     gender: profile.gender,
     role: profile.role,
     lifecycle_status: profile.lifecycle_status,

@@ -1,5 +1,10 @@
 # Invariants
 
+## INV-ASTRA-011 — Student profile reads use binding-verified canonical fields
+
+**Rule:** Admin student detail and mobile profile share the canonical student read projection. Overlay roster name, class, absence number and gender only when a canonical Student and its binding match the requested User ID. Account email, role, lifecycle and avatar remain profile-owned; legacy-only or mismatched bindings keep the legacy profile. Roster read failures propagate instead of masquerading as missing values. Mobile active-enrollment absence number takes precedence when available. Reads do not rewrite profiles or enrollments.
+**Evidence:** `src/modules/profile/canonical-profile.ts`, `src/modules/profile/service.ts`, `src/modules/admin/service.ts`, `tests/unit/modules/admin-student-service.test.ts`, `tests/unit/modules/profile-history.test.ts`.
+
 ## INV-ASTRA-010 — Monthly attendance counts days
 
 **Rule:** Monthly totals count days, not requests. Present, late and absent use aggregated daily attendance; approved leave expands inclusively through its effective end, clipped to the selected month, with legacy approvals treated as one day. Historical date filters reach the DomainStore before its collection limit. Repeated attendance records and checkout on the same date do not add days.

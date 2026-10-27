@@ -15,6 +15,8 @@
 **Purpose:** Implement client-facing domain behavior without exposing storage/database internals.
 **Entry points:** `src/modules/{attendance,dashboard,enrollment,files,permits,profile,notifications,admin}/`.
 
+**Student read projection:** `src/modules/profile/canonical-profile.ts` is shared by admin student detail and mobile profile. It overlays canonical roster fields only after matching the Student binding to the requested User ID, preserving account-owned security metadata and legacy-only behavior. Generic DomainStore profile reads used by authentication are unchanged.
+
 ## Adiwiyata
 
 **Purpose:** Authorize student camera reports and administrative Site/access management, daily coverage, and per-photo verification.

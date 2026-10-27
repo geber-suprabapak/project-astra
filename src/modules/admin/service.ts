@@ -1,3 +1,4 @@
+import { getCanonicalProfile } from '../profile/canonical-profile.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import type {
   AcademicPeriod,
@@ -829,7 +830,7 @@ export async function getStudent(params: {
     throw AppError.forbidden()
   }
 
-  const profile = await params.providers.domainStore.getUserProfile(params.userId)
+  const profile = await getCanonicalProfile(params.userId, params.providers)
   if (profile.role !== 'student') {
     throw AppError.notFound('Student profile')
   }

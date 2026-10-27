@@ -143,9 +143,11 @@ describe('Student Profile and History Unit Tests', () => {
         classId: cls.id,
         academicPeriodId: period.id,
       })
+      domainStore.classEnrollments[0].absence_number = '7'
 
       const profile = await getProfile('student-1', providers)
       expect(profile.class_name).toBe('XII RPL 2 Dynamic')
+      expect(profile.absence_number).toBe('7')
       expect(profile.active_enrollment).toBeDefined()
       expect(profile.active_enrollment?.class_id).toBe(cls.id)
       expect(profile.active_enrollment?.academic_period_id).toBe(period.id)
