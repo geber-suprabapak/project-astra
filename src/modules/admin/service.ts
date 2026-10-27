@@ -1177,7 +1177,12 @@ export async function listAcademicPeriods(params: {
   filter?: { isActive?: boolean }
   providers: AppProviders
 }): Promise<AcademicPeriod[]> {
-  checkPolicyAdminAccess(params.actorRole)
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
+  ) {
+    throw AppError.forbidden()
+  }
   return params.providers.domainStore.listAcademicPeriods(params.filter)
 }
 
@@ -1363,7 +1368,12 @@ export async function listClassEnrollments(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<ClassEnrollment[]> {
-  checkPolicyAdminAccess(params.actorRole)
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
+  ) {
+    throw AppError.forbidden()
+  }
   return params.providers.domainStore.listClassEnrollments({
     userId: params.userId,
     classId: params.classId,

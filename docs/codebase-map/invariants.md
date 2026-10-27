@@ -1,5 +1,10 @@
 # Invariants
 
+## INV-ASTRA-013 — Operational academic reads are distinct from policy writes
+
+**Rule:** Approved platform administrators, school administrators, teachers and staff with the admin API scope can read academic periods and class enrollments for operational roster/attendance summaries. Policy creation, enrollment changes and other configuration mutations retain administrator-only checks. Student profiles remain denied even with an over-scoped token. This matches the existing operational student/class/attendance read policy and Chronos's documented teacher/staff dashboard access.
+**Evidence:** `src/modules/admin/service.ts`, `tests/integration/academic-attendance-policy.test.ts`, Chronos `docs/rbac-implementation.md`.
+
 ## INV-ASTRA-012 — Staff assigned roles precede domain publication
 
 **Rule:** Staff creation assigns the primary and extra roles through the identity provider before publishing an approved profile or success audit. When identity creation is configured, callers cannot supply a different User ID. Role updates replace the complete identity role set before updating the profile; roles-only input retains the primary role. A school administrator cannot modify an existing platform administrator. Identity failures propagate; no manual `customData` role is an authorization substitute. These operations are not a distributed transaction: a failed create may retain an identity without a profile, and database/session-revocation recovery requires separate validation.

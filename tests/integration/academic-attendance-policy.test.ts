@@ -92,6 +92,71 @@ function setupPolicyTestEnvironment() {
 }
 
 describe('Academic Attendance Policy Integration', () => {
+  it.each(['teacher', 'staff'] as const)(
+    '%s can read dashboard period/enrollment sources while policy writes remain forbidden',
+    async (role) => {
+      const { app, domainStore } = setupPolicyTestEnvironment()
+      domainStore.profiles.set('reader-1', {
+        user_id: 'reader-1',
+        full_name: 'Operational Reader',
+        role,
+        lifecycle_status: 'approved',
+        gender: null,
+      })
+      const token = tokenFor({ sub: 'reader-1', roles: [role], scope: 'openid profile admin:read' })
+      const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+      const period = await domainStore.createAcademicPeriod({
+        name: '2026/2027',
+        startDate: '2026-07-01',
+        endDate: '2027-06-30',
+        isActive: true,
+      })
+      const periods = await app.request('/v1/admin/academic-periods?is_active=true', { headers })
+      expect(periods.status).toBe(200)
+      expect((await periods.json()).data).toEqual([expect.objectContaining({ id: period.id })])
+      const enrollments = await app.request(
+        `/v1/admin/enrollments?academic_period_id=${period.id}&status=active`,
+        { headers },
+      )
+      expect(enrollments.status).toBe(200)
+      expect((await enrollments.json()).data).toEqual([])
+      const create = await app.request('/v1/admin/academic-periods', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          name: 'Forbidden',
+          start_date: '2027-07-01',
+          end_date: '2028-06-30',
+        }),
+      })
+      expect(create.status).toBe(403)
+      const enroll = await app.request('/v1/admin/enrollments', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          user_id: 'student-1',
+          class_id: '00000000-0000-4000-8000-000000000001',
+          academic_period_id: period.id,
+        }),
+      })
+      expect(enroll.status).toBe(403)
+    },
+  )
+
+  it('denies operational period/enrollment reads to an over-scoped student', async () => {
+    const { app } = setupPolicyTestEnvironment()
+    const token = tokenFor({
+      sub: 'student-1',
+      roles: ['student'],
+      scope: 'openid profile admin:read',
+    })
+    for (const path of ['/v1/admin/academic-periods', '/v1/admin/enrollments']) {
+      expect(
+        (await app.request(path, { headers: { Authorization: `Bearer ${token}` } })).status,
+      ).toBe(403)
+    }
+  })
+
   it('manages full lifecycle of academic policies and applies attendance rules', async () => {
     const { app, adminToken, studentToken } = setupPolicyTestEnvironment()
 
