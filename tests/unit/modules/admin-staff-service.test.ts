@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   createPermission,
   createRole,
@@ -205,6 +205,118 @@ describe('admin staff, roles, and permissions service unit tests (Ticket 05)', (
   })
 
   describe('Staff Identity & Profile Lifecycle Management', () => {
+    it('provisions the complete assigned identity roles before publishing an approved profile', async () => {
+      const { providers, domainStore, identityProvider } = createTestProviders()
+      const assign = vi
+        .spyOn(identityProvider, 'assignRoles')
+        .mockImplementation(async (id, roles) => {
+          expect(domainStore.profiles.has(id)).toBe(false)
+          expect(roles).toEqual(['staff', 'teacher'])
+        })
+      const staff = await createStaff({
+        email: 'assigned@school.sch.id',
+        fullName: 'Assigned Staff',
+        role: 'staff',
+        roles: ['teacher', 'staff'],
+        actorId: 'school-admin-1',
+        actorRole: 'school_admin',
+        providers,
+      })
+      expect(assign).toHaveBeenCalledWith(staff.user_id, ['staff', 'teacher'])
+      expect(staff.roles).toEqual(['staff', 'teacher'])
+    })
+
+    it('does not publish a profile or success audit when Logto role assignment fails', async () => {
+      const { providers, domainStore, identityProvider } = createTestProviders()
+      vi.spyOn(identityProvider, 'assignRoles').mockRejectedValue(
+        AppError.internal('Logto unavailable'),
+      )
+      await expect(
+        createStaff({
+          email: 'failure@school.sch.id',
+          fullName: 'Failed Staff',
+          role: 'staff',
+          actorId: 'school-admin-1',
+          actorRole: 'school_admin',
+          providers,
+        }),
+      ).rejects.toThrow('Logto unavailable')
+      expect(await domainStore.getStaffProfiles()).toEqual([])
+      expect(await domainStore.getAuditLogs('profile')).toEqual([])
+    })
+
+    it('rejects a caller-selected identity before creating or assigning identity roles', async () => {
+      const { providers, identityProvider } = createTestProviders()
+      const create = vi.spyOn(identityProvider, 'createStaffIdentity')
+      const assign = vi.spyOn(identityProvider, 'assignRoles')
+      await expect(
+        createStaff({
+          userId: 'existing-platform-admin',
+          email: 'separate@school.sch.id',
+          fullName: 'Wrong Binding',
+          role: 'staff',
+          actorId: 'school-admin-1',
+          actorRole: 'school_admin',
+          providers,
+        }),
+      ).rejects.toThrow(AppError)
+      expect(create).not.toHaveBeenCalled()
+      expect(assign).not.toHaveBeenCalled()
+    })
+
+    it('repairs assigned roles through the existing update path and retains primary role on roles-only input', async () => {
+      const { providers, domainStore, identityProvider } = createTestProviders()
+      const staff = await createStaff({
+        email: 'repair@school.sch.id',
+        fullName: 'Repair Staff',
+        role: 'staff',
+        actorId: 'school-admin-1',
+        actorRole: 'school_admin',
+        providers,
+      })
+      identityProvider.users.get(staff.user_id)!.roles = []
+      const assign = vi
+        .spyOn(identityProvider, 'assignRoles')
+        .mockRejectedValueOnce(AppError.internal('Logto unavailable'))
+      const params = {
+        userId: staff.user_id,
+        roles: ['teacher'],
+        actorId: 'school-admin-1',
+        actorRole: 'school_admin' as const,
+        providers,
+      }
+      await expect(updateStaff(params)).rejects.toThrow('Logto unavailable')
+      expect(await domainStore.getUserRoles(staff.user_id)).toEqual(['staff'])
+      expect((await domainStore.getAuditLogs('profile', staff.user_id)).length).toBe(1)
+      const updated = await updateStaff(params)
+      expect(updated.roles).toEqual(['staff', 'teacher'])
+      expect(identityProvider.users.get(staff.user_id)?.roles).toEqual(['staff', 'teacher'])
+      expect(assign).toHaveBeenLastCalledWith(staff.user_id, ['staff', 'teacher'])
+    })
+
+    it('does not let school_admin replace a platform administrator identity role', async () => {
+      const { providers, identityProvider } = createTestProviders()
+      const staff = await createStaff({
+        email: 'platform@school.sch.id',
+        fullName: 'Platform Admin',
+        role: 'platform_admin',
+        actorId: 'platform-admin-1',
+        actorRole: 'platform_admin',
+        providers,
+      })
+      const assign = vi.spyOn(identityProvider, 'assignRoles')
+      await expect(
+        updateStaff({
+          userId: staff.user_id,
+          role: 'staff',
+          actorId: 'school-admin-1',
+          actorRole: 'school_admin',
+          providers,
+        }),
+      ).rejects.toThrow(AppError)
+      expect(assign).not.toHaveBeenCalled()
+    })
+
     it('school_admin can create a Staff profile with an existing active role', async () => {
       const { providers, domainStore } = createTestProviders()
 

@@ -1,5 +1,10 @@
 # Invariants
 
+## INV-ASTRA-012 — Staff assigned roles precede domain publication
+
+**Rule:** Staff creation assigns the primary and extra roles through the identity provider before publishing an approved profile or success audit. When identity creation is configured, callers cannot supply a different User ID. Role updates replace the complete identity role set before updating the profile; roles-only input retains the primary role. A school administrator cannot modify an existing platform administrator. Identity failures propagate; no manual `customData` role is an authorization substitute. These operations are not a distributed transaction: a failed create may retain an identity without a profile, and database/session-revocation recovery requires separate validation.
+**Evidence:** `src/modules/admin/service.ts`, `src/providers/identity/oidc-identity.ts`, `tests/unit/modules/admin-staff-service.test.ts`, `tests/unit/providers/oidc-identity.test.ts`.
+
 ## INV-ASTRA-011 — Student profile reads use binding-verified canonical fields
 
 **Rule:** Admin student detail and mobile profile share the canonical student read projection. Overlay roster name, class, absence number and gender only when a canonical Student and its binding match the requested User ID. Account email, role, lifecycle and avatar remain profile-owned; legacy-only or mismatched bindings keep the legacy profile. Roster read failures propagate instead of masquerading as missing values. Mobile active-enrollment absence number takes precedence when available. Reads do not rewrite profiles or enrollments.

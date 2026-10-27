@@ -399,7 +399,7 @@ export class OidcIdentityProvider implements IdentityProvider {
 
   async assignRoles(userId: string, roles: readonly string[]): Promise<void> {
     if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
-      return
+      throw AppError.internal('Identity provider management API is not configured.')
     }
 
     try {

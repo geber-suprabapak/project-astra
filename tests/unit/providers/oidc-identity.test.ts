@@ -176,6 +176,15 @@ describe('OidcIdentityProvider', () => {
   })
 
   describe('unconfigured Logto operations fail strictly without fake success', () => {
+    it('bulk role assignment rejects missing management credentials', async () => {
+      const provider = new OidcIdentityProvider({
+        jwtSecret: 'test-secret-at-least-32-chars-long-12345',
+      })
+      await expect(provider.assignRoles('user-1', ['staff'])).rejects.toThrow(
+        'Identity provider management API is not configured.',
+      )
+    })
+
     it('verifyPassword throws internal AppError when Logto is not configured', async () => {
       const provider = new OidcIdentityProvider({
         jwtSecret: 'test-secret-at-least-32-chars-long-12345',
