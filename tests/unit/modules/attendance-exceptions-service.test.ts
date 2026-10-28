@@ -474,21 +474,38 @@ describe('Manual Attendance & Attempt Audit Trail (Ticket 09)', () => {
     expect(log.details?.attempt_reason).toBe('Camera glare prevented face recognition')
   })
 
-  it('Authorized teacher creates manual attendance successfully', async () => {
+  it('Teacher cannot create manual attendance', async () => {
     const { domainStore, providers } = createTestEnvironment()
     await setupStudentAttendance(domainStore, 'student-1')
 
-    const manualRecord = await createManualAttendance({
-      userId: 'student-1',
-      actionType: 'check_in',
-      status: 'Hadir',
-      reason: 'Manual check-in by homeroom teacher',
-      actorId: 'teacher-1',
-      actorRole: 'teacher',
-      providers,
-    })
+    await expect(
+      createManualAttendance({
+        userId: 'student-1',
+        actionType: 'check_in',
+        status: 'Hadir',
+        reason: 'Manual check-in by homeroom teacher',
+        actorId: 'teacher-1',
+        actorRole: 'teacher',
+        providers,
+      }),
+    ).rejects.toThrow('Access denied.')
+  })
 
-    expect(manualRecord.status).toBe('Hadir')
+  it('Requires a related attendance attempt for manual attendance', async () => {
+    const { domainStore, providers } = createTestEnvironment()
+    await setupStudentAttendance(domainStore, 'student-1')
+
+    await expect(
+      createManualAttendance({
+        userId: 'student-1',
+        actionType: 'check_in',
+        status: 'Hadir',
+        reason: 'Manual check-in after verification failure',
+        actorId: 'admin-1',
+        actorRole: 'school_admin',
+        providers,
+      }),
+    ).rejects.toThrow('Validation failed.')
   })
 
   it('Unauthorized actor (student) cannot create manual attendance (throws 403)', async () => {
@@ -571,6 +588,30 @@ describe('Manual Attendance & Attempt Audit Trail (Ticket 09)', () => {
         status: 'Hadir',
         reason: 'Wrong student attempt',
         attemptId: attemptStudent2.id,
+        actorId: 'admin-1',
+        actorRole: 'school_admin',
+        providers,
+      }),
+    ).rejects.toThrow('Validation failed.')
+  })
+
+  it('Rejects an attempt for a different attendance action', async () => {
+    const { domainStore, providers } = createTestEnvironment()
+    await setupStudentAttendance(domainStore, 'student-1')
+    const checkInAttempt = await domainStore.recordAttendanceAttempt({
+      userId: 'student-1',
+      actionType: 'check_in',
+      status: 'failed',
+      reason: 'Face verification failed',
+    })
+
+    await expect(
+      createManualAttendance({
+        userId: 'student-1',
+        actionType: 'check_out',
+        status: 'Pulang',
+        reason: 'Manual checkout after verification failure',
+        attemptId: checkInAttempt.id,
         actorId: 'admin-1',
         actorRole: 'school_admin',
         providers,

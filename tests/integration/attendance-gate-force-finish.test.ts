@@ -135,6 +135,12 @@ describe('attendance gate and leave force-finish', () => {
         mfa_verified: true,
         must_change_password: false,
       })
+      const attempt = await domainStore.recordAttendanceAttempt({
+        userId: 'student-1',
+        actionType: 'check_in',
+        status: 'failed',
+        reason: `${approvalStatus} leave does not change the attempt requirement`,
+      })
 
       const response = await app.request('/v1/admin/attendance/manual', {
         method: 'POST',
@@ -147,6 +153,7 @@ describe('attendance gate and leave force-finish', () => {
           action_type: 'check_in',
           date: today,
           reason: `${approvalStatus} leave must not block attendance`,
+          attempt_id: attempt.id,
         }),
       })
 
@@ -189,6 +196,16 @@ describe('attendance gate and leave force-finish', () => {
       Authorization: `Bearer ${adminToken}`,
       'Content-Type': 'application/json',
     }
+    const attempts = new Map<string, string>()
+    for (const actionType of ['check_in', 'check_out'] as const) {
+      const attempt = await domainStore.recordAttendanceAttempt({
+        userId: 'student-1',
+        actionType,
+        status: 'failed',
+        reason: `Leave period blocks manual ${actionType}`,
+      })
+      attempts.set(actionType, attempt.id)
+    }
 
     const precheckBlocked = await app.request('/v1/mobile/attendance/precheck', {
       method: 'POST',
@@ -230,6 +247,7 @@ describe('attendance gate and leave force-finish', () => {
           action_type: actionType,
           date: today,
           reason: 'Manual verification',
+          attempt_id: attempts.get(actionType),
         }),
       })
       expect(blocked.status, actionType).toBe(409)
@@ -270,6 +288,7 @@ describe('attendance gate and leave force-finish', () => {
         action_type: 'check_in',
         date: today,
         reason: 'Manual verification after return',
+        attempt_id: attempts.get('check_in'),
       }),
     })
     expect(allowed.status).toBe(201)

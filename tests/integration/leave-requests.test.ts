@@ -671,6 +671,12 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     expect(permitId).toBeDefined()
 
     // A pending leave request must not block a physical attendance record for the same student.
+    const attendanceAttempt = await domainStore.recordAttendanceAttempt({
+      userId: 'student-1',
+      actionType: 'check_in',
+      status: 'failed',
+      reason: 'Manual attendance scenario after the student presence was checked',
+    })
     const attendanceRes = await app.request('/v1/admin/attendance/manual', {
       method: 'POST',
       headers: {
@@ -683,6 +689,7 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
         status: 'Hadir',
         reason: 'Physical attendance recorded while leave is pending',
         date: '2026-08-28',
+        attempt_id: attendanceAttempt.id,
       }),
     })
 

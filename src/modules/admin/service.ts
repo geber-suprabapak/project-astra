@@ -1897,12 +1897,7 @@ export async function createManualAttendance(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<AttendanceRecord> {
-  if (
-    !params.actorRole ||
-    !['platform_admin', 'school_admin', 'teacher'].includes(params.actorRole)
-  ) {
-    throw AppError.forbidden()
-  }
+  checkPolicyAdminAccess(params.actorRole)
 
   let student: UserProfile | null = null
   try {
@@ -1922,17 +1917,21 @@ export async function createManualAttendance(params: {
     throw AppError.conflict('Cannot record manual attendance for student who is not approved.')
   }
 
-  let relatedAttempt: AttendanceAttempt | null = null
-  if (params.attemptId) {
-    relatedAttempt = await params.providers.domainStore.getAttendanceAttempt(params.attemptId)
-    if (!relatedAttempt) {
-      throw AppError.notFound('Referenced attendance attempt')
-    }
-    if (relatedAttempt.user_id !== params.userId) {
-      throw AppError.validationError(
-        'Referenced attendance attempt does not belong to this student.',
-      )
-    }
+  if (!params.attemptId) {
+    throw AppError.validationError('Attendance attempt is required for manual attendance.')
+  }
+
+  const relatedAttempt = await params.providers.domainStore.getAttendanceAttempt(params.attemptId)
+  if (!relatedAttempt) {
+    throw AppError.notFound('Referenced attendance attempt')
+  }
+  if (relatedAttempt.user_id !== params.userId) {
+    throw AppError.validationError('Referenced attendance attempt does not belong to this student.')
+  }
+  if (relatedAttempt.action_type !== params.actionType) {
+    throw AppError.validationError(
+      'Referenced attendance attempt does not match the attendance action.',
+    )
   }
 
   const attendance = await params.providers.domainStore.createManualAttendance({

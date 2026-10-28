@@ -698,7 +698,7 @@ export const createManualAttendanceSchema = z
     action_type: z.enum(['check_in', 'check_out']).optional(),
     actionType: z.enum(['check_in', 'check_out']).optional(),
     status: z.enum(['Hadir', 'Terlambat', 'Pulang', 'Alpha']).optional(),
-    reason: z.string().min(3, 'Reason must be at least 3 characters.').max(500),
+    reason: z.string().trim().min(3, 'Reason must be at least 3 characters.').max(500),
     date: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD')
@@ -715,6 +715,10 @@ export const createManualAttendanceSchema = z
   .refine((data) => Boolean(data.action_type || data.actionType), {
     message: 'Action type is required.',
     path: ['action_type'],
+  })
+  .refine((data) => Boolean(data.attempt_id || data.attemptId), {
+    message: 'Attendance attempt is required for manual attendance.',
+    path: ['attempt_id'],
   })
 
 export type CreateManualAttendanceInput = z.infer<typeof createManualAttendanceSchema>

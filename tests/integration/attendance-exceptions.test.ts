@@ -513,15 +513,64 @@ describe('Record Face Attendance & Manual Exceptions Integration Tests (Ticket 0
         user_id: 'student-1',
         action_type: 'check_in',
         reason: 'Illegal self-override',
+        attempt_id: 'not-used-for-unauthorized-role',
       }),
     })
 
     expect(res.status).toBe(403)
+
+    const teacherToken = await signedOidcToken({
+      sub: 'teacher-1',
+      roles: ['teacher'],
+      scope: 'admin:read admin:write attendance:write openid profile',
+    })
+    const teacherRes = await app.request('/v1/admin/attendance/manual', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${teacherToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user_id: 'student-1',
+        action_type: 'check_in',
+        reason: 'Teacher attempts a manual attendance write',
+        attempt_id: 'not-used-for-unauthorized-role',
+      }),
+    })
+    expect(teacherRes.status).toBe(403)
 
     const deleteRes = await app.request('/v1/admin/attendance/nonexistent', {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${studentToken}` },
     })
     expect(deleteRes.status).toBe(403)
+  })
+
+  it('requires a related attendance attempt before recording manual attendance', async () => {
+    const { domainStore, identityProvider, app } = createIntegrationEnvironment()
+    await setupSchoolAndStudent(domainStore, identityProvider, 'student-1')
+    const adminToken = await signedOidcToken({
+      sub: 'school-admin-1',
+      roles: ['school_admin'],
+      scope: 'admin:read admin:write openid profile',
+      mfa_verified: true,
+      must_change_password: false,
+    })
+
+    const response = await app.request('/v1/admin/attendance/manual', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user_id: 'student-1',
+        action_type: 'check_in',
+        reason: 'Physical verification completed by the school administrator',
+      }),
+    })
+
+    expect(response.status).toBe(422)
+    expect(await domainStore.listAttendances({ userId: 'student-1' })).toHaveLength(0)
   })
 })
