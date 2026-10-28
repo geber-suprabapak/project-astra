@@ -97,6 +97,7 @@ export class NotificationWorker {
             notificationId: notification.id,
             userId: notification.user_id,
             channel: notification.channel,
+            messageId: deliveryResult.messageId,
           },
           'Notification delivered successfully',
         )

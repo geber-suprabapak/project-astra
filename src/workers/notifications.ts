@@ -1,9 +1,11 @@
 import { defaultProviders } from '../providers/index.js'
 import { NotificationWorker } from './notification-worker.js'
 import { logger } from '../lib/logging/logger.js'
+import { ExpoPushNotificationTransport } from '../modules/notifications/transport.js'
 
 const worker = new NotificationWorker({
   domainStore: defaultProviders.domainStore,
+  transport: new ExpoPushNotificationTransport(),
   pollIntervalMs: 2000,
   batchSize: 10,
   maxRetries: 3,
