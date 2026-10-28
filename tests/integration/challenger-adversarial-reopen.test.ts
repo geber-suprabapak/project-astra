@@ -64,6 +64,7 @@ async function setupTestEntities(ctx: ReturnType<typeof createTestContext>) {
     { id: 'admin-1', role: 'platform_admin' as const },
     { id: 'school-admin-1', role: 'school_admin' as const },
     { id: 'teacher-1', role: 'teacher' as const },
+    { id: 'staff-1', role: 'staff' as const },
     { id: 'student-1', role: 'student' as const },
   ]
 
@@ -110,7 +111,7 @@ async function setupTestEntities(ctx: ReturnType<typeof createTestContext>) {
 }
 
 describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-01)', () => {
-  it('Role Matrix: allows only school_admin; strictly forbids platform_admin, teacher, student, and unauthenticated roles', async () => {
+  it('Role Matrix: all Chronos roles can decide Leave while students and unauthenticated users remain forbidden', async () => {
     const ctx = createTestContext()
     const {
       lr,
@@ -121,7 +122,7 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
       studentWithAdminScopeToken,
     } = await setupTestEntities(ctx)
 
-    // 1. Platform administrators cannot perform leave transitions.
+    // 1. Platform administrators can reject Leave Requests.
     const rejectRes = await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/reject`, {
       method: 'POST',
       headers: {
@@ -130,7 +131,7 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
       },
       body: JSON.stringify({ reason: 'Surat dokter buram.' }),
     })
-    expect(rejectRes.status).toBe(403)
+    expect(rejectRes.status).toBe(200)
 
     // Establish a rejected request using the authorized role.
     const schoolAdminReject = await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/reject`, {
@@ -170,40 +171,33 @@ describe('Challenger 1 Adversarial Stress: Leave Request Reopen Lifecycle (GAP-0
     })
     expect(unauthReopen.status).toBe(401)
 
-    // 5. Reopen as teacher -> 403 Forbidden (approval is school-admin-only)
+    // 5. Reopen as teacher -> 200 OK.
     const teacherReopen = await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/reopen`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${teacherToken}`,
       },
     })
-    expect(teacherReopen.status).toBe(403)
+    expect(teacherReopen.status).toBe(200)
 
-    // 6. Reject again and reopen as school_admin -> 200 OK
-    await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/reject`, {
+    // 6. Staff may reject, and the platform admin may reopen again.
+    const staffToken = tokenFor({ sub: 'staff-1', roles: ['staff'] })
+    const staffReject = await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/reject`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${schoolAdminToken}`,
+        Authorization: `Bearer ${staffToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ reason: 'Alasan kedua ditolak' }),
+      body: JSON.stringify({ reason: 'Verified by staff' }),
     })
-    const schoolAdminReopen = await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/reopen`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${schoolAdminToken}`,
-      },
-    })
-    expect(schoolAdminReopen.status).toBe(200)
-
-    // 7. Platform administrator remains forbidden after a rejected transition.
+    expect(staffReject.status).toBe(200)
     const platformAdminReopen = await ctx.app.request(`/v1/admin/leave-requests/${lr.id}/reopen`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${adminToken}`,
       },
     })
-    expect(platformAdminReopen.status).toBe(403)
+    expect(platformAdminReopen.status).toBe(200)
   })
 
   it('Non-existent ID: returns 404 Resource Not Found', async () => {

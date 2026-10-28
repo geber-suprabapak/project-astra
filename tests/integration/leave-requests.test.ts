@@ -158,7 +158,7 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
     'Chronos manual creation through %s',
     (path) => {
       it.each(['platform_admin', 'school_admin', 'teacher', 'staff'] as const)(
-        'allows approved %s without granting review privileges',
+        'allows approved %s to create and approve a Leave Request',
         async (role) => {
           const { domainStore, identityProvider, app } = createIntegrationEnvironment()
           await setupTestUsers(domainStore, identityProvider)
@@ -201,19 +201,77 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
           const logs = await domainStore.getAuditLogs('leave_request', data.id)
           expect(logs).toHaveLength(1)
           expect(logs[0].actor_id).toBe(actorId)
-          if (role !== 'school_admin') {
-            const review = await app.request(`${path}/${data.id}/approve`, {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ duration_days: 1 }),
-            })
-            expect(review.status).toBe(403)
-            expect((await domainStore.getLeaveRequestById(data.id))?.approval_status).toBe(
-              'pending',
-            )
-          }
+          const review = await app.request(`${path}/${data.id}/approve`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ duration_days: 1 }),
+          })
+          expect(review.status).toBe(200)
+          expect((await domainStore.getLeaveRequestById(data.id))?.approval_status).toBe('approved')
+          const reviewLogs = await domainStore.getAuditLogs('leave_request', data.id)
+          expect(reviewLogs.at(-1)?.actor_id).toBe(actorId)
         },
       )
+    },
+  )
+
+  it.each(['platform_admin', 'school_admin', 'teacher', 'staff'] as const)(
+    'allows approved %s to reject and reopen a Leave Request',
+    async (role) => {
+      const { domainStore, identityProvider, app } = createIntegrationEnvironment()
+      await setupTestUsers(domainStore, identityProvider)
+      const actorId = `chronos-${role}`
+      domainStore.profiles.set(actorId, {
+        user_id: actorId,
+        full_name: 'Chronos user',
+        role,
+        lifecycle_status: 'approved',
+      })
+      identityProvider.users.set(actorId, {
+        userId: actorId,
+        roles: [role],
+        scopes: ['openid', 'profile', 'admin:read', 'leave:read'],
+        mfaVerified: true,
+        mustChangePassword: false,
+      })
+      const actorToken = tokenFor({
+        sub: actorId,
+        roles: [role],
+        scope: 'openid profile admin:read leave:read',
+      })
+      const headers = {
+        Authorization: `Bearer ${actorToken}`,
+        'Content-Type': 'application/json',
+      }
+      const created = await app.request('/v1/admin/leave-requests', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          user_id: 'student-1',
+          category: 'pergi',
+          description: 'Chronos manual request',
+          date: '2026-08-28',
+        }),
+      })
+      expect(created.status).toBe(201)
+      const { data: leave } = await created.json()
+
+      const rejected = await app.request(`/v1/admin/leave-requests/${leave.id}/reject`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ reason: 'Verified by Chronos role' }),
+      })
+      expect(rejected.status).toBe(200)
+      expect((await domainStore.getLeaveRequestById(leave.id))?.approval_status).toBe('rejected')
+
+      const reopened = await app.request(`/v1/admin/leave-requests/${leave.id}/reopen`, {
+        method: 'POST',
+        headers,
+      })
+      expect(reopened.status).toBe(200)
+      expect((await domainStore.getLeaveRequestById(leave.id))?.approval_status).toBe('pending')
+      const logs = await domainStore.getAuditLogs('leave_request', leave.id)
+      expect(logs.slice(-2).map((entry) => entry.actor_id)).toEqual([actorId, actorId])
     },
   )
 

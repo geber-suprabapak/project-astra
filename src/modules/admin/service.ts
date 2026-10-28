@@ -2253,7 +2253,10 @@ export async function approveLeaveRequest(params: {
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse> {
-  if (params.actorRole !== 'school_admin') {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
+  ) {
     throw AppError.forbidden()
   }
 
@@ -2310,7 +2313,10 @@ export async function forceFinishLeaveRequest(params: {
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse> {
-  if (params.actorRole !== 'school_admin') {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
+  ) {
     throw AppError.forbidden()
   }
 
@@ -2331,7 +2337,10 @@ export async function rejectLeaveRequest(params: {
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse> {
-  if (params.actorRole !== 'school_admin') {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
+  ) {
     throw AppError.forbidden()
   }
 
@@ -2376,7 +2385,10 @@ export async function reopenLeaveRequest(params: {
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse> {
-  if (params.actorRole !== 'school_admin') {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
+  ) {
     throw AppError.forbidden()
   }
 

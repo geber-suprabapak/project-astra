@@ -288,43 +288,60 @@ describe('attendance gate and leave force-finish', () => {
     expect(forceFinish?.created_at).toBeDefined()
   })
 
-  it('rejects force-finish from a non-school-admin role', async () => {
-    const { domainStore, app } = await setup()
-    const today = wibDate()
-    const leave = await domainStore.insertPermit({
-      user_id: 'student-1',
-      kategori_izin: 'sakit',
-      deskripsi: 'Medical leave',
-      status: false,
-      link_foto: null,
-      tanggal: `${today}T00:00:00+07:00`,
-    })
-    await domainStore.updateLeaveRequestStatus({
-      id: leave.id,
-      approvalStatus: 'approved',
-      durationDays: 2,
-    })
-    const teacherToken = await token({
-      sub: 'teacher-1',
-      roles: ['teacher'],
-      scope: 'admin:read admin:write',
-      mfa_verified: true,
-      must_change_password: false,
-    })
+  it.each(['platform_admin', 'school_admin', 'teacher', 'staff'] as const)(
+    'allows %s to force-finish a Leave Period',
+    async (role) => {
+      const { domainStore, app } = await setup()
+      const today = wibDate()
+      const leave = await domainStore.insertPermit({
+        user_id: 'student-1',
+        kategori_izin: 'sakit',
+        deskripsi: 'Medical leave',
+        status: false,
+        link_foto: null,
+        tanggal: `${today}T00:00:00+07:00`,
+      })
+      await domainStore.updateLeaveRequestStatus({
+        id: leave.id,
+        approvalStatus: 'approved',
+        durationDays: 2,
+      })
+      const actorId = `reviewer-${role}`
+      domainStore.profiles.set(actorId, {
+        user_id: actorId,
+        full_name: 'Chronos reviewer',
+        role,
+        lifecycle_status: 'approved',
+      })
+      const reviewerToken = await token({
+        sub: actorId,
+        roles: [role],
+        scope: 'admin:read admin:write',
+        mfa_verified: true,
+        must_change_password: false,
+      })
 
-    const response = await app.request(`/v1/admin/leave-requests/${leave.id}/force-finish`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${teacherToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ effective_end_date: today, reason: 'Not allowed' }),
-    })
+      const response = await app.request(`/v1/admin/leave-requests/${leave.id}/force-finish`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${reviewerToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ effective_end_date: today, reason: 'Student returned' }),
+      })
 
-    expect(response.status).toBe(403)
-    expect(await domainStore.getLeaveRequestById(leave.id)).toMatchObject({
-      original_end_date: wibDate(1),
-      effective_end_date: wibDate(1),
-    })
-  })
+      expect(response.status).toBe(200)
+      expect(await domainStore.getLeaveRequestById(leave.id)).toMatchObject({
+        approval_status: 'approved',
+        original_end_date: wibDate(1),
+        effective_end_date: today,
+      })
+      const audit = await domainStore.getAuditLogs('leave_request', leave.id)
+      expect(audit.at(-1)).toMatchObject({
+        actor_id: actorId,
+        action: 'force_finish_leave_request',
+        details: { reason: 'Student returned' },
+      })
+    },
+  )
 })

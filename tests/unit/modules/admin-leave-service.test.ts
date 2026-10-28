@@ -484,7 +484,7 @@ describe('Admin Leave Requests Service', () => {
     expect((await domainStore.getLeaveRequestById(candidate.id))?.approval_status).toBe('pending')
   })
 
-  it('rejects teacher approval while preserving a one-day legacy period on read', async () => {
+  it('prevents a teacher from extending an approved legacy period while preserving it on read', async () => {
     const { domainStore, providers } = setupTestEnvironment()
 
     const permit = await domainStore.createLeaveRequest({
@@ -503,7 +503,7 @@ describe('Admin Leave Requests Service', () => {
         durationDays: 2,
         providers,
       }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    ).rejects.toMatchObject({ code: 'CONFLICT' })
 
     const legacy = await getAdminLeaveRequest({
       id: permit.id,
@@ -584,7 +584,7 @@ describe('Admin Leave Requests Service', () => {
     ).rejects.toMatchObject({ code: 'CONFLICT' })
   })
 
-  it('forbids platform administrators from approving, rejecting, or reopening Leave Requests', async () => {
+  it('allows platform administrators to approve, reject, and reopen Leave Requests', async () => {
     const { domainStore, providers } = setupTestEnvironment()
     const permit = await domainStore.insertPermit({
       user_id: 'student-1',
@@ -595,34 +595,40 @@ describe('Admin Leave Requests Service', () => {
       tanggal: '2026-08-21T00:00:00+07:00',
     })
 
-    await expect(
-      approveLeaveRequest({
-        id: permit.id,
-        actorRole: 'platform_admin',
-        actorId: 'platform-admin-1',
-        durationDays: 1,
-        providers,
-      }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    const approved = await approveLeaveRequest({
+      id: permit.id,
+      actorRole: 'platform_admin',
+      actorId: 'platform-admin-1',
+      durationDays: 1,
+      providers,
+    })
+    expect(approved.approval_status).toBe('approved')
 
-    await expect(
-      rejectLeaveRequest({
-        id: permit.id,
-        actorRole: 'platform_admin',
-        actorId: 'platform-admin-1',
-        reason: 'Tidak disetujui',
-        providers,
-      }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    const secondPermit = await domainStore.insertPermit({
+      user_id: 'student-1',
+      kategori_izin: 'sakit',
+      deskripsi: 'Kontrol lanjutan',
+      status: false,
+      link_foto: null,
+      tanggal: '2026-08-22T00:00:00+07:00',
+    })
 
-    await expect(
-      reopenLeaveRequest({
-        id: permit.id,
-        actorRole: 'platform_admin',
-        actorId: 'platform-admin-1',
-        providers,
-      }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    const rejected = await rejectLeaveRequest({
+      id: secondPermit.id,
+      actorRole: 'platform_admin',
+      actorId: 'platform-admin-1',
+      reason: 'Tidak disetujui',
+      providers,
+    })
+    expect(rejected.approval_status).toBe('rejected')
+
+    const reopened = await reopenLeaveRequest({
+      id: secondPermit.id,
+      actorRole: 'platform_admin',
+      actorId: 'platform-admin-1',
+      providers,
+    })
+    expect(reopened.approval_status).toBe('pending')
   })
 
   it('rejects a leave request with reason and records an audit log', async () => {
@@ -721,7 +727,7 @@ describe('Admin Leave Requests Service', () => {
     expect(reopenNotification?.payload.leave_request_id).toBe(permit.id)
   })
 
-  it('forbids unauthorized student or staff role from reopening leave request', async () => {
+  it('forbids students and allows staff to reopen leave requests', async () => {
     const { domainStore, providers } = setupTestEnvironment()
 
     const permit = await domainStore.insertPermit({
@@ -733,6 +739,12 @@ describe('Admin Leave Requests Service', () => {
       tanggal: '2026-08-21T00:00:00+07:00',
     })
 
+    await domainStore.updateLeaveRequestStatus({
+      id: permit.id,
+      approvalStatus: 'rejected',
+      status: false,
+    })
+
     await expect(
       reopenLeaveRequest({
         id: permit.id,
@@ -740,20 +752,15 @@ describe('Admin Leave Requests Service', () => {
         actorId: 'student-1',
         providers,
       }),
-    ).rejects.toMatchObject({
-      code: 'FORBIDDEN',
-    })
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
 
-    await expect(
-      reopenLeaveRequest({
-        id: permit.id,
-        actorRole: 'staff',
-        actorId: 'staff-1',
-        providers,
-      }),
-    ).rejects.toMatchObject({
-      code: 'FORBIDDEN',
+    const reopened = await reopenLeaveRequest({
+      id: permit.id,
+      actorRole: 'staff',
+      actorId: 'staff-1',
+      providers,
     })
+    expect(reopened.approval_status).toBe('pending')
   })
 
   it('throws notFound when reopening non-existent leave request', async () => {
