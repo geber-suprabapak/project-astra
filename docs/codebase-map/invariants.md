@@ -1,5 +1,10 @@
 # Invariants
 
+## INV-ASTRA-017 — File sizes cross the PostgreSQL boundary as numbers
+
+**Rule:** FileRecord size_bytes is a number or null on create, get, list and lifecycle-update responses. PostgreSQL bigint storage is projected through a numeric driver type so verification can compare it strictly with S3 object bytes. Null and zero are preserved. Upload verification still checks object existence, MIME and exact size; existing rejected files are never silently reactivated.
+**Evidence:** `src/providers/postgres/domain-store.ts`, `src/modules/files/service.ts`, `tests/integration/postgres-file-records.test.ts`. The real PostgreSQL test pins a transaction, asserts pg_temp resolution and uses ON COMMIT DROP for its private file table.
+
 ## INV-ASTRA-016 — Chronos roles may create pending Leave Requests
 
 **Rule:** Approved platform administrators, school administrators, teachers and staff with the admin API scope may create a pending Leave Request for an approved Student. The Student may still submit only for themselves. Creation retains actor-owned permit attachments, attachment-purpose/lifecycle validation, and the creator audit identity; it does not grant approval/rejection/reopen/force-finish privileges. Route aliases delegate creation authorization to the same service. This follows the owner decision of 28 October 2026 that users admitted to Chronos may use its manual Leave creation feature.

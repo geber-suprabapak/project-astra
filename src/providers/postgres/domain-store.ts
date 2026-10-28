@@ -3813,7 +3813,7 @@ export class PostgresDomainStore implements DomainStore {
           ${params.sizeBytes ?? null},
           ${params.lifecycle ?? 'available'}
         )
-        RETURNING id, user_id, purpose, object_path, content_type, size_bytes, lifecycle, created_at::text, updated_at::text
+        RETURNING id, user_id, purpose, object_path, content_type, size_bytes::double precision AS size_bytes, lifecycle, created_at::text, updated_at::text
       `
       if (!rows || rows.length === 0) {
         throw AppError.internal('Failed to create file record.')
@@ -3829,7 +3829,7 @@ export class PostgresDomainStore implements DomainStore {
   async getFileRecord(id: string): Promise<FileRecord | null> {
     try {
       const rows = await this.sql<FileRecord[]>`
-        SELECT id, user_id, purpose, object_path, content_type, size_bytes, lifecycle, created_at::text, updated_at::text
+        SELECT id, user_id, purpose, object_path, content_type, size_bytes::double precision AS size_bytes, lifecycle, created_at::text, updated_at::text
         FROM files
         WHERE id = ${id}
         LIMIT 1
@@ -3849,7 +3849,7 @@ export class PostgresDomainStore implements DomainStore {
   }): Promise<FileRecord[]> {
     try {
       const rows = await this.sql<FileRecord[]>`
-        SELECT id, user_id, purpose, object_path, content_type, size_bytes, lifecycle, created_at::text, updated_at::text
+        SELECT id, user_id, purpose, object_path, content_type, size_bytes::double precision AS size_bytes, lifecycle, created_at::text, updated_at::text
         FROM files
         WHERE (${filter?.userId ?? null}::text IS NULL OR user_id = ${filter?.userId ?? null})
           AND (${filter?.purpose ?? null}::text IS NULL OR purpose = ${filter?.purpose ?? null})
@@ -3870,7 +3870,7 @@ export class PostgresDomainStore implements DomainStore {
         UPDATE files
         SET lifecycle = ${lifecycle}, updated_at = NOW()
         WHERE id = ${id}
-        RETURNING id, user_id, purpose, object_path, content_type, size_bytes, lifecycle, created_at::text, updated_at::text
+        RETURNING id, user_id, purpose, object_path, content_type, size_bytes::double precision AS size_bytes, lifecycle, created_at::text, updated_at::text
       `
       if (!rows || rows.length === 0) {
         throw AppError.notFound('File record')
