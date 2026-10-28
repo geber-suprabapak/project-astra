@@ -1,5 +1,10 @@
 # Invariants
 
+## INV-ASTRA-016 — Chronos roles may create pending Leave Requests
+
+**Rule:** Approved platform administrators, school administrators, teachers and staff with the admin API scope may create a pending Leave Request for an approved Student. The Student may still submit only for themselves. Creation retains actor-owned permit attachments, attachment-purpose/lifecycle validation, and the creator audit identity; it does not grant approval/rejection/reopen/force-finish privileges. Route aliases delegate creation authorization to the same service. This follows the owner decision of 28 October 2026 that users admitted to Chronos may use its manual Leave creation feature.
+**Evidence:** `src/modules/admin/routes.ts`, `src/modules/admin/service.ts`, `tests/unit/modules/admin-leave-service.test.ts`, `tests/integration/leave-requests.test.ts`, `tests/integration/challenger-scope1.test.ts`.
+
 ## INV-ASTRA-015 — Leave student fields follow the verified canonical binding
 
 **Rule:** Leave detail, collection and write responses project name, class and absence number from the canonical Student only when its binding, User ID and profile NIS agree for a student profile. The latest active enrollment supplies class/absence; a bound student without an active enrollment clears stale legacy class/absence. Legacy-only and mismatched bindings retain legacy fields. PostgreSQL collections use one query without per-row roster reads; reads do not rewrite profiles or enrollments. Write enrichment preserves the committed leave snapshot and remains best effort if its subsequent read fails.

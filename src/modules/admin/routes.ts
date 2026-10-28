@@ -1489,9 +1489,6 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
   // POST /v1/admin/leave-requests & /v1/admin/permits
   const handleCreateAdminLeaveRequest = async (c: any) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
-    if (c.get('profileRole') !== 'student') {
-      throw AppError.forbidden('Only students can submit their own leave requests.')
-    }
     const body = await c.req.json()
     const parsed = createAdminLeaveRequestSchema.safeParse(body)
     if (!parsed.success) {
@@ -1499,9 +1496,6 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
     }
 
     const userId = parsed.data.user_id ?? parsed.data.userId
-    if (userId !== c.get('userId')) {
-      throw AppError.forbidden('Only students can submit their own leave requests.')
-    }
     const fileId = parsed.data.file_id ?? parsed.data.fileId
     const approvalStatus = parsed.data.approval_status ?? parsed.data.approvalStatus ?? 'pending'
 

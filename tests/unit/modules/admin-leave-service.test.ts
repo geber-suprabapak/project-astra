@@ -846,21 +846,106 @@ describe('Admin Leave Requests Service', () => {
   })
 
   describe('createAdminLeaveRequest', () => {
-    it('rejects staff actors from submitting a request for another student', async () => {
-      const { domainStore, providers } = setupTestEnvironment()
+    it.each(['platform_admin', 'school_admin', 'teacher', 'staff'] as const)(
+      'allows Chronos %s to create a pending request with their own attachment and audit actor',
+      async (actorRole) => {
+        const { domainStore, providers } = setupTestEnvironment()
+        const actorId = `${actorRole}-creator`
+        domainStore.profiles.set(actorId, {
+          user_id: actorId,
+          full_name: 'Chronos creator',
+          role: actorRole,
+          lifecycle_status: 'approved',
+        })
+        const file = await domainStore.createFileRecord({
+          userId: actorId,
+          purpose: 'permit_attachment',
+          objectPath: `${actorId}/note.jpg`,
+          contentType: 'image/jpeg',
+          lifecycle: 'pending_upload',
+        })
+        const created = await createAdminLeaveRequest({
+          userId: 'student-1',
+          category: 'sakit',
+          description: 'Dicatat melalui Chronos',
+          date: '2026-08-28',
+          actorRole,
+          actorId,
+          fileId: file.id,
+          providers,
+        })
+        expect(created.user_id).toBe('student-1')
+        expect(created.approval_status).toBe('pending')
+        expect(created.status).toBe(false)
+        expect(created.attachment_url).toContain(encodeURIComponent(file.object_path))
+        expect((await domainStore.getFileRecord(file.id))?.lifecycle).toBe('available')
+        const logs = await domainStore.getAuditLogs('leave_request', created.id)
+        expect(logs).toHaveLength(1)
+        expect(logs[0].actor_id).toBe(actorId)
+        expect(logs[0].details).toMatchObject({ user_id: 'student-1', approval_status: 'pending' })
+      },
+    )
 
+    it.each(['pending', 'rejected', 'disabled'] as const)(
+      'rejects a Chronos creation for a %s student without writing a request',
+      async (lifecycleStatus) => {
+        const { domainStore, providers } = setupTestEnvironment()
+        const student = await domainStore.getUserProfile('student-1')
+        domainStore.profiles.set('student-1', { ...student, lifecycle_status: lifecycleStatus })
+        await expect(
+          createAdminLeaveRequest({
+            userId: 'student-1',
+            category: 'sakit',
+            description: 'Invalid target',
+            date: '2026-08-28',
+            actorRole: 'teacher',
+            actorId: 'teacher-1',
+            providers,
+          }),
+        ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+        expect(await domainStore.listLeaveRequests()).toHaveLength(0)
+      },
+    )
+
+    it('does not let a Chronos user borrow a student attachment', async () => {
+      const { domainStore, providers } = setupTestEnvironment()
+      const file = await domainStore.createFileRecord({
+        userId: 'student-1',
+        purpose: 'permit_attachment',
+        objectPath: 'student-1/note.jpg',
+        contentType: 'image/jpeg',
+        lifecycle: 'pending_upload',
+      })
       await expect(
         createAdminLeaveRequest({
           userId: 'student-1',
           category: 'sakit',
-          description: 'Pengajuan tidak boleh dibuat oleh guru',
+          description: 'Foreign file',
           date: '2026-08-28',
           actorRole: 'teacher',
+          actorId: 'teacher-1',
+          fileId: file.id,
+          providers,
+        }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+      expect((await domainStore.getFileRecord(file.id))?.lifecycle).toBe('pending_upload')
+      expect(await domainStore.listLeaveRequests()).toHaveLength(0)
+    })
+
+    it('rejects a missing actor role before creating a request', async () => {
+      const { domainStore, providers } = setupTestEnvironment()
+      await expect(
+        createAdminLeaveRequest({
+          userId: 'student-1',
+          category: 'sakit',
+          description: 'No role',
+          date: '2026-08-28',
+          actorRole: null,
           actorId: 'teacher-1',
           providers,
         }),
       ).rejects.toMatchObject({ code: 'FORBIDDEN' })
-      expect(await domainStore.listLeaveRequests({ userId: 'student-1' })).toHaveLength(0)
+      expect(await domainStore.listLeaveRequests()).toHaveLength(0)
     })
 
     it('creates leave request with default pending status and records audit log', async () => {

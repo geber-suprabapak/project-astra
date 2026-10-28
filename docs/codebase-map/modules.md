@@ -17,6 +17,8 @@
 
 **Student read projection:** `src/modules/profile/canonical-profile.ts` is shared by admin student detail and mobile profile. It overlays canonical roster fields only after matching the Student binding to the requested User ID, preserving account-owned security metadata and legacy-only behavior. Generic DomainStore profile reads used by authentication are unchanged.
 
+**Manual Leave creation:** `src/modules/admin/service.ts::createAdminLeaveRequest` authorizes all four Chronos roles or Student self-submission, requires an approved Student target, preserves pending-only creation and actor-owned attachments, and records the creator separately from the target Student. Both admin route aliases use this service; status decisions remain separate.
+
 ## Adiwiyata
 
 **Purpose:** Authorize student camera reports and administrative Site/access management, daily coverage, and per-photo verification.

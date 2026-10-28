@@ -2140,13 +2140,16 @@ export async function createAdminLeaveRequest(params: {
   actorId: string
   providers: AppProviders
 }): Promise<AdminLeaveRequestResponse> {
-  if (params.actorRole !== 'student' || params.userId !== params.actorId) {
-    throw AppError.forbidden('Only students can submit their own leave requests.')
+  const isChronosUser =
+    params.actorRole !== null &&
+    ['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
+  if (!isChronosUser && (params.actorRole !== 'student' || params.userId !== params.actorId)) {
+    throw AppError.forbidden('Cannot submit a leave request for this student.')
   }
 
   const targetProfile = await params.providers.domainStore.getUserProfile(params.userId)
   if (targetProfile.role !== 'student' || targetProfile.lifecycle_status !== 'approved') {
-    throw AppError.forbidden('Only approved students can submit leave requests.')
+    throw AppError.forbidden('Leave requests require an approved student.')
   }
 
   let storagePath: string | null = null

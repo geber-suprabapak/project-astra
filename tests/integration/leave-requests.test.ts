@@ -154,6 +154,69 @@ async function setupTestUsers(
 }
 
 describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
+  describe.each(['/v1/admin/leave-requests', '/v1/admin/permits'])(
+    'Chronos manual creation through %s',
+    (path) => {
+      it.each(['platform_admin', 'school_admin', 'teacher', 'staff'] as const)(
+        'allows approved %s without granting review privileges',
+        async (role) => {
+          const { domainStore, identityProvider, app } = createIntegrationEnvironment()
+          await setupTestUsers(domainStore, identityProvider)
+          const actorId = `chronos-${role}`
+          domainStore.profiles.set(actorId, {
+            user_id: actorId,
+            full_name: 'Chronos user',
+            role,
+            lifecycle_status: 'approved',
+          })
+          identityProvider.users.set(actorId, {
+            userId: actorId,
+            roles: [role],
+            scopes: ['openid', 'profile', 'admin:read', 'leave:read'],
+            mfaVerified: true,
+            mustChangePassword: false,
+          })
+          const token = tokenFor({
+            sub: actorId,
+            roles: [role],
+            scope: 'openid profile admin:read leave:read',
+          })
+          const response = await app.request(path, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              user_id: 'student-1',
+              category: 'pergi',
+              description: 'Chronos manual request',
+              date: '2026-08-28',
+            }),
+          })
+          expect(response.status).toBe(201)
+          const { data } = await response.json()
+          expect(data).toMatchObject({
+            user_id: 'student-1',
+            approval_status: 'pending',
+            status: false,
+          })
+          const logs = await domainStore.getAuditLogs('leave_request', data.id)
+          expect(logs).toHaveLength(1)
+          expect(logs[0].actor_id).toBe(actorId)
+          if (role !== 'school_admin') {
+            const review = await app.request(`${path}/${data.id}/approve`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ duration_days: 1 }),
+            })
+            expect(review.status).toBe(403)
+            expect((await domainStore.getLeaveRequestById(data.id))?.approval_status).toBe(
+              'pending',
+            )
+          }
+        },
+      )
+    },
+  )
+
   it('Student creates upload intent, uploads attachment, and submits leave request referencing file_id', async () => {
     const { domainStore, identityProvider, app } = createIntegrationEnvironment()
     await setupTestUsers(domainStore, identityProvider)

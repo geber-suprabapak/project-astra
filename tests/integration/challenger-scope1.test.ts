@@ -150,7 +150,7 @@ async function setupUsers(
     mustChangePassword: false,
   })
 
-  // Staff (unauthorized for leave creation)
+  // Staff (authorized when the access token includes admin:read)
   domainStore.profiles.set('staff-1', {
     user_id: 'staff-1',
     full_name: 'Staff Tata Usaha',
@@ -401,53 +401,41 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
   })
 
   describe('4. HTTP Endpoint RBAC & Flow Verification', () => {
-    it('rejects school_admin, platform_admin, and teacher from creating leave requests', async () => {
-      const env = createTestEnv()
-      await setupUsers(env.domainStore, env.identityProvider)
-
-      const adminToken = tokenFor({
-        sub: 'admin-1',
-        roles: ['school_admin'],
-        scope: 'openid profile admin:read admin:write',
-        mfa_verified: true,
-        must_change_password: false,
-      })
-      const platformAdminToken = tokenFor({
-        sub: 'platform-admin-1',
-        roles: ['platform_admin'],
-        scope: 'openid profile admin:read admin:write',
-        mfa_verified: true,
-        must_change_password: false,
-      })
-      const teacherToken = tokenFor({
-        sub: 'teacher-1',
-        roles: ['teacher'],
-        scope: 'openid profile admin:read admin:write',
-        mfa_verified: true,
-        must_change_password: false,
-      })
-
-      for (const [roleName, token] of [
-        ['school_admin', adminToken],
-        ['platform_admin', platformAdminToken],
-        ['teacher', teacherToken],
-      ] as const) {
+    it.each(['school_admin', 'platform_admin', 'teacher'] as const)(
+      'allows approved %s to create a pending request for a student',
+      async (role) => {
+        const env = createTestEnv()
+        await setupUsers(env.domainStore, env.identityProvider)
+        const actorId = {
+          school_admin: 'admin-1',
+          platform_admin: 'platform-admin-1',
+          teacher: 'teacher-1',
+        }[role]
+        const token = tokenFor({
+          sub: actorId,
+          roles: [role],
+          scope: 'openid profile admin:read admin:write',
+          mfa_verified: true,
+          must_change_password: false,
+        })
         const res = await env.app.request('/v1/admin/leave-requests', {
           method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             user_id: 'student-1',
             category: 'sakit',
-            description: `Leave created by ${roleName}`,
+            description: `Leave created by ${role}`,
             date: '2026-08-28',
           }),
         })
-        expect(res.status).toBe(403)
-      }
-    })
+        expect(res.status).toBe(201)
+        expect((await res.json()).data).toMatchObject({
+          user_id: 'student-1',
+          approval_status: 'pending',
+          status: false,
+        })
+      },
+    )
 
     it('allows alias POST /v1/admin/permits', async () => {
       const env = createTestEnv()
@@ -474,10 +462,11 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           date: '2026-08-29',
         }),
       })
-      expect(permitRes.status).toBe(403)
+      expect(permitRes.status).toBe(201)
+      expect((await permitRes.json()).data.approval_status).toBe('pending')
     })
 
-    it('rejects student and staff roles with HTTP 403 Forbidden', async () => {
+    it('rejects a student admin request and a staff token without the admin scope', async () => {
       const env = createTestEnv()
       await setupUsers(env.domainStore, env.identityProvider)
 
@@ -489,7 +478,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
       const staffToken = tokenFor({
         sub: 'staff-1',
         roles: ['staff'],
-        scp: ['openid', 'profile', 'admin:read'],
+        scope: 'openid profile',
       })
 
       const studentRes = await env.app.request('/v1/admin/leave-requests', {
@@ -523,7 +512,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
       expect(staffRes.status).toBe(403)
     })
 
-    it('rejects target selection before looking up a student', async () => {
+    it('returns not found for an authorized request targeting an unknown student', async () => {
       const env = createTestEnv()
       await setupUsers(env.domainStore, env.identityProvider)
 
@@ -548,7 +537,11 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           date: '2026-08-28',
         }),
       })
-      expect(nonExistentRes.status).toBe(403)
+      expect(nonExistentRes.status).toBe(404)
+      expect((await nonExistentRes.json()).error.code).toBe('RESOURCE_NOT_FOUND')
+      expect(env.domainStore.auditLogs).not.toContainEqual(
+        expect.objectContaining({ action: 'create_admin_leave_request' }),
+      )
     })
 
     it('verifies attachment lifecycle transition and purpose gating', async () => {
@@ -591,14 +584,42 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
         }),
       })
       expect(attachRes.status).toBe(403)
+      expect(env.domainStore.files.get(validFileId)?.lifecycle).toBe('pending_upload')
+      expect(await env.domainStore.listLeaveRequests()).toHaveLength(0)
+
+      const ownFile = {
+        id: '33333333-2222-3333-4444-555555555555',
+        user_id: 'admin-1',
+        purpose: 'permit_attachment' as const,
+        object_path: 'admin-1/note.jpg',
+        content_type: 'image/jpeg',
+        size_bytes: 1024,
+        lifecycle: 'pending_upload' as const,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+      env.domainStore.files.set(ownFile.id, ownFile)
+      const ownAttachment = await env.app.request('/v1/admin/leave-requests', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: 'student-1',
+          category: 'pergi',
+          description: 'Own attachment',
+          date: '2026-08-28',
+          file_id: ownFile.id,
+        }),
+      })
+      expect(ownAttachment.status).toBe(201)
+      expect(env.domainStore.files.get(ownFile.id)?.lifecycle).toBe('available')
 
       // Wrong file purpose (avatar)
       const avatarFileId = '22222222-2222-3333-4444-555555555555'
       env.domainStore.files.set(avatarFileId, {
         id: avatarFileId,
-        user_id: 'student-1',
+        user_id: 'admin-1',
         purpose: 'avatar',
-        object_path: 'student-1/avatar.jpg',
+        object_path: 'admin-1/avatar.jpg',
         content_type: 'image/jpeg',
         size_bytes: 1024,
         lifecycle: 'available',
@@ -619,7 +640,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           file_id: avatarFileId,
         }),
       })
-      expect(wrongPurposeRes.status).toBe(403)
+      expect(wrongPurposeRes.status).toBe(422)
 
       // Non-existent file ID
       const nonExistentFileRes = await env.app.request('/v1/admin/leave-requests', {
@@ -636,7 +657,7 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           file_id: '99999999-9999-9999-9999-999999999999',
         }),
       })
-      expect(nonExistentFileRes.status).toBe(403)
+      expect(nonExistentFileRes.status).toBe(404)
     })
 
     it('generates audit log entry with entity_type leave_request', async () => {
@@ -664,9 +685,15 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests Adversarial Suite', 
           date: '2026-08-28',
         }),
       })
-      expect(res.status).toBe(403)
-      expect(env.domainStore.auditLogs).not.toContainEqual(
-        expect.objectContaining({ action: 'create_admin_leave_request' }),
+      expect(res.status).toBe(201)
+      const created = (await res.json()).data
+      expect(env.domainStore.auditLogs).toContainEqual(
+        expect.objectContaining({
+          action: 'create_admin_leave_request',
+          actor_id: 'admin-1',
+          entity_type: 'leave_request',
+          entity_id: created.id,
+        }),
       )
     })
   })
