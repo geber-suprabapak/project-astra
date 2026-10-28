@@ -619,6 +619,30 @@ describe('Manual Attendance & Attempt Audit Trail (Ticket 09)', () => {
     ).rejects.toThrow('Validation failed.')
   })
 
+  it('Rejects a successful attendance attempt for manual attendance', async () => {
+    const { domainStore, providers } = createTestEnvironment()
+    await setupStudentAttendance(domainStore, 'student-1')
+    const successfulAttempt = await domainStore.recordAttendanceAttempt({
+      userId: 'student-1',
+      actionType: 'check_in',
+      status: 'success',
+      reason: 'Face verified successfully',
+    })
+
+    await expect(
+      createManualAttendance({
+        userId: 'student-1',
+        actionType: 'check_in',
+        status: 'Hadir',
+        reason: 'Correct successful attempt',
+        attemptId: successfulAttempt.id,
+        actorId: 'admin-1',
+        actorRole: 'school_admin',
+        providers,
+      }),
+    ).rejects.toThrow('Validation failed.')
+  })
+
   it('listAttendanceAttempts and getAttendanceAttempt support querying and filtering', async () => {
     const { domainStore, providers } = createTestEnvironment()
     await setupStudentAttendance(domainStore, 'student-1')

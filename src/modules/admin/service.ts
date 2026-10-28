@@ -1933,6 +1933,11 @@ export async function createManualAttendance(params: {
       'Referenced attendance attempt does not match the attendance action.',
     )
   }
+  if (relatedAttempt.status === 'success') {
+    throw AppError.validationError(
+      'Successful attendance attempts cannot be used for manual attendance.',
+    )
+  }
 
   const attendance = await params.providers.domainStore.createManualAttendance({
     userId: params.userId,
