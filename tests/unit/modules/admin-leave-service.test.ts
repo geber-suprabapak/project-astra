@@ -305,6 +305,80 @@ describe('Admin Leave Requests Service', () => {
     domainStore.insertAuditLog = originalInsertAuditLog
   })
 
+  it.each(['platform_admin', 'school_admin', 'teacher', 'staff'] as const)(
+    'allows Chronos %s to force-finish with audited actor attribution',
+    async (actorRole) => {
+      const { domainStore, providers } = setupTestEnvironment()
+      const permit = await domainStore.insertPermit({
+        user_id: 'student-1',
+        kategori_izin: 'sakit',
+        deskripsi: 'Synthetic early return',
+        status: false,
+        link_foto: null,
+        tanggal: '2026-08-21T00:00:00+07:00',
+      })
+      await approveLeaveRequest({
+        id: permit.id,
+        actorRole: 'school_admin',
+        actorId: 'admin-1',
+        durationDays: 3,
+        providers,
+      })
+
+      const actorId = `${actorRole}-decision-actor`
+      const finished = await forceFinishLeaveRequest({
+        id: permit.id,
+        effectiveEndDate: '2026-08-22',
+        reason: 'Student returned early',
+        actorRole,
+        actorId,
+        providers,
+      })
+
+      expect(finished.effective_end_date).toBe('2026-08-22')
+      const logs = await domainStore.getAuditLogs('leave_request', permit.id)
+      expect(logs.find((entry) => entry.action === 'force_finish_leave_request')).toMatchObject({
+        actor_id: actorId,
+        action: 'force_finish_leave_request',
+      })
+    },
+  )
+
+  it('denies student force-finish without changing the approved Leave Period', async () => {
+    const { domainStore, providers } = setupTestEnvironment()
+    const permit = await domainStore.insertPermit({
+      user_id: 'student-1',
+      kategori_izin: 'sakit',
+      deskripsi: 'Synthetic denied force-finish',
+      status: false,
+      link_foto: null,
+      tanggal: '2026-08-21T00:00:00+07:00',
+    })
+    await approveLeaveRequest({
+      id: permit.id,
+      actorRole: 'school_admin',
+      actorId: 'admin-1',
+      durationDays: 3,
+      providers,
+    })
+
+    await expect(
+      forceFinishLeaveRequest({
+        id: permit.id,
+        effectiveEndDate: '2026-08-22',
+        reason: 'Unauthorized actor',
+        actorRole: 'student',
+        actorId: 'student-1',
+        providers,
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+
+    expect((await domainStore.getLeaveRequestById(permit.id))?.effective_end_date).toBe(
+      '2026-08-23',
+    )
+    expect(await domainStore.getAuditLogs('leave_request', permit.id)).toHaveLength(1)
+  })
+
   it('lists leave requests with student profile enrichment and filters', async () => {
     const { domainStore, providers } = setupTestEnvironment()
 
