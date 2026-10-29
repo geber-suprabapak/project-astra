@@ -1140,6 +1140,7 @@ export async function correctStudentEmail(params: {
 
 export async function resetStudentFaceEnrollment(params: {
   userId: string
+  requestId: string
   actorId: string
   actorRole: IdentityRole | null
   providers: AppProviders
@@ -1153,7 +1154,7 @@ export async function resetStudentFaceEnrollment(params: {
     throw AppError.notFound('Student profile')
   }
 
-  await params.providers.robinClient.deleteEnrollment(undefined, undefined, params.userId)
+  await params.providers.robinClient.deleteEnrollment(undefined, params.requestId, params.userId)
   await params.providers.objectStorage.deleteFaceEnrollmentImages(params.userId)
   await params.providers.domainStore.deleteFaceEnrollmentFiles(params.userId)
   await params.providers.domainStore.deleteFaceEnrollment(params.userId)

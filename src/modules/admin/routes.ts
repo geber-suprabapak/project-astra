@@ -412,6 +412,7 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
     const userId = c.req.param('userId')
     await resetStudentFaceEnrollment({
       userId,
+      requestId: c.get('requestId'),
       actorId: c.get('userId'),
       actorRole: c.get('profileRole'),
       providers,

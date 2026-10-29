@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createApp } from '../../../src/app.js'
 import { AppError } from '../../../src/lib/errors/app-error.js'
 import { ErrorCode } from '../../../src/lib/errors/codes.js'
@@ -414,6 +414,7 @@ describe('Adversarial Challenge M0: Astra Authorization & Privilege Boundaries',
         try {
           await resetStudentFaceEnrollment({
             userId: 'approved-student',
+            requestId: 'req-admin-reset',
             actorId: 'attacker-1',
             actorRole: role ?? null,
             providers,
@@ -427,6 +428,33 @@ describe('Adversarial Challenge M0: Astra Authorization & Privilege Boundaries',
           expect(appErr.code).toBe(ErrorCode.FORBIDDEN)
         }
       }
+    })
+
+    it('forwards the request ID to Robin when an admin resets face enrollment', async () => {
+      const domainStore = new MemoryDomainStore()
+      const deleteEnrollment = vi.fn(async () => {})
+      const providers = {
+        ...createTestProviders(domainStore),
+        robinClient: { ...mockRobinClient, deleteEnrollment },
+      }
+      domainStore.profiles.set('approved-student', {
+        user_id: 'approved-student',
+        nis: '1003',
+        full_name: 'Approved Student',
+        role: 'student',
+        lifecycle_status: 'approved',
+        gender: null,
+      })
+
+      await resetStudentFaceEnrollment({
+        userId: 'approved-student',
+        requestId: 'req-admin-reset',
+        actorId: 'school-admin-1',
+        actorRole: 'school_admin',
+        providers,
+      })
+
+      expect(deleteEnrollment).toHaveBeenCalledWith(undefined, 'req-admin-reset', 'approved-student')
     })
 
     it('strictly rejects non-admin roles for class and student enrollment mutations with HTTP 403', async () => {
