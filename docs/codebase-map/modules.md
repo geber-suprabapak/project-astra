@@ -19,7 +19,9 @@
 
 **Manual Leave creation:** `src/modules/admin/service.ts::createAdminLeaveRequest` authorizes all four Chronos roles or Student self-submission, requires an approved Student target, preserves pending-only creation and actor-owned attachments, and records the creator separately from the target Student. Both admin route aliases use this service; status decisions remain separate.
 
-**Manual Attendance:** `src/modules/admin/service.ts::createManualAttendance` validates the approved Student and related failed/error Attempt before delegating creation to `DomainStore`. The provider commits the Attendance and its actor/reason/Attempt audit record together; notification enqueue happens after that transaction.
+**Leave decision history:** `src/modules/admin/service.ts::getAdminLeaveRequestHistory` returns only decision action, event time and actor name/role snapshots from `audit_logs`. The additive admin route admits the four Chronos roles and never exposes actor IDs or raw audit details; legacy events without snapshots remain nullable and follow existing audit retention.
+
+**Manual Attendance:** `src/modules/admin/service.ts::createManualAttendance` admits only canonical `school_admin` and validates the approved Student plus a failed/error Attempt for the same Student, action, and WIB date before delegating creation to `DomainStore`. The provider commits the Attendance and its actor/reason/Attempt audit record together; notification enqueue happens after that transaction.
 
 ## Adiwiyata
 

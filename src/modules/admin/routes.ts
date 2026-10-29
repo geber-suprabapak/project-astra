@@ -76,6 +76,7 @@ import {
   exitStudentEnrollment,
   generateStudentResetCode,
   getAdminLeaveRequest,
+  getAdminLeaveRequestHistory,
   getAdminNotification,
   getAdminBackupStatus,
   getAttendance,
@@ -1532,6 +1533,17 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
 
   router.get('/leave-requests/:id', handleGetLeaveRequest)
   router.get('/permits/:id', handleGetLeaveRequest)
+
+  // GET /v1/admin/leave-requests/:id/history
+  router.get('/leave-requests/:id/history', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const history = await getAdminLeaveRequestHistory({
+      id: c.req.param('id'),
+      actorRole: c.get('profileRole'),
+      providers,
+    })
+    return successResponse(c, history, 'Leave decision history retrieved successfully.')
+  })
 
   // PATCH /v1/admin/leave-requests/:id & /v1/admin/permits/:id
   const handlePatchLeaveRequest = async (c: any) => {

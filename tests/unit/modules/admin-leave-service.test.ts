@@ -326,6 +326,12 @@ describe('Admin Leave Requests Service', () => {
       })
 
       const actorId = `${actorRole}-decision-actor`
+      domainStore.profiles.set(actorId, {
+        user_id: actorId,
+        full_name: `Decision Actor ${actorRole}`,
+        role: actorRole,
+        lifecycle_status: 'approved',
+      })
       const finished = await forceFinishLeaveRequest({
         id: permit.id,
         effectiveEndDate: '2026-08-22',
@@ -340,6 +346,7 @@ describe('Admin Leave Requests Service', () => {
       expect(logs.find((entry) => entry.action === 'force_finish_leave_request')).toMatchObject({
         actor_id: actorId,
         action: 'force_finish_leave_request',
+        details: { actor_name: `Decision Actor ${actorRole}`, actor_role: actorRole },
       })
     },
   )
@@ -514,6 +521,8 @@ describe('Admin Leave Requests Service', () => {
       student_user_id: 'student-1',
       category: 'sakit',
       date: '2026-08-21',
+      actor_name: 'Kepala Sekolah',
+      actor_role: 'school_admin',
       duration_days: 3,
       requested_start_date: '2026-08-21',
       original_end_date: '2026-08-23',
@@ -742,6 +751,8 @@ describe('Admin Leave Requests Service', () => {
       previous_status: 'pending',
       student_user_id: 'student-1',
       category: 'pergi',
+      actor_name: 'Kepala Sekolah',
+      actor_role: 'school_admin',
       rejection_reason: 'Izin liburan pribadi tidak dapat disetujui saat hari efektif KBM',
     })
   })
@@ -791,6 +802,8 @@ describe('Admin Leave Requests Service', () => {
       previous_status: 'rejected',
       student_user_id: 'student-1',
       category: 'sakit',
+      actor_name: 'Kepala Sekolah',
+      actor_role: 'school_admin',
     })
 
     // Verify push notification enqueued

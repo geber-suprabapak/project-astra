@@ -154,6 +154,135 @@ async function setupTestUsers(
 }
 
 describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
+  it.each(['platform_admin', 'school_admin', 'teacher', 'staff'] as const)(
+    'allows Chronos %s to read sanitized Leave decision history',
+    async (role) => {
+      const { domainStore, identityProvider, app } = createIntegrationEnvironment()
+      await setupTestUsers(domainStore, identityProvider)
+      const actorId = `history-reader-${role}`
+      domainStore.profiles.set(actorId, {
+        user_id: actorId,
+        full_name: 'History Reader',
+        role,
+        lifecycle_status: 'approved',
+      })
+      identityProvider.users.set(actorId, {
+        userId: actorId,
+        roles: [role],
+        scopes: ['openid', 'profile', 'admin:read'],
+      })
+      const token = tokenFor({
+        sub: actorId,
+        roles: [role],
+        scope: 'openid profile admin:read',
+      })
+      const leave = await domainStore.createLeaveRequest({
+        user_id: 'student-1',
+        category: 'sakit',
+        description: 'Synthetic history test',
+        date: '2026-08-28',
+      })
+      await domainStore.insertAuditLog({
+        actor_id: 'private-actor-id',
+        action: 'approve_leave_request',
+        entity_type: 'leave_request',
+        entity_id: leave.id,
+        details: {
+          actor_name: 'Name at decision',
+          actor_role: 'teacher',
+          reason: 'private audit detail',
+        },
+      })
+      await domainStore.insertAuditLog({
+        actor_id: 'private-actor-id',
+        action: 'reject_leave_request',
+        entity_type: 'leave_request',
+        entity_id: leave.id,
+        details: { actor_name: 'Reject Actor', actor_role: 'staff' },
+      })
+      await domainStore.insertAuditLog({
+        actor_id: 'legacy-private-actor-id',
+        action: 'reopen_leave_request',
+        entity_type: 'leave_request',
+        entity_id: leave.id,
+        details: { reason: 'legacy private detail' },
+      })
+      await domainStore.insertAuditLog({
+        actor_id: 'private-actor-id',
+        action: 'force_finish_leave_request',
+        entity_type: 'leave_request',
+        entity_id: leave.id,
+        details: { actor_name: 'Finish Actor', actor_role: 'platform_admin' },
+      })
+      await domainStore.insertAuditLog({
+        actor_id: 'private-actor-id',
+        action: 'create_admin_leave_request',
+        entity_type: 'leave_request',
+        entity_id: leave.id,
+        details: { actor_name: 'Do not expose create actor' },
+      })
+
+      const response = await app.request(`/v1/admin/leave-requests/${leave.id}/history`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      expect(response.status).toBe(200)
+      const { data } = await response.json()
+      expect(data).toHaveLength(4)
+      expect(data).toContainEqual({
+        action: 'approve_leave_request',
+        occurred_at: expect.any(String),
+        actor_name: 'Name at decision',
+        actor_role: 'teacher',
+      })
+      expect(data).toContainEqual({
+        action: 'reject_leave_request',
+        occurred_at: expect.any(String),
+        actor_name: 'Reject Actor',
+        actor_role: 'staff',
+      })
+      expect(data).toContainEqual({
+        action: 'reopen_leave_request',
+        occurred_at: expect.any(String),
+        actor_name: null,
+        actor_role: null,
+      })
+      expect(data).toContainEqual({
+        action: 'force_finish_leave_request',
+        occurred_at: expect.any(String),
+        actor_name: 'Finish Actor',
+        actor_role: 'platform_admin',
+      })
+      expect(JSON.stringify(data)).not.toContain('private')
+      expect(JSON.stringify(data)).not.toContain('actor_id')
+    },
+  )
+
+  it('denies students access to the admin Leave decision history endpoint', async () => {
+    const { domainStore, identityProvider, app } = createIntegrationEnvironment()
+    await setupTestUsers(domainStore, identityProvider)
+    identityProvider.users.set('student-1', {
+      userId: 'student-1',
+      roles: ['student'],
+      scopes: ['openid', 'profile', 'admin:read'],
+    })
+    const leave = await domainStore.createLeaveRequest({
+      user_id: 'student-1',
+      category: 'sakit',
+      description: 'Synthetic history access test',
+      date: '2026-08-28',
+    })
+    const token = tokenFor({
+      sub: 'student-1',
+      roles: ['student'],
+      scope: 'openid profile admin:read',
+    })
+
+    const response = await app.request(`/v1/admin/leave-requests/${leave.id}/history`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    expect(response.status).toBe(403)
+  })
+
   describe.each(['/v1/admin/leave-requests', '/v1/admin/permits'])(
     'Chronos manual creation through %s',
     (path) => {
@@ -677,6 +806,13 @@ describe('Ticket 10 Integration: Submit and Review Leave Requests', () => {
       status: 'failed',
       reason: 'Manual attendance scenario after the student presence was checked',
     })
+    const attendanceAttemptIndex = domainStore.attendanceAttempts.findIndex(
+      (attempt) => attempt.id === attendanceAttempt.id,
+    )
+    domainStore.attendanceAttempts[attendanceAttemptIndex] = {
+      ...attendanceAttempt,
+      created_at: '2026-08-27T17:00:00.000Z',
+    }
     const attendanceRes = await app.request('/v1/admin/attendance/manual', {
       method: 'POST',
       headers: {

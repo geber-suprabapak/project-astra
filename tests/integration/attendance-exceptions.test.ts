@@ -496,6 +496,53 @@ describe('Record Face Attendance & Manual Exceptions Integration Tests (Ticket 0
   it('RBAC: Student cannot access /v1/admin/attendance/manual (403)', async () => {
     const { domainStore, identityProvider, app } = createIntegrationEnvironment()
     await setupSchoolAndStudent(domainStore, identityProvider, 'student-1')
+    const attempt = await domainStore.recordAttendanceAttempt({
+      userId: 'student-1',
+      actionType: 'check_in',
+      status: 'failed',
+      reason: 'Camera unavailable',
+    })
+
+    domainStore.profiles.set('platform-admin-1', {
+      user_id: 'platform-admin-1',
+      full_name: 'Platform Admin 1',
+      email: 'platform-admin@school.sch.id',
+      role: 'platform_admin',
+      lifecycle_status: 'approved',
+    })
+    identityProvider.users.set('platform-admin-1', {
+      userId: 'platform-admin-1',
+      email: 'platform-admin@school.sch.id',
+      roles: ['platform_admin'],
+      scopes: ['openid', 'profile', 'admin:read', 'admin:write'],
+      mfaVerified: true,
+      mustChangePassword: false,
+    })
+
+    const platformAdminToken = await signedOidcToken({
+      sub: 'platform-admin-1',
+      roles: ['platform_admin'],
+      scope: 'admin:read admin:write openid profile',
+      mfa_verified: true,
+      must_change_password: false,
+    })
+    const platformAdminRes = await app.request('/v1/admin/attendance/manual', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${platformAdminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user_id: 'student-1',
+        action_type: 'check_in',
+        date: '2026-08-22',
+        status: 'Hadir',
+        reason: 'Verified in person after camera failure',
+        attempt_id: attempt.id,
+      }),
+    })
+    expect(platformAdminRes.status).toBe(403)
+    expect(await domainStore.listAttendances({ userId: 'student-1' })).toHaveLength(0)
 
     const studentToken = await signedOidcToken({
       sub: 'student-1',

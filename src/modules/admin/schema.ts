@@ -798,6 +798,22 @@ export const adminLeaveRequestResponseSchema = z.object({
 
 export type AdminLeaveRequestResponse = z.infer<typeof adminLeaveRequestResponseSchema>
 
+export const leaveDecisionHistoryActionSchema = z.enum([
+  'approve_leave_request',
+  'reject_leave_request',
+  'reopen_leave_request',
+  'force_finish_leave_request',
+])
+
+export const adminLeaveDecisionHistoryEventSchema = z.object({
+  action: leaveDecisionHistoryActionSchema,
+  occurred_at: z.string().min(1),
+  actor_name: z.string().nullable().catch(null),
+  actor_role: identityRoleSchema.nullable().catch(null),
+})
+
+export type AdminLeaveDecisionHistoryEvent = z.infer<typeof adminLeaveDecisionHistoryEventSchema>
+
 export const rejectLeaveRequestSchema = z.object({
   reason: z.string().min(1).optional(),
   rejection_reason: z.string().min(1).optional(),

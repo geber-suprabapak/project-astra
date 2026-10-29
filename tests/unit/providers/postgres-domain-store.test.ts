@@ -1987,11 +1987,11 @@ describe('PostgresDomainStore (Greenfield)', () => {
 
   it('runs a rejection status update and its required audit insert in one transaction', async () => {
     let transactionActive = false
-    const statements: { query: string; inTransaction: boolean }[] = []
+    const statements: { query: string; inTransaction: boolean; values: readonly unknown[] }[] = []
     const mockSql = createMockSql(
-      (strings: TemplateStringsArray) => {
+      (strings: TemplateStringsArray, ...values: readonly unknown[]) => {
         const query = strings.join('?')
-        statements.push({ query, inTransaction: transactionActive })
+        statements.push({ query, inTransaction: transactionActive, values })
         if (query.includes('FOR UPDATE')) {
           return [
             {
@@ -2036,7 +2036,12 @@ describe('PostgresDomainStore (Greenfield)', () => {
       approvalStatus: 'rejected',
       rejectionReason: 'Synthetic reason',
       rejectedAt: '2026-08-22T12:00:00.000Z',
-      audit: { actorId: 'admin-1', action: 'reject_leave_request' },
+      audit: {
+        actorId: 'admin-1',
+        actorName: 'History Actor',
+        actorRole: 'teacher',
+        action: 'reject_leave_request',
+      },
     })
 
     expect(updated.approval_status).toBe('rejected')
@@ -2046,6 +2051,73 @@ describe('PostgresDomainStore (Greenfield)', () => {
     expect(
       statements.find(({ query }) => query.includes('INSERT INTO audit_logs'))?.inTransaction,
     ).toBe(true)
+    const auditWrite = statements.find(({ query }) => query.includes('INSERT INTO audit_logs'))
+    expect(JSON.parse(String(auditWrite?.values[3]))).toMatchObject({
+      actor_name: 'History Actor',
+      actor_role: 'teacher',
+    })
+  })
+
+  it('persists the force-finish actor snapshot in the audit transaction', async () => {
+    const statements: { query: string; values: readonly unknown[] }[] = []
+    const mockSql = createMockSql(
+      (strings: TemplateStringsArray, ...values: readonly unknown[]) => {
+        const query = strings.join('?')
+        statements.push({ query, values })
+        if (query.includes('SELECT user_id FROM leave_requests')) return [{ user_id: 'student-1' }]
+        if (query.includes('FOR UPDATE')) {
+          return [
+            {
+              id: 'leave-force-finish',
+              user_id: 'student-1',
+              category: 'sakit',
+              description: 'Synthetic approved Leave Period',
+              status: true,
+              attachment_url: null,
+              date: '2026-08-21',
+              approval_status: 'approved',
+              original_end_date: '2026-08-23',
+              effective_end_date: '2026-08-23',
+            },
+          ]
+        }
+        if (query.includes('UPDATE leave_requests')) {
+          return [
+            {
+              id: 'leave-force-finish',
+              user_id: 'student-1',
+              category: 'sakit',
+              description: 'Synthetic approved Leave Period',
+              status: true,
+              attachment_url: null,
+              date: '2026-08-21',
+              approval_status: 'approved',
+              original_end_date: '2026-08-23',
+              effective_end_date: '2026-08-22',
+            },
+          ]
+        }
+        if (query.includes('INSERT INTO audit_logs')) return [{ id: 'audit-force-finish' }]
+        return []
+      },
+    )
+    const store = new PostgresDomainStore({ sql: mockSql })
+
+    const finished = await store.forceFinishLeaveRequest({
+      id: 'leave-force-finish',
+      effectiveEndDate: '2026-08-22',
+      actorId: 'teacher-1',
+      actorName: 'History Actor',
+      actorRole: 'teacher',
+      reason: 'Student returned early',
+    })
+
+    expect(finished.effective_end_date).toBe('2026-08-22')
+    const auditWrite = statements.find(({ query }) => query.includes('INSERT INTO audit_logs'))
+    expect(JSON.parse(String(auditWrite?.values[2]))).toMatchObject({
+      actor_name: 'History Actor',
+      actor_role: 'teacher',
+    })
   })
 
   it('lists leave periods by inclusive overlap using WIB date boundaries', async () => {

@@ -35,11 +35,15 @@ import type {
   StudentRosterRow,
   UserProfile,
 } from '../../providers/types.js'
+import { toWibDate } from '../../providers/types.js'
 import {
   backupLogDetailsSchema,
+  adminLeaveDecisionHistoryEventSchema,
+  leaveDecisionHistoryActionSchema,
   isValidDateInMonth,
   isValidRealYearMonth,
   privilegedSessionSchema,
+  type AdminLeaveDecisionHistoryEvent,
   type AdminLeaveRequestResponse,
   type BackupStatusQuery,
   type BackupStatusRecord,
@@ -1897,7 +1901,7 @@ export async function createManualAttendance(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<AttendanceRecord> {
-  checkPolicyAdminAccess(params.actorRole)
+  if (params.actorRole !== 'school_admin') throw AppError.forbidden()
 
   let student: UserProfile | null = null
   try {
@@ -1933,9 +1937,20 @@ export async function createManualAttendance(params: {
       'Referenced attendance attempt does not match the attendance action.',
     )
   }
-  if (relatedAttempt.status === 'success') {
+  if (relatedAttempt.status !== 'failed' && relatedAttempt.status !== 'error') {
     throw AppError.validationError(
-      'Successful attendance attempts cannot be used for manual attendance.',
+      'Only failed or errored attendance attempts can be used for manual attendance.',
+    )
+  }
+
+  const attendanceDate = params.date ?? toWibDate(new Date().toISOString())
+  const attemptTimestamp = Date.parse(relatedAttempt.created_at)
+  if (
+    !Number.isFinite(attemptTimestamp) ||
+    toWibDate(relatedAttempt.created_at) !== attendanceDate
+  ) {
+    throw AppError.validationError(
+      'Referenced attendance attempt must be from the same WIB date as the manual attendance.',
     )
   }
 
@@ -1944,7 +1959,7 @@ export async function createManualAttendance(params: {
     actionType: params.actionType,
     status: params.status,
     reason: params.reason,
-    date: params.date,
+    date: attendanceDate,
     latitude: params.latitude,
     longitude: params.longitude,
     attemptId: params.attemptId,
@@ -2237,6 +2252,54 @@ export async function getAdminLeaveRequest(params: {
   return mapLeaveRequestWithAttachment(lr, params.providers)
 }
 
+async function getLeaveDecisionActorSnapshot(params: {
+  actorId: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<{ actorName: string | null; actorRole: IdentityRole | null }> {
+  try {
+    const profile = await params.providers.domainStore.getUserProfile(params.actorId)
+    return { actorName: profile.full_name, actorRole: profile.role ?? params.actorRole }
+  } catch (error) {
+    if (error instanceof AppError && error.code === 'RESOURCE_NOT_FOUND') {
+      return { actorName: null, actorRole: params.actorRole }
+    }
+    throw error
+  }
+}
+
+export async function getAdminLeaveRequestHistory(params: {
+  id: string
+  actorRole: IdentityRole | null
+  providers: AppProviders
+}): Promise<AdminLeaveDecisionHistoryEvent[]> {
+  if (
+    !params.actorRole ||
+    !['platform_admin', 'school_admin', 'teacher', 'staff'].includes(params.actorRole)
+  ) {
+    throw AppError.forbidden()
+  }
+
+  const leaveRequest = await params.providers.domainStore.getLeaveRequestById(params.id)
+  if (!leaveRequest) throw AppError.notFound('Leave request')
+
+  const history = (
+    await params.providers.domainStore.getAuditLogs('leave_request', params.id)
+  ).flatMap((log) => {
+    if (!leaveDecisionHistoryActionSchema.safeParse(log.action).success) return []
+    const details = log.details ?? {}
+    const event = adminLeaveDecisionHistoryEventSchema.safeParse({
+      action: log.action,
+      occurred_at: log.created_at,
+      actor_name: details['actor_name'],
+      actor_role: details['actor_role'],
+    })
+    return event.success ? [event.data] : []
+  })
+
+  return history.sort((left, right) => Date.parse(left.occurred_at) - Date.parse(right.occurred_at))
+}
+
 export async function approveLeaveRequest(params: {
   id: string
   durationDays?: number
@@ -2272,12 +2335,19 @@ export async function approveLeaveRequest(params: {
     })
   }
 
+  const actor = await getLeaveDecisionActorSnapshot(params)
+
   const updated = await params.providers.domainStore.updateLeaveRequestStatus({
     id: params.id,
     approvalStatus: 'approved',
     status: true,
     durationDays,
-    audit: { actorId: params.actorId, action: 'approve_leave_request' },
+    audit: {
+      actorId: params.actorId,
+      actorName: actor.actorName,
+      actorRole: actor.actorRole,
+      action: 'approve_leave_request',
+    },
   })
 
   await params.providers.domainStore.enqueueNotification({
@@ -2311,10 +2381,14 @@ export async function forceFinishLeaveRequest(params: {
     throw AppError.forbidden()
   }
 
+  const actor = await getLeaveDecisionActorSnapshot(params)
+
   const updated = await params.providers.domainStore.forceFinishLeaveRequest({
     id: params.id,
     effectiveEndDate: params.effectiveEndDate,
     actorId: params.actorId,
+    actorName: actor.actorName,
+    actorRole: actor.actorRole,
     reason: params.reason,
   })
 
@@ -2344,13 +2418,20 @@ export async function rejectLeaveRequest(params: {
     throw AppError.conflict('Approved Leave Period cannot be edited or extended.')
   }
 
+  const actor = await getLeaveDecisionActorSnapshot(params)
+
   const updated = await params.providers.domainStore.updateLeaveRequestStatus({
     id: params.id,
     approvalStatus: 'rejected',
     status: false,
     rejectionReason: params.reason ?? null,
     rejectedAt: new Date().toISOString(),
-    audit: { actorId: params.actorId, action: 'reject_leave_request' },
+    audit: {
+      actorId: params.actorId,
+      actorName: actor.actorName,
+      actorRole: actor.actorRole,
+      action: 'reject_leave_request',
+    },
   })
 
   await params.providers.domainStore.enqueueNotification({
@@ -2392,13 +2473,20 @@ export async function reopenLeaveRequest(params: {
     throw AppError.conflict('Approved Leave Period cannot be edited or extended.')
   }
 
+  const actor = await getLeaveDecisionActorSnapshot(params)
+
   const updated = await params.providers.domainStore.updateLeaveRequestStatus({
     id: params.id,
     approvalStatus: 'pending',
     status: false,
     rejectionReason: null,
     rejectedAt: null,
-    audit: { actorId: params.actorId, action: 'reopen_leave_request' },
+    audit: {
+      actorId: params.actorId,
+      actorName: actor.actorName,
+      actorRole: actor.actorRole,
+      action: 'reopen_leave_request',
+    },
   })
 
   await params.providers.domainStore.enqueueNotification({

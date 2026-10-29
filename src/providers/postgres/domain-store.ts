@@ -1381,6 +1381,8 @@ export class PostgresDomainStore implements DomainStore {
             student_user_id: current[0].user_id,
             category: current[0].category,
             date: current[0].date.slice(0, 10),
+            actor_name: params.audit.actorName,
+            actor_role: params.audit.actorRole,
           }
           if (params.approvalStatus === 'rejected') {
             auditDetails['rejection_reason'] = params.rejectionReason ?? null
@@ -1483,6 +1485,8 @@ export class PostgresDomainStore implements DomainStore {
               previous_effective_end_date: current[0].effective_end_date,
               effective_end_date: target,
               reason: params.reason,
+              actor_name: params.actorName,
+              actor_role: params.actorRole,
             })}::text::jsonb
           )
           RETURNING id

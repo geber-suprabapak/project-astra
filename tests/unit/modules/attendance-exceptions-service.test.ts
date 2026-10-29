@@ -522,6 +522,30 @@ describe('Manual Attendance & Attempt Audit Trail (Ticket 09)', () => {
     ).rejects.toThrow('Access denied.')
   })
 
+  it('Platform administrator cannot create manual attendance', async () => {
+    const { domainStore, providers } = createTestEnvironment()
+    await setupStudentAttendance(domainStore, 'student-1')
+    const attempt = await domainStore.recordAttendanceAttempt({
+      userId: 'student-1',
+      actionType: 'check_in',
+      status: 'failed',
+    })
+
+    await expect(
+      createManualAttendance({
+        userId: 'student-1',
+        actionType: 'check_in',
+        status: 'Hadir',
+        reason: 'Verified in person after failed check-in',
+        attemptId: attempt.id,
+        actorId: 'platform-admin-1',
+        actorRole: 'platform_admin',
+        providers,
+      }),
+    ).rejects.toThrow('Access denied.')
+    expect(await domainStore.listAttendances({ userId: 'student-1' })).toHaveLength(0)
+  })
+
   it('Requires a related attendance attempt for manual attendance', async () => {
     const { domainStore, providers } = createTestEnvironment()
     await setupStudentAttendance(domainStore, 'student-1')
@@ -648,6 +672,66 @@ describe('Manual Attendance & Attempt Audit Trail (Ticket 09)', () => {
         providers,
       }),
     ).rejects.toThrow('Validation failed.')
+  })
+
+  it('requires a failed/error attempt on the same WIB calendar date', async () => {
+    const { domainStore, providers } = createTestEnvironment()
+    await setupStudentAttendance(domainStore, 'student-1')
+    const boundaryAttempt = await domainStore.recordAttendanceAttempt({
+      userId: 'student-1',
+      actionType: 'check_in',
+      status: 'error',
+      reason: 'Camera unavailable',
+    })
+    const attemptIndex = domainStore.attendanceAttempts.findIndex(
+      (attempt) => attempt.id === boundaryAttempt.id,
+    )
+    domainStore.attendanceAttempts[attemptIndex] = {
+      ...boundaryAttempt,
+      created_at: '2026-08-21T17:00:00.000Z',
+    }
+
+    const record = await createManualAttendance({
+      userId: 'student-1',
+      actionType: 'check_in',
+      status: 'Hadir',
+      date: '2026-08-22',
+      reason: 'Verified in person after camera outage',
+      attemptId: boundaryAttempt.id,
+      actorId: 'school-admin-1',
+      actorRole: 'school_admin',
+      providers,
+    })
+    expect(record.date).toBe('2026-08-22')
+
+    const previousDayAttempt = await domainStore.recordAttendanceAttempt({
+      userId: 'student-1',
+      actionType: 'check_in',
+      status: 'failed',
+      reason: 'Attempt one second before WIB midnight',
+    })
+    const previousIndex = domainStore.attendanceAttempts.findIndex(
+      (attempt) => attempt.id === previousDayAttempt.id,
+    )
+    domainStore.attendanceAttempts[previousIndex] = {
+      ...previousDayAttempt,
+      created_at: '2026-08-21T16:59:59.999Z',
+    }
+
+    await expect(
+      createManualAttendance({
+        userId: 'student-1',
+        actionType: 'check_in',
+        status: 'Hadir',
+        date: '2026-08-22',
+        reason: 'Invalid previous-day attempt',
+        attemptId: previousDayAttempt.id,
+        actorId: 'school-admin-1',
+        actorRole: 'school_admin',
+        providers,
+      }),
+    ).rejects.toThrow('Validation failed.')
+    expect(await domainStore.listAttendances({ userId: 'student-1' })).toHaveLength(1)
   })
 
   it('Rejects a successful attendance attempt for manual attendance', async () => {

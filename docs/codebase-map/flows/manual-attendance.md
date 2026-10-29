@@ -2,25 +2,25 @@
 
 ## Trigger and outcome
 
-An authorized school administrator records Attendance after a related Attendance Attempt could not complete the intended action. The operation preserves the actor, human reason, and Attempt reference in an audit row.
+Only a canonical `school_admin` records Attendance after a related Attendance Attempt could not complete the intended action. The operation preserves the actor, human reason, and Attempt reference in an audit row.
 
 ## Preconditions
 
-- The caller passes Astra's Manual Attendance role check.
+- The caller has the canonical `school_admin` role; platform administrators and all other domain roles are denied.
 - The target Student profile exists and is approved.
-- A related Attempt exists, belongs to the same Student, and matches the action; a successful Attempt is rejected.
+- A related Attempt has status `failed` or `error`, belongs to the same Student, matches the action, and falls on the same WIB date as the requested Attendance.
 - An active Leave Period does not block the requested Attendance date.
 
 ## Main sequence
 
 1. The admin route validates the request, including the required reason and Attempt ID.
-2. The service checks authorization and Student/Attempt relationships.
+2. The service checks authorization, Student/Attempt relationships, eligible status, and the Asia/Jakarta date match.
 3. `DomainStore.createManualAttendance` applies the Leave Period guard and inserts Attendance plus its audit row in one database transaction.
 4. After the transaction commits, the service enqueues a notification and returns the Attendance record.
 
 ## Branches and failures
 
-- Invalid or unrelated Attempts, non-approved Students, and Leave Period conflicts fail before an Attendance record is committed.
+- Invalid, successful, unrelated, or different-WIB-date Attempts, non-approved Students, and Leave Period conflicts fail before an Attendance record is committed.
 - A PostgreSQL audit insert failure aborts the transaction, so Attendance does not commit.
 - Notification enqueue runs after the commit; an enqueue failure does not undo the Attendance or audit row.
 

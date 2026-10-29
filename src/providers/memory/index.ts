@@ -1907,6 +1907,8 @@ export class MemoryDomainStore implements DomainStore {
         student_user_id: p.user_id,
         category: p.kategori_izin,
         date: startDate,
+        actor_name: audit.actorName,
+        actor_role: audit.actorRole,
       }
       if (params.approvalStatus === 'approved') {
         details['duration_days'] = durationDays
@@ -2032,6 +2034,8 @@ export class MemoryDomainStore implements DomainStore {
         previous_effective_end_date: previousEffectiveEndDate,
         effective_end_date: effectiveEndDate,
         reason: params.reason,
+        actor_name: params.actorName,
+        actor_role: params.actorRole,
       },
     })
     permit.original_end_date = originalEndDate

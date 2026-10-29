@@ -251,6 +251,8 @@ export interface UpdateLeaveRequestStatusParams {
   durationDays?: number
   audit?: {
     actorId: string
+    actorName?: string | null
+    actorRole?: IdentityRole | null
     action: 'approve_leave_request' | 'reject_leave_request' | 'reopen_leave_request'
   }
 }
@@ -259,6 +261,8 @@ export interface ForceFinishLeaveRequestParams {
   id: string
   effectiveEndDate: string
   actorId: string
+  actorName?: string | null
+  actorRole?: IdentityRole | null
   reason: string
 }
 

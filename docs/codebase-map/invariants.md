@@ -1,9 +1,19 @@
 # Invariants
 
+## INV-ASTRA-020 — Leave history exposes only audit snapshots
+
+**Rule:** Approval, rejection, reopening and force-finish audit rows snapshot the actor's profile name and role. The authorized history endpoint returns only those actions, timestamp and snapshot fields; legacy values remain null, actor IDs/raw details stay internal, and the existing audit retention behavior applies without a second store or TTL.
+**Evidence:** `src/modules/admin/routes.ts`, `src/modules/admin/service.ts`, `src/providers/postgres/domain-store.ts`, `src/providers/memory/index.ts`, `contracts/astra-v1.json`, `tests/integration/leave-requests.test.ts`.
+
 ## INV-ASTRA-018 — Manual Attendance and audit commit together
 
 **Rule:** A Manual Attendance is persisted with its actor, reason, and related Attempt audit record in the same PostgreSQL transaction. If the audit insert fails, the transaction fails and the Attendance does not commit. The Memory provider removes any partially persisted audit before returning the failure. Notification enqueue occurs after the Attendance/audit commit and may fail independently.
 **Evidence:** `src/modules/admin/service.ts`, `src/providers/postgres/domain-store.ts`, `src/providers/memory/index.ts`, `tests/unit/providers/postgres-domain-store.test.ts`, `tests/unit/modules/attendance-exceptions-service.test.ts`.
+
+## INV-ASTRA-019 — Manual Attendance uses an eligible same-day Attempt
+
+**Rule:** Only the canonical `school_admin` role may create Manual Attendance. The related Attempt must be `failed` or `error`, belong to the same Student, match the action, have a valid timestamp, and fall on the same WIB date as the Attendance.
+**Evidence:** `src/modules/admin/service.ts`, `src/providers/types.ts`, `tests/unit/modules/attendance-exceptions-service.test.ts`.
 
 ## INV-ASTRA-017 — File sizes cross the PostgreSQL boundary as numbers
 
