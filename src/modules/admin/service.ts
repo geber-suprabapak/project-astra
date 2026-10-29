@@ -1949,25 +1949,12 @@ export async function createManualAttendance(params: {
     longitude: params.longitude,
     attemptId: params.attemptId,
     actorId: params.actorId,
-  })
-
-  await params.providers.domainStore.insertAuditLog({
-    actor_id: params.actorId,
-    action: 'create_manual_attendance',
-    entity_type: 'attendance',
-    entity_id: attendance.id,
-    details: {
-      student_user_id: student.user_id,
+    auditDetails: {
       student_nis: student.nis ?? null,
       student_name: student.full_name ?? null,
-      action_type: params.actionType,
-      status: attendance.status,
-      date: attendance.date,
-      reason: params.reason,
-      attempt_id: params.attemptId ?? null,
-      attempt_status: relatedAttempt?.status ?? null,
-      attempt_reason: relatedAttempt?.reason ?? null,
-      attempt_created_at: relatedAttempt?.created_at ?? null,
+      attempt_status: relatedAttempt.status,
+      attempt_reason: relatedAttempt.reason ?? null,
+      attempt_created_at: relatedAttempt.created_at,
     },
   })
 

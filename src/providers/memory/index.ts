@@ -2245,6 +2245,42 @@ export class MemoryDomainStore implements DomainStore {
       created_at: new Date().toISOString(),
     }
 
+    const auditDetails: AuditLogDetails = {
+      ...params.auditDetails,
+      student_user_id: params.userId,
+      action_type: params.actionType,
+      status: record.status,
+      date: record.date,
+      reason: params.reason,
+      attempt_id: params.attemptId ?? null,
+    }
+    const existingAuditIds = new Set(this.auditLogs.map((item) => item.id))
+    try {
+      await this.insertAuditLog({
+        actor_id: params.actorId,
+        action: 'create_manual_attendance',
+        entity_type: 'attendance',
+        entity_id: record.id,
+        details: auditDetails,
+      })
+    } catch (error) {
+      // SAFETY: test/custom stores may persist the audit row before reporting failure.
+      for (let i = this.auditLogs.length - 1; i >= 0; i--) {
+        const item = this.auditLogs[i]
+        if (
+          item &&
+          !existingAuditIds.has(item.id) &&
+          item.actor_id === params.actorId &&
+          item.action === 'create_manual_attendance' &&
+          item.entity_type === 'attendance' &&
+          item.entity_id === record.id
+        ) {
+          this.auditLogs.splice(i, 1)
+        }
+      }
+      throw error
+    }
+
     this.absences.push({
       status: record.status,
       date: record.date,

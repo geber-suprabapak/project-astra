@@ -474,6 +474,37 @@ describe('Manual Attendance & Attempt Audit Trail (Ticket 09)', () => {
     expect(log.details?.attempt_reason).toBe('Camera glare prevented face recognition')
   })
 
+  it('does not leave manual attendance or partial audit when audit persistence fails', async () => {
+    const { domainStore, providers } = createTestEnvironment()
+    await setupStudentAttendance(domainStore, 'student-1')
+    const failedAttempt = await domainStore.recordAttendanceAttempt({
+      userId: 'student-1',
+      actionType: 'check_in',
+      status: 'failed',
+    })
+    const insertAuditLog = domainStore.insertAuditLog.bind(domainStore)
+    domainStore.insertAuditLog = async (entry) => {
+      await insertAuditLog(entry)
+      throw new Error('synthetic audit acknowledgment failure')
+    }
+
+    await expect(
+      createManualAttendance({
+        userId: 'student-1',
+        actionType: 'check_in',
+        status: 'Hadir',
+        reason: 'Verified in person after retry',
+        attemptId: failedAttempt.id,
+        actorId: 'school-admin-1',
+        actorRole: 'school_admin',
+        providers,
+      }),
+    ).rejects.toThrow('synthetic audit acknowledgment failure')
+
+    expect(await domainStore.listAttendances({ userId: 'student-1' })).toHaveLength(0)
+    expect(await domainStore.getAuditLogs('attendance')).toHaveLength(0)
+  })
+
   it('Teacher cannot create manual attendance', async () => {
     const { domainStore, providers } = createTestEnvironment()
     await setupStudentAttendance(domainStore, 'student-1')

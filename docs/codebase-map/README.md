@@ -8,6 +8,7 @@ Project Astra is the Skanida domain backend and API gateway. It exposes mobile a
 | Feature/provider ownership | [Modules](modules.md) |
 | Adiwiyata reports, coverage and verification | [Adiwiyata module](modules.md#adiwiyata) |
 | Precheck to attendance write | [Attendance submission](flows/attendance-submission.md) |
+| Audited Manual Attendance | [Manual Attendance](flows/manual-attendance.md) |
 | Administrative leave reopen | [Leave reopen](flows/leave-reopen.md) |
 | Notification outbox delivery | [Notification delivery](flows/notification-delivery.md) |
 | Rules to preserve | [Invariants](invariants.md) |

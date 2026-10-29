@@ -359,6 +359,7 @@ export interface CreateManualAttendanceParams {
   longitude?: number | null
   attemptId?: string | null
   actorId: string
+  auditDetails?: AuditLogDetails
 }
 
 export interface AttendanceActionValidationResult {

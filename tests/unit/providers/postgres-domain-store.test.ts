@@ -1594,38 +1594,49 @@ describe('PostgresDomainStore (Greenfield)', () => {
   })
 
   it('createManualAttendance and listAttendances operate on attendances table', async () => {
-    const mockSql = createMockSql((strings: TemplateStringsArray) => {
-      const query = strings.join('?')
-      if (query.includes('INSERT INTO attendances')) {
-        return [
-          {
-            id: 'att-manual-1',
-            user_id: 'student-1',
-            date: '2026-08-21',
-            status: 'Hadir',
-            action_type: 'check_in',
-            latitude: -6.2,
-            longitude: 106.81,
-            created_at: '2026-08-21T07:10:00Z',
-          },
-        ]
-      }
-      if (query.includes('SELECT') && query.includes('FROM attendances')) {
-        return [
-          {
-            id: 'att-manual-1',
-            user_id: 'student-1',
-            date: '2026-08-21',
-            status: 'Hadir',
-            action_type: 'check_in',
-            latitude: -6.2,
-            longitude: 106.81,
-            created_at: '2026-08-21T07:10:00Z',
-          },
-        ]
-      }
-      return []
-    })
+    let inTransaction = false
+    const writes: { query: string; inTransaction: boolean }[] = []
+    const mockSql = createMockSql(
+      (strings: TemplateStringsArray) => {
+        const query = strings.join('?')
+        if (query.includes('INSERT INTO attendances') || query.includes('INSERT INTO audit_logs')) {
+          writes.push({ query, inTransaction })
+        }
+        if (query.includes('INSERT INTO attendances')) {
+          return [
+            {
+              id: 'att-manual-1',
+              user_id: 'student-1',
+              date: '2026-08-21',
+              status: 'Hadir',
+              action_type: 'check_in',
+              latitude: -6.2,
+              longitude: 106.81,
+              created_at: '2026-08-21T07:10:00Z',
+            },
+          ]
+        }
+        if (query.includes('INSERT INTO audit_logs')) return [{ id: 'audit-manual-1' }]
+        if (query.includes('SELECT') && query.includes('FROM attendances')) {
+          return [
+            {
+              id: 'att-manual-1',
+              user_id: 'student-1',
+              date: '2026-08-21',
+              status: 'Hadir',
+              action_type: 'check_in',
+              latitude: -6.2,
+              longitude: 106.81,
+              created_at: '2026-08-21T07:10:00Z',
+            },
+          ]
+        }
+        return []
+      },
+      (active) => {
+        inTransaction = active
+      },
+    )
 
     const store = new PostgresDomainStore({ sql: mockSql })
     const manual = await store.createManualAttendance({
@@ -1639,10 +1650,59 @@ describe('PostgresDomainStore (Greenfield)', () => {
     expect(manual.id).toBe('att-manual-1')
     expect(manual.status).toBe('Hadir')
     expect(manual.action_type).toBe('check_in')
+    expect(writes).toHaveLength(2)
+    expect(writes.every((write) => write.inTransaction)).toBe(true)
 
     const list = await store.listAttendances({ userId: 'student-1' })
     expect(list).toHaveLength(1)
     expect(list[0].id).toBe('att-manual-1')
+  })
+
+  it('fails the manual attendance transaction if its audit insert fails', async () => {
+    let inTransaction = false
+    const writes: { query: string; inTransaction: boolean }[] = []
+    const mockSql = createMockSql(
+      (strings: TemplateStringsArray) => {
+        const query = strings.join('?')
+        if (query.includes('INSERT INTO attendances') || query.includes('INSERT INTO audit_logs')) {
+          writes.push({ query, inTransaction })
+        }
+        if (query.includes('INSERT INTO attendances')) {
+          return [
+            {
+              id: 'att-manual-2',
+              user_id: 'student-1',
+              date: '2026-08-21',
+              status: 'Hadir',
+              action_type: 'check_in',
+              latitude: null,
+              longitude: null,
+              created_at: '2026-08-21T07:10:00Z',
+            },
+          ]
+        }
+        if (query.includes('INSERT INTO audit_logs')) throw new Error('synthetic audit failure')
+        return []
+      },
+      (active) => {
+        inTransaction = active
+      },
+    )
+    const store = new PostgresDomainStore({ sql: mockSql })
+
+    await expect(
+      store.createManualAttendance({
+        userId: 'student-1',
+        actionType: 'check_in',
+        status: 'Hadir',
+        reason: 'Verified in person',
+        actorId: 'school-admin-1',
+      }),
+    ).rejects.toThrow('An unexpected database error occurred.')
+
+    expect(writes).toHaveLength(2)
+    expect(writes.every((write) => write.inTransaction)).toBe(true)
+    expect(writes[1]?.query).toContain('INSERT INTO audit_logs')
   })
 
   it('updateSchedule casts partial time edits in SQL and preserves omitted columns', async () => {

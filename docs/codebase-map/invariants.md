@@ -1,5 +1,10 @@
 # Invariants
 
+## INV-ASTRA-018 — Manual Attendance and audit commit together
+
+**Rule:** A Manual Attendance is persisted with its actor, reason, and related Attempt audit record in the same PostgreSQL transaction. If the audit insert fails, the transaction fails and the Attendance does not commit. The Memory provider removes any partially persisted audit before returning the failure. Notification enqueue occurs after the Attendance/audit commit and may fail independently.
+**Evidence:** `src/modules/admin/service.ts`, `src/providers/postgres/domain-store.ts`, `src/providers/memory/index.ts`, `tests/unit/providers/postgres-domain-store.test.ts`, `tests/unit/modules/attendance-exceptions-service.test.ts`.
+
 ## INV-ASTRA-017 — File sizes cross the PostgreSQL boundary as numbers
 
 **Rule:** FileRecord size_bytes is a number or null on create, get, list and lifecycle-update responses. PostgreSQL bigint storage is projected through a numeric driver type so verification can compare it strictly with S3 object bytes. Null and zero are preserved. Upload verification still checks object existence, MIME and exact size; existing rejected files are never silently reactivated.

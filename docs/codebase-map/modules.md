@@ -19,6 +19,8 @@
 
 **Manual Leave creation:** `src/modules/admin/service.ts::createAdminLeaveRequest` authorizes all four Chronos roles or Student self-submission, requires an approved Student target, preserves pending-only creation and actor-owned attachments, and records the creator separately from the target Student. Both admin route aliases use this service; status decisions remain separate.
 
+**Manual Attendance:** `src/modules/admin/service.ts::createManualAttendance` validates the approved Student and related failed/error Attempt before delegating creation to `DomainStore`. The provider commits the Attendance and its actor/reason/Attempt audit record together; notification enqueue happens after that transaction.
+
 ## Adiwiyata
 
 **Purpose:** Authorize student camera reports and administrative Site/access management, daily coverage, and per-photo verification.

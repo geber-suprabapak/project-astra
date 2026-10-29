@@ -1804,7 +1804,7 @@ export class PostgresDomainStore implements DomainStore {
         }
       }
 
-      const rows = await this.sql.begin(async (sql) => {
+      return await this.sql.begin(async (sql) => {
         await sql`SELECT pg_advisory_xact_lock(hashtextextended(${params.userId}, 0))`
         const blocking = await sql<
           {
@@ -1832,16 +1832,40 @@ export class PostgresDomainStore implements DomainStore {
             effective_end_date: blocking[0].effective_end_date,
           })
         }
-        return sql<AttendanceRecord[]>`
+        const rows = await sql<AttendanceRecord[]>`
           INSERT INTO attendances (user_id, date, status, action_type, latitude, longitude, created_at)
           VALUES (${params.userId}, ${todayWIB}, ${status}, ${params.actionType}, ${params.latitude ?? null}, ${params.longitude ?? null}, ${now.toISOString()})
           RETURNING id, user_id, date, status, action_type, latitude, longitude, created_at::text
         `
+        const attendance = rows[0]
+        if (!attendance) {
+          throw AppError.internal('Failed to create manual attendance record.')
+        }
+
+        const auditRows = await sql<{ id: string }[]>`
+          INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, details)
+          VALUES (
+            ${params.actorId},
+            'create_manual_attendance',
+            'attendance',
+            ${attendance.id},
+            ${JSON.stringify({
+              ...params.auditDetails,
+              student_user_id: params.userId,
+              action_type: params.actionType,
+              status: attendance.status,
+              date: attendance.date,
+              reason: params.reason,
+              attempt_id: params.attemptId ?? null,
+            })}::text::jsonb
+          )
+          RETURNING id
+        `
+        if (!auditRows[0]) {
+          throw AppError.internal('Failed to record manual attendance audit.')
+        }
+        return attendance
       })
-      if (!rows || rows.length === 0) {
-        throw AppError.internal('Failed to create manual attendance record.')
-      }
-      return rows[0]
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, params }, 'Failed to create manual attendance record')
