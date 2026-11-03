@@ -532,6 +532,7 @@ export class OidcIdentityProvider implements IdentityProvider {
           },
         ).catch(() => null)
         if (searchRes?.ok) {
+          // SAFETY: Logto Management API /api/users search returns a JSON array of user records
           const candidates = (await searchRes.json()) as Array<{
             id: string
             primaryEmail?: string | null
@@ -654,12 +655,12 @@ export class OidcIdentityProvider implements IdentityProvider {
     try {
       const token = await this.getManagementToken()
       const response = await fetch(
-        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/primary-email`,
+        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}`,
         {
           method: 'PATCH',
           headers: {
-            'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
           },
           body: JSON.stringify({ primaryEmail: email }),
         },
@@ -671,6 +672,32 @@ export class OidcIdentityProvider implements IdentityProvider {
       if (err instanceof AppError) throw err
       logger.error({ err, userId }, 'Logto update user email error')
       throw AppError.internal('Failed to update email in identity provider.')
+    }
+  }
+
+  async deleteUser(userId: string): Promise<void> {
+    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
+      throw AppError.internal('Identity provider management API is not configured.')
+    }
+
+    try {
+      const token = await this.getManagementToken()
+      const response = await fetch(
+        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}`,
+        {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      )
+      if (!response.ok && response.status !== 404) {
+        throw AppError.internal('Failed to delete user in identity provider.')
+      }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, userId }, 'Logto delete user error')
+      throw AppError.internal('Failed to delete user in identity provider.')
     }
   }
 

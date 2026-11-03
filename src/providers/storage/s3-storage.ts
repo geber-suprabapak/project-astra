@@ -96,6 +96,7 @@ export class S3ObjectStorage implements ObjectStorage {
     key: string,
     expiresInSeconds: number,
     method: 'GET' | 'PUT' = 'GET',
+    contentType?: string,
   ): string {
     const now = new Date()
     const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '')
@@ -105,12 +106,18 @@ export class S3ObjectStorage implements ObjectStorage {
     const targetUrl = this.buildObjectUrl(bucket, key, true)
     const host = targetUrl.host
 
+    const normalizedContentType = contentType?.trim()
+    const signedHeaders = normalizedContentType ? 'content-type;host' : 'host'
+    const canonicalHeaders = normalizedContentType
+      ? `content-type:${normalizedContentType}\nhost:${host}\n`
+      : `host:${host}\n`
+
     const queryParams = {
       'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
       'X-Amz-Credential': credential,
       'X-Amz-Date': amzDate,
       'X-Amz-Expires': expiresInSeconds.toString(),
-      'X-Amz-SignedHeaders': 'host',
+      'X-Amz-SignedHeaders': signedHeaders,
     }
 
     const canonicalQuery = Object.entries(queryParams)
@@ -119,8 +126,6 @@ export class S3ObjectStorage implements ObjectStorage {
       .join('&')
 
     const canonicalUri = targetUrl.pathname
-    const canonicalHeaders = `host:${host}\n`
-    const signedHeaders = 'host'
     const payloadHash = 'UNSIGNED-PAYLOAD'
 
     const canonicalRequest = [
@@ -502,7 +507,7 @@ export class S3ObjectStorage implements ObjectStorage {
   }): Promise<string> {
     const bucket = params.bucket ?? this.bucketAvatars
     const ttl = params.expiresInSeconds ?? 900
-    return this.signUrl(bucket, params.key, ttl, 'PUT')
+    return this.signUrl(bucket, params.key, ttl, 'PUT', params.contentType)
   }
 
   async checkHealth(): Promise<boolean> {

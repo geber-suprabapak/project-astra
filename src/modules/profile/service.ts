@@ -110,4 +110,6 @@ export async function changePassword(
   }
   await providers.identityProvider.verifyPassword(email, currentPassword)
   await providers.identityProvider.updatePassword(userId, newPassword)
+  await providers.domainStore.revokeUserSessions(userId)
+  await providers.identityProvider.revokeUserSessions?.(userId)
 }

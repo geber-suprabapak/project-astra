@@ -1,4 +1,5 @@
 import { getCanonicalProfile } from '../profile/canonical-profile.js'
+import { randomInt } from 'node:crypto'
 import { AppError } from '../../lib/errors/app-error.js'
 import type {
   AcademicPeriod,
@@ -976,12 +977,21 @@ export async function rejectStudent(params: {
     'rejected',
   )
 
+  await params.providers.domainStore.updateUserProfile(params.userId, { nis: null })
+  if (profile.nis) {
+    await params.providers.domainStore.unbindStudentByNis?.(profile.nis)
+  }
+
   if (params.providers.identityProvider.setUserSuspended) {
     await params.providers.identityProvider.setUserSuspended(params.userId, true)
   }
   if (params.providers.identityProvider.revokeUserSessions) {
     await params.providers.identityProvider.revokeUserSessions(params.userId)
   }
+  if (params.providers.identityProvider.deleteUser) {
+    await params.providers.identityProvider.deleteUser(params.userId)
+  }
+  await params.providers.domainStore.revokeUserSessions(params.userId)
 
   await params.providers.domainStore.insertAuditLog({
     actor_id: params.actorId,
@@ -1037,6 +1047,7 @@ export async function disableStudent(params: {
   if (params.providers.identityProvider.revokeUserSessions) {
     await params.providers.identityProvider.revokeUserSessions(params.userId)
   }
+  await params.providers.domainStore.revokeUserSessions(params.userId)
 
   await params.providers.domainStore.insertAuditLog({
     actor_id: params.actorId,
@@ -1079,7 +1090,7 @@ export async function generateStudentResetCode(params: {
     )
   }
 
-  const code = Math.floor(100000 + Math.random() * 900000).toString()
+  const code = randomInt(100000, 1000000).toString()
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString()
 
   await params.providers.domainStore.createPasswordResetCode({
@@ -1137,10 +1148,20 @@ export async function correctStudentEmail(params: {
   }
 
   const oldEmail = profile.email
-  const updated = await params.providers.domainStore.updateProfileEmail(params.userId, params.email)
-
   if (params.providers.identityProvider.updateUserEmail) {
     await params.providers.identityProvider.updateUserEmail(params.userId, params.email)
+  }
+
+  let updated: UserProfile
+  try {
+    updated = await params.providers.domainStore.updateProfileEmail(params.userId, params.email)
+  } catch (err) {
+    if (oldEmail && params.providers.identityProvider.updateUserEmail) {
+      await params.providers.identityProvider
+        .updateUserEmail(params.userId, oldEmail)
+        .catch(() => {})
+    }
+    throw err
   }
 
   await params.providers.domainStore.insertAuditLog({

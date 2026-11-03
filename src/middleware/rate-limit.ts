@@ -152,7 +152,9 @@ export interface PublicRateLimitOptions extends RateLimitOptions {
   failOpen?: boolean
 }
 
-export function extractPublicClientIp(c: { req: { header: (name: string) => string | undefined } }): string {
+export function extractPublicClientIp(c: {
+  req: { header: (name: string) => string | undefined }
+}): string {
   const cfIp = c.req.header('cf-connecting-ip')?.trim()
   if (cfIp) return cfIp
   const realIp = c.req.header('x-real-ip')?.trim()
@@ -214,4 +216,4 @@ export const rateLimits = {
   authResetPassword: publicRateLimit({ windowMs: 900_000, max: 10, routeKey: 'auth-reset' }),
 }
 
-export { RATE_LIMIT_SCRIPT, defaultStore, rateLimitBackend }
+export { RATE_LIMIT_SCRIPT, defaultStore, rateLimitBackend, publicRateLimit as ipRateLimit }

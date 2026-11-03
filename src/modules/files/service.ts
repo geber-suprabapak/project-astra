@@ -195,14 +195,30 @@ export async function confirmFileUpload(params: {
       'Upload has not completed; file remains pending until the object exists in storage.',
     )
   }
+  const maxAllowedSize =
+    fileRecord.purpose === 'avatar'
+      ? MAX_AVATAR_UPLOAD_SIZE
+      : fileRecord.purpose === 'permit_attachment'
+        ? MAX_PERMIT_UPLOAD_SIZE
+        : MAX_FACE_UPLOAD_SIZE
   if (objectStat.contentType !== fileRecord.content_type) {
     await providers.domainStore.updateFileLifecycle(params.fileId, 'rejected')
+    await providers.objectStorage
+      .deleteObject(fileRecord.purpose, fileRecord.object_path)
+      .catch(() => {})
     throw AppError.conflict(
       'Uploaded object content type does not match the upload intent; file rejected.',
     )
   }
-  if (fileRecord.size_bytes != null && objectStat.sizeBytes !== fileRecord.size_bytes) {
+  if (
+    (fileRecord.size_bytes != null && objectStat.sizeBytes !== fileRecord.size_bytes) ||
+    objectStat.sizeBytes <= 0 ||
+    objectStat.sizeBytes > maxAllowedSize
+  ) {
     await providers.domainStore.updateFileLifecycle(params.fileId, 'rejected')
+    await providers.objectStorage
+      .deleteObject(fileRecord.purpose, fileRecord.object_path)
+      .catch(() => {})
     throw AppError.conflict('Uploaded object size does not match the upload intent; file rejected.')
   }
 

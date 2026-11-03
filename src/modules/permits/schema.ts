@@ -4,6 +4,11 @@ export const PERMIT_CATEGORIES = ['sakit', 'pergi', 'dispensasi', 'lainnya'] as 
 export type PermitCategory = (typeof PERMIT_CATEGORIES)[number]
 
 export const MAX_PERMIT_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024 // 10MB
+export const ALLOWED_PERMIT_ATTACHMENT_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'application/pdf',
+] as const
 
 export const CreatePermitSchema = z.object({
   category: z.enum(PERMIT_CATEGORIES, {

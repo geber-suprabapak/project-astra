@@ -1,6 +1,8 @@
 import { Hono } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 import { cors } from 'hono/cors'
 import { requestId } from './middleware/request-id.js'
+import { requestTimeout } from './middleware/timeout.js'
 import { errorHandler } from './middleware/error-handler.js'
 import {
   createHealthRouter,
@@ -19,6 +21,7 @@ import {
 } from './modules/auth/routes.js'
 import { defaultProviders } from './providers/index.js'
 import type { AppProviders } from './providers/types.js'
+import { AppError } from './lib/errors/app-error.js'
 import { errorResponse } from './lib/http/responses.js'
 import { env } from './config/env.js'
 import { logger } from './lib/logging/logger.js'
@@ -48,6 +51,20 @@ export function createApp(deps: AppDeps = {}) {
 
   // Global middleware
   app.use('*', requestId)
+  app.use(
+    '*',
+    bodyLimit({
+      maxSize: 24 * 1024 * 1024,
+      onError: () => {
+        throw new AppError(
+          'VALIDATION_ERROR',
+          413,
+          'Request payload exceeds the maximum allowed size.',
+        )
+      },
+    }),
+  )
+  app.use('*', requestTimeout(90_000))
 
   // Attach providers to context
   app.use('*', async (c, next) => {

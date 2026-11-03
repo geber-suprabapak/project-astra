@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { AppError } from '../../lib/errors/app-error.js'
 import type { AppProviders, UserProfile } from '../../providers/types.js'
 import type { StudentResetPasswordInput, StudentSignupInput } from './schema.js'
@@ -67,14 +68,21 @@ export async function registerStudent(
 
       return existingProfile
     }
+
+    throw AppError.conflict(
+      `A student account is already registered or pending approval for NIS "${input.nis}".`,
+    )
   }
 
-  // 4. Create identity in IdentityProvider (suspended / disabled until school admin approval)
+  // 4. Create identity in IdentityProvider (suspended / disabled until school admin approval).
+  // Never persist caller-supplied credentials from an unverified signup request; first
+  // sign-in credentials must be established via admin-issued reset-code handoff.
+  const bootstrapSecret = randomBytes(24).toString('base64url')
   const identity = await (providers.identityProvider.createStudentIdentity
     ? providers.identityProvider.createStudentIdentity({
         username: input.nis,
         email: input.email,
-        password: input.password,
+        password: bootstrapSecret,
         name: fullName,
         suspended: true,
         roles: ['student'],
@@ -144,7 +152,8 @@ export async function resetStudentPassword(
   // 4. Mark reset code as used (cannot be reused)
   await providers.domainStore.markPasswordResetCodeUsed(resetCode.id)
 
-  // 5. Revoke sessions for security
+  // 5. Revoke sessions for security (both Astra-side and IdP-side)
+  await providers.domainStore.revokeUserSessions(profile.user_id)
   if (providers.identityProvider.revokeUserSessions) {
     await providers.identityProvider.revokeUserSessions(profile.user_id)
   }

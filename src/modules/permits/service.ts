@@ -1,6 +1,6 @@
 import { defaultProviders } from '../../providers/index.js'
 import type { AppProviders, LeaveRequest, Permit } from '../../providers/types.js'
-import type { PermitCategory } from './schema.js'
+import { MAX_PERMIT_ATTACHMENT_SIZE_BYTES, type PermitCategory } from './schema.js'
 import { AppError } from '../../lib/errors/app-error.js'
 
 export interface PermitResponse {
@@ -131,6 +131,28 @@ export async function createPermit(params: {
       throw AppError.validationError('Attachment file is no longer available.')
     }
     if (fileRecord.lifecycle === 'pending_upload') {
+      if (providers.objectStorage.statObject) {
+        const objectStat = await providers.objectStorage.statObject(
+          fileRecord.purpose,
+          fileRecord.object_path,
+        )
+        if (objectStat) {
+          if (
+            objectStat.contentType !== fileRecord.content_type ||
+            (fileRecord.size_bytes != null && objectStat.sizeBytes !== fileRecord.size_bytes) ||
+            objectStat.sizeBytes <= 0 ||
+            objectStat.sizeBytes > MAX_PERMIT_ATTACHMENT_SIZE_BYTES
+          ) {
+            await providers.domainStore.updateFileLifecycle(fileRecord.id, 'rejected')
+            await providers.objectStorage
+              .deleteObject(fileRecord.purpose, fileRecord.object_path)
+              .catch(() => {})
+            throw AppError.conflict(
+              'Uploaded permit attachment does not match the declared upload constraints.',
+            )
+          }
+        }
+      }
       await providers.domainStore.updateFileLifecycle(fileRecord.id, 'available')
     }
     storagePath = fileRecord.object_path

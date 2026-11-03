@@ -76,6 +76,7 @@ export interface IdentityProvider {
   revokeUserRole?(userId: string, role: IdentityRole): Promise<void>
   revokeUserSessions?(userId: string): Promise<void>
   updateUserEmail?(userId: string, email: string): Promise<void>
+  deleteUser?(userId: string): Promise<void>
   checkHealth(): Promise<boolean>
   createStaffIdentity?(params: {
     email: string
@@ -1031,6 +1032,7 @@ export interface DomainStore {
   getStudentByNis(nis: string): Promise<Student | null>
   createStudent(params: CreateStudentParams): Promise<Student>
   bindStudentToUser(params: { studentId: string; userId: string }): Promise<StudentBinding>
+  unbindStudentByNis?(nis: string): Promise<void>
   getSchool(): Promise<School | null>
   getSchoolBySlug(slug: string): Promise<School | null>
   createSchool(params: CreateSchoolParams): Promise<School>

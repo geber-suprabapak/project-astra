@@ -964,6 +964,16 @@ export class MemoryDomainStore implements DomainStore {
     return { ...binding }
   }
 
+  async unbindStudentByNis(nis: string): Promise<void> {
+    const student = await this.getStudentByNis(nis)
+    if (student) {
+      this.studentBindings.delete(student.id)
+      for (const enrollment of this.classEnrollments) {
+        if (enrollment.student_id === student.id) enrollment.user_id = null
+      }
+    }
+  }
+
   async getTodayAbsences(userId: string, dateWIB: string): Promise<Absence[]> {
     return this.absences
       .filter(
@@ -2336,11 +2346,9 @@ export class MemoryDomainStore implements DomainStore {
             ...params.notification.payload,
             status: record.status,
             date: record.date,
-            body:
-              typeof params.notification.payload.body === 'string' &&
-              params.notification.payload.body.length > 0
-                ? params.notification.payload.body
-                : `Presensi manual (${params.actionType}) berhasil dicatat. Status: ${record.status}.`,
+            body: params.notification.payload.body
+              ? String(params.notification.payload.body)
+              : `Presensi manual (${params.actionType}) berhasil dicatat. Status: ${record.status}.`,
           },
         })
       }
@@ -3056,6 +3064,11 @@ export class MemoryDomainStore implements DomainStore {
     fullName: string
     className: string
   }): Promise<UserProfile> {
+    for (const existing of this.profiles.values()) {
+      if (existing.nis === params.nis && existing.user_id !== params.userId) {
+        throw AppError.conflict(`A student account is already registered for NIS "${params.nis}".`)
+      }
+    }
     const profile: UserProfile = {
       user_id: params.userId,
       full_name: params.fullName,
@@ -3262,8 +3275,7 @@ export class MemoryDomainStore implements DomainStore {
 
   async enqueueNotification(params: EnqueueNotificationParams): Promise<NotificationRecord> {
     const eventKey =
-      params.eventKey ??
-      (typeof params.payload?.event_key === 'string' ? params.payload.event_key : null)
+      params.eventKey ?? (params.payload?.event_key ? String(params.payload.event_key) : null)
     const normalizedPayload = eventKey
       ? { ...params.payload, event_key: eventKey }
       : { ...params.payload }
@@ -3561,8 +3573,20 @@ export class MemoryIdentityProvider implements IdentityProvider {
   async updateUserEmail(userId: string, email: string): Promise<void> {
     const user = this.users.get(userId)
     if (user) {
-      this.users.set(userId, { ...user, email })
+      user.email = email
     }
+  }
+
+  async deleteUser(userId: string): Promise<void> {
+    const user = this.users.get(userId)
+    if (user?.email) {
+      this.passwords.delete(user.email)
+    }
+    this.passwords.delete(userId)
+    this.users.delete(userId)
+    this.suspendedUsers.add(userId)
+    this.revokedUsers.add(userId)
+    this.revokedSessions.add(userId)
   }
 
   public isHealthy = true

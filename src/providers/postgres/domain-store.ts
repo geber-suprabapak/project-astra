@@ -864,6 +864,19 @@ export class PostgresDomainStore implements DomainStore {
     }
   }
 
+  async unbindStudentByNis(nis: string): Promise<void> {
+    try {
+      await this.sql`
+        DELETE FROM student_bindings
+        WHERE student_id IN (SELECT id FROM students WHERE nis = ${nis})
+      `
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err, nis }, 'Failed to unbind student by NIS')
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  }
+
   async getTodayAbsences(userId: string, dateWIB: string): Promise<Absence[]> {
     try {
       const rows = await this.sql<Absence[]>`
@@ -1929,11 +1942,9 @@ export class PostgresDomainStore implements DomainStore {
               ...params.notification.payload,
               status: attendance.status,
               date: attendance.date,
-              body:
-                typeof params.notification.payload.body === 'string' &&
-                params.notification.payload.body.length > 0
-                  ? params.notification.payload.body
-                  : `Presensi manual (${params.actionType}) berhasil dicatat. Status: ${attendance.status}.`,
+              body: params.notification.payload.body
+                ? String(params.notification.payload.body)
+                : `Presensi manual (${params.actionType}) berhasil dicatat. Status: ${attendance.status}.`,
             },
           })
         }
@@ -3796,6 +3807,10 @@ export class PostgresDomainStore implements DomainStore {
       return rows[0]
     } catch (err) {
       if (err instanceof AppError) throw err
+      // SAFETY: postgres driver errors expose SQLSTATE as an optional string code.
+      if ((err as { code?: string }).code === '23505') {
+        throw AppError.conflict(`A student account is already registered for NIS "${params.nis}".`)
+      }
       logger.error({ err, params }, 'Failed to create pending student profile')
       throw AppError.internal('An unexpected database error occurred.')
     }
@@ -4074,8 +4089,7 @@ export class PostgresDomainStore implements DomainStore {
     params: EnqueueNotificationParams,
   ): Promise<NotificationRecord> {
     const eventKey =
-      params.eventKey ??
-      (typeof params.payload?.event_key === 'string' ? params.payload.event_key : null)
+      params.eventKey ?? (params.payload?.event_key ? String(params.payload.event_key) : null)
     const normalizedPayload = eventKey
       ? { ...params.payload, event_key: eventKey }
       : { ...params.payload }

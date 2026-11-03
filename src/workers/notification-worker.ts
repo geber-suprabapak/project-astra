@@ -75,10 +75,6 @@ export class NotificationWorker {
     return result
   }
 
-  private isLeaseConflict(err: unknown): boolean {
-    return err instanceof AppError && err.httpStatus === 409
-  }
-
   private async processSingleNotification(
     notification: NotificationRecord,
     batchResult: WorkerBatchResult,
@@ -114,7 +110,7 @@ export class NotificationWorker {
             'Notification delivered successfully',
           )
         } catch (updateErr: unknown) {
-          if (this.isLeaseConflict(updateErr)) {
+          if (updateErr instanceof AppError && updateErr.httpStatus === 409) {
             logger.warn(
               { notificationId: notification.id },
               'Ignoring stale worker delivery status update after lease expiry',
@@ -131,7 +127,7 @@ export class NotificationWorker {
         )
       }
     } catch (err: unknown) {
-      if (this.isLeaseConflict(err)) {
+      if (err instanceof AppError && err.httpStatus === 409) {
         return
       }
       const errorMsg = err instanceof Error ? err.message : 'Unexpected dispatch error'
@@ -197,7 +193,7 @@ export class NotificationWorker {
         )
       }
     } catch (updateErr: unknown) {
-      if (this.isLeaseConflict(updateErr)) {
+      if (updateErr instanceof AppError && updateErr.httpStatus === 409) {
         logger.warn(
           { notificationId: notification.id },
           'Ignoring stale worker failure status update after lease expiry',
