@@ -454,7 +454,11 @@ describe('Adversarial Challenge M0: Astra Authorization & Privilege Boundaries',
         providers,
       })
 
-      expect(deleteEnrollment).toHaveBeenCalledWith(undefined, 'req-admin-reset', 'approved-student')
+      expect(deleteEnrollment).toHaveBeenCalledWith(
+        undefined,
+        'req-admin-reset',
+        'approved-student',
+      )
     })
 
     it('strictly rejects non-admin roles for class and student enrollment mutations with HTTP 403', async () => {

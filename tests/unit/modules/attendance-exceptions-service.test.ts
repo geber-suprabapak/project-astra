@@ -276,6 +276,63 @@ describe('Attendance Face Verification & Attempts (Ticket 09)', () => {
     expect(attendances).toHaveLength(1)
   })
 
+  it('serializes concurrent same-action submissions after Robin verification', async () => {
+    let identifyCalls = 0
+    let releaseIdentifies: (() => void) | undefined
+    const bothIdentified = new Promise<void>((resolve) => {
+      releaseIdentifies = resolve
+    })
+    const { domainStore, providers } = createTestEnvironment({
+      identify: async () => {
+        identifyCalls += 1
+        if (identifyCalls === 2) releaseIdentifies?.()
+        await bothIdentified
+        return {
+          status: 'ok',
+          confidence: 0.95,
+          processTimeMs: 12,
+          message: 'Face verified successfully',
+        }
+      },
+    })
+    await setupStudentAttendance(domainStore, 'student-1')
+
+    const submissions = await Promise.allSettled([
+      submit({
+        userId: 'student-1',
+        actionType: 'check_in',
+        imageBase64: 'data:image/jpeg;base64,dGVzdA==',
+        latitude: -6.2,
+        longitude: 106.816666,
+        token: 'jwt-student-token',
+        requestId: 'req-concurrent-first',
+        providers,
+      }),
+      submit({
+        userId: 'student-1',
+        actionType: 'check_in',
+        imageBase64: 'data:image/jpeg;base64,dGVzdA==',
+        latitude: -6.2,
+        longitude: 106.816666,
+        token: 'jwt-student-token',
+        requestId: 'req-concurrent-second',
+        providers,
+      }),
+    ])
+
+    expect(submissions.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    const rejected = submissions.find((result) => result.status === 'rejected')
+    expect(rejected?.status).toBe('rejected')
+    if (rejected?.status === 'rejected') {
+      expect(rejected.reason).toMatchObject({ code: 'ATTENDANCE_BLOCKED', httpStatus: 409 })
+    }
+    expect(identifyCalls).toBe(2)
+    expect(await domainStore.listAttendances({ userId: 'student-1' })).toHaveLength(1)
+    expect(
+      await domainStore.listAttendanceAttempts({ userId: 'student-1', status: 'success' }),
+    ).toHaveLength(1)
+  })
+
   it('Attendance save failure never leaves a successful Attempt without a record', async () => {
     const { domainStore, providers } = createTestEnvironment()
     await setupStudentAttendance(domainStore, 'student-1')
@@ -472,6 +529,21 @@ describe('Manual Attendance & Attempt Audit Trail (Ticket 09)', () => {
     expect(log.details?.attempt_id).toBe(failedAttempt.id)
     expect(log.details?.attempt_status).toBe('failed')
     expect(log.details?.attempt_reason).toBe('Camera glare prevented face recognition')
+
+    await expect(
+      createManualAttendance({
+        userId: 'student-1',
+        actionType: 'check_in',
+        status: 'Hadir',
+        reason: 'Duplicate synthetic record',
+        attemptId: failedAttempt.id,
+        actorId: 'staff-admin-1',
+        actorRole: 'school_admin',
+        providers,
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT', httpStatus: 409 })
+    expect(await domainStore.listAttendances({ userId: 'student-1' })).toHaveLength(1)
+    expect(await domainStore.getAuditLogs('attendance')).toHaveLength(1)
   })
 
   it('does not leave manual attendance or partial audit when audit persistence fails', async () => {

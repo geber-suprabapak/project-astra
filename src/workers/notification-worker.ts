@@ -1,3 +1,4 @@
+import { AppError } from '../lib/errors/app-error.js'
 import { logger } from '../lib/logging/logger.js'
 import {
   type NotificationTransport,
@@ -12,6 +13,7 @@ export interface NotificationWorkerOptions {
   batchSize?: number
   maxRetries?: number
   backoffBaseMs?: number
+  leaseMs?: number
 }
 
 export interface WorkerBatchResult {
@@ -33,6 +35,7 @@ export class NotificationWorker {
   private batchSize: number
   private maxRetries: number
   private backoffBaseMs: number
+  private leaseMs: number
   private isRunning = false
   private isProcessing = false
   private loopTimer: NodeJS.Timeout | null = null
@@ -44,12 +47,14 @@ export class NotificationWorker {
     this.batchSize = options.batchSize ?? 10
     this.maxRetries = options.maxRetries ?? 3
     this.backoffBaseMs = options.backoffBaseMs ?? 5000
+    this.leaseMs = options.leaseMs ?? 120_000
   }
 
   async processBatch(): Promise<WorkerBatchResult> {
     const claimedRecords = await this.domainStore.claimPendingNotifications({
       limit: this.batchSize,
       maxRetries: this.maxRetries,
+      leaseMs: this.leaseMs,
     })
 
     const result: WorkerBatchResult = {
@@ -70,6 +75,10 @@ export class NotificationWorker {
     return result
   }
 
+  private isLeaseConflict(err: unknown): boolean {
+    return err instanceof AppError && err.httpStatus === 409
+  }
+
   private async processSingleNotification(
     notification: NotificationRecord,
     batchResult: WorkerBatchResult,
@@ -85,22 +94,35 @@ export class NotificationWorker {
           : await this.transport.sendEmail(notification, recipientProfile)
 
       if (deliveryResult.success) {
-        await this.domainStore.updateNotificationStatus({
-          id: notification.id,
-          status: 'delivered',
-          errorMessage: null,
-          nextRetryAt: null,
-        })
-        batchResult.delivered++
-        logger.info(
-          {
-            notificationId: notification.id,
-            userId: notification.user_id,
-            channel: notification.channel,
-            messageId: deliveryResult.messageId,
-          },
-          'Notification delivered successfully',
-        )
+        try {
+          await this.domainStore.updateNotificationStatus({
+            id: notification.id,
+            status: 'delivered',
+            errorMessage: null,
+            nextRetryAt: null,
+            expectedCurrentStatus: 'processing',
+            expectedUpdatedAt: notification.updated_at,
+          })
+          batchResult.delivered++
+          logger.info(
+            {
+              notificationId: notification.id,
+              userId: notification.user_id,
+              channel: notification.channel,
+              messageId: deliveryResult.messageId,
+            },
+            'Notification delivered successfully',
+          )
+        } catch (updateErr: unknown) {
+          if (this.isLeaseConflict(updateErr)) {
+            logger.warn(
+              { notificationId: notification.id },
+              'Ignoring stale worker delivery status update after lease expiry',
+            )
+            return
+          }
+          throw updateErr
+        }
       } else {
         await this.handleDeliveryFailure(
           notification,
@@ -109,6 +131,9 @@ export class NotificationWorker {
         )
       }
     } catch (err: unknown) {
+      if (this.isLeaseConflict(err)) {
+        return
+      }
       const errorMsg = err instanceof Error ? err.message : 'Unexpected dispatch error'
       await this.handleDeliveryFailure(notification, errorMsg, batchResult)
     }
@@ -121,50 +146,65 @@ export class NotificationWorker {
   ): Promise<void> {
     const nextRetryCount = notification.retry_count + 1
 
-    if (nextRetryCount >= this.maxRetries) {
-      await this.domainStore.updateNotificationStatus({
-        id: notification.id,
-        status: 'failed',
-        retryCount: nextRetryCount,
-        errorMessage,
-        nextRetryAt: null,
-      })
-      batchResult.failed++
-      logger.error(
-        {
-          notificationId: notification.id,
-          userId: notification.user_id,
-          channel: notification.channel,
+    try {
+      if (nextRetryCount >= this.maxRetries) {
+        await this.domainStore.updateNotificationStatus({
+          id: notification.id,
+          status: 'failed',
           retryCount: nextRetryCount,
-          maxRetries: this.maxRetries,
           errorMessage,
-        },
-        'Notification failed permanently after reaching max retries',
-      )
-    } else {
-      const delayMs = this.backoffBaseMs * Math.pow(2, notification.retry_count)
-      const nextRetryAt = new Date(Date.now() + delayMs).toISOString()
+          nextRetryAt: null,
+          expectedCurrentStatus: 'processing',
+          expectedUpdatedAt: notification.updated_at,
+        })
+        batchResult.failed++
+        logger.error(
+          {
+            notificationId: notification.id,
+            userId: notification.user_id,
+            channel: notification.channel,
+            retryCount: nextRetryCount,
+            maxRetries: this.maxRetries,
+            errorMessage,
+          },
+          'Notification failed permanently after reaching max retries',
+        )
+      } else {
+        const delayMs = this.backoffBaseMs * Math.pow(2, notification.retry_count)
+        const nextRetryAt = new Date(Date.now() + delayMs).toISOString()
 
-      await this.domainStore.updateNotificationStatus({
-        id: notification.id,
-        status: 'pending',
-        retryCount: nextRetryCount,
-        nextRetryAt,
-        errorMessage,
-      })
-      batchResult.retried++
-      logger.warn(
-        {
-          notificationId: notification.id,
-          userId: notification.user_id,
-          channel: notification.channel,
+        await this.domainStore.updateNotificationStatus({
+          id: notification.id,
+          status: 'pending',
           retryCount: nextRetryCount,
           nextRetryAt,
-          delayMs,
           errorMessage,
-        },
-        'Notification failed delivery, scheduled for retry',
-      )
+          expectedCurrentStatus: 'processing',
+          expectedUpdatedAt: notification.updated_at,
+        })
+        batchResult.retried++
+        logger.warn(
+          {
+            notificationId: notification.id,
+            userId: notification.user_id,
+            channel: notification.channel,
+            retryCount: nextRetryCount,
+            nextRetryAt,
+            delayMs,
+            errorMessage,
+          },
+          'Notification failed delivery, scheduled for retry',
+        )
+      }
+    } catch (updateErr: unknown) {
+      if (this.isLeaseConflict(updateErr)) {
+        logger.warn(
+          { notificationId: notification.id },
+          'Ignoring stale worker failure status update after lease expiry',
+        )
+        return
+      }
+      throw updateErr
     }
   }
 

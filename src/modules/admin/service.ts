@@ -860,9 +860,27 @@ export async function listStudents(params: {
     throw AppError.forbidden()
   }
 
-  return params.providers.domainStore.listStudentProfiles(
+  const rows = await params.providers.domainStore.listStudentProfiles(
     params.status ? { lifecycle_status: params.status } : undefined,
   )
+
+  if (params.actorRole === 'teacher' || params.actorRole === 'staff') {
+    return rows.map((row) => ({
+      student_id: row.student_id,
+      user_id: row.user_id,
+      full_name: row.full_name,
+      nis: row.nis ?? null,
+      class_id: row.class_id ?? null,
+      class_name: row.class_name ?? null,
+      absence_number: row.absence_number ?? null,
+      gender: row.gender ?? null,
+      academic_period_id: row.academic_period_id ?? null,
+      period_name: row.period_name ?? null,
+      lifecycle_status: row.lifecycle_status,
+    }))
+  }
+
+  return rows
 }
 
 export async function getStudent(params: {
@@ -926,6 +944,7 @@ export async function approveStudent(params: {
   await params.providers.domainStore.enqueueNotification({
     userId: params.userId,
     channel: 'push',
+    eventKey: `student_approved:${params.userId}`,
     payload: {
       title: 'Akun Disetujui',
       body: 'Pendaftaran akun Anda telah disetujui oleh admin sekolah.',
@@ -980,6 +999,7 @@ export async function rejectStudent(params: {
   await params.providers.domainStore.enqueueNotification({
     userId: params.userId,
     channel: 'email',
+    eventKey: `student_rejected:${params.userId}`,
     payload: {
       title: 'Pendaftaran Akun Ditolak',
       body: `Pendaftaran akun Anda ditolak.${params.reason ? ` Alasan: ${params.reason}` : ''}`,
@@ -1972,18 +1992,18 @@ export async function createManualAttendance(params: {
       attempt_reason: relatedAttempt.reason ?? null,
       attempt_created_at: relatedAttempt.created_at,
     },
-  })
-
-  await params.providers.domainStore.enqueueNotification({
-    userId: student.user_id,
-    channel: 'push',
-    payload: {
-      title: 'Presensi Manual Dicatat',
-      body: `Presensi manual (${params.actionType}) berhasil dicatat. Status: ${attendance.status}.`,
-      action_type: params.actionType,
-      status: attendance.status,
-      date: attendance.date,
-      type: 'manual_attendance',
+    notification: {
+      userId: student.user_id,
+      channel: 'push',
+      eventKey: `manual_attendance:${student.user_id}:${attendanceDate}:${params.actionType}:${params.attemptId}`,
+      payload: {
+        title: 'Presensi Manual Dicatat',
+        body: '',
+        action_type: params.actionType,
+        status: params.status ?? (params.actionType === 'check_in' ? 'Hadir' : 'Pulang'),
+        date: attendanceDate,
+        type: 'manual_attendance',
+      },
     },
   })
 
@@ -2349,18 +2369,18 @@ export async function approveLeaveRequest(params: {
       actorRole: actor.actorRole,
       action: 'approve_leave_request',
     },
-  })
-
-  await params.providers.domainStore.enqueueNotification({
-    userId: lr.user_id,
-    channel: 'push',
-    payload: {
-      title: 'Pengajuan Izin Disetujui',
-      body: `Pengajuan izin Anda untuk tanggal ${lr.date} telah disetujui.`,
-      category: lr.category,
-      date: lr.date,
-      leave_request_id: lr.id,
-      type: 'leave_approved',
+    notification: {
+      userId: lr.user_id,
+      channel: 'push',
+      eventKey: `leave_approved:${lr.id}`,
+      payload: {
+        title: 'Pengajuan Izin Disetujui',
+        body: `Pengajuan izin Anda untuk tanggal ${lr.date} telah disetujui.`,
+        category: lr.category,
+        date: lr.date,
+        leave_request_id: lr.id,
+        type: 'leave_approved',
+      },
     },
   })
 
@@ -2433,19 +2453,19 @@ export async function rejectLeaveRequest(params: {
       actorRole: actor.actorRole,
       action: 'reject_leave_request',
     },
-  })
-
-  await params.providers.domainStore.enqueueNotification({
-    userId: lr.user_id,
-    channel: 'push',
-    payload: {
-      title: 'Pengajuan Izin Ditolak',
-      body: `Pengajuan izin Anda untuk tanggal ${lr.date} ditolak.${params.reason ? ` Alasan: ${params.reason}` : ''}`,
-      category: lr.category,
-      date: lr.date,
-      leave_request_id: lr.id,
-      rejection_reason: params.reason ?? null,
-      type: 'leave_rejected',
+    notification: {
+      userId: lr.user_id,
+      channel: 'push',
+      eventKey: `leave_rejected:${lr.id}`,
+      payload: {
+        title: 'Pengajuan Izin Ditolak',
+        body: `Pengajuan izin Anda untuk tanggal ${lr.date} ditolak.${params.reason ? ` Alasan: ${params.reason}` : ''}`,
+        category: lr.category,
+        date: lr.date,
+        leave_request_id: lr.id,
+        rejection_reason: params.reason ?? null,
+        type: 'leave_rejected',
+      },
     },
   })
 
@@ -2488,18 +2508,18 @@ export async function reopenLeaveRequest(params: {
       actorRole: actor.actorRole,
       action: 'reopen_leave_request',
     },
-  })
-
-  await params.providers.domainStore.enqueueNotification({
-    userId: lr.user_id,
-    channel: 'push',
-    payload: {
-      title: 'Pengajuan Izin Dibuka Kembali',
-      body: `Pengajuan izin Anda untuk tanggal ${lr.date} telah dibuka kembali untuk ditinjau ulang.`,
-      category: lr.category,
-      date: lr.date,
-      leave_request_id: lr.id,
-      type: 'leave_reopened',
+    notification: {
+      userId: lr.user_id,
+      channel: 'push',
+      eventKey: `leave_reopened:${lr.id}`,
+      payload: {
+        title: 'Pengajuan Izin Dibuka Kembali',
+        body: `Pengajuan izin Anda untuk tanggal ${lr.date} telah dibuka kembali untuk ditinjau ulang.`,
+        category: lr.category,
+        date: lr.date,
+        leave_request_id: lr.id,
+        type: 'leave_reopened',
+      },
     },
   })
 

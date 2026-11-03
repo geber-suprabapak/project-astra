@@ -13,7 +13,12 @@ function invalidImage(): AppError {
 
 function xmlText(value: string): string {
   return value
-    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .split('')
+    .map((character) => {
+      const code = character.charCodeAt(0)
+      return code < 0x20 || code === 0x7f ? ' ' : character
+    })
+    .join('')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')

@@ -21,20 +21,55 @@ export async function registerStudent(
   }
 
   // 3. Check if an active/pending profile already exists for this NIS
+  const fullName = input.full_name?.trim() || rosterStudent.full_name
   const existingProfile = await providers.domainStore.getProfileByNis(input.nis)
-  if (
-    existingProfile &&
-    (existingProfile.lifecycle_status === 'pending' ||
-      existingProfile.lifecycle_status === 'approved') &&
-    existingProfile.email
-  ) {
-    throw AppError.conflict(
-      `A student account is already registered or pending approval for NIS "${input.nis}".`,
-    )
+  if (existingProfile) {
+    if (existingProfile.lifecycle_status === 'approved') {
+      throw AppError.conflict(
+        `A student account is already registered or pending approval for NIS "${input.nis}".`,
+      )
+    }
+
+    if (existingProfile.lifecycle_status === 'pending' && existingProfile.email) {
+      if (existingProfile.email !== input.email) {
+        throw AppError.conflict(
+          `A student account is already registered or pending approval for NIS "${input.nis}".`,
+        )
+      }
+
+      // Recoverable retry for the same NIS + email after an interrupted registration
+      if (rosterStudent.student_id) {
+        await providers.domainStore.bindStudentToUser({
+          studentId: rosterStudent.student_id,
+          userId: existingProfile.user_id,
+        })
+      }
+
+      const existingAudits = await providers.domainStore.getAuditLogs(
+        'profile',
+        existingProfile.user_id,
+      )
+      if (!existingAudits.some((entry) => entry.action === 'student_signup')) {
+        await providers.domainStore.insertAuditLog({
+          actor_id: existingProfile.user_id,
+          action: 'student_signup',
+          entity_type: 'profile',
+          entity_id: existingProfile.user_id,
+          details: {
+            nis: input.nis,
+            email: input.email,
+            full_name: fullName,
+            class_name: rosterStudent.class_name,
+            student_id: rosterStudent.student_id ?? null,
+          },
+        })
+      }
+
+      return existingProfile
+    }
   }
 
   // 4. Create identity in IdentityProvider (suspended / disabled until school admin approval)
-  const fullName = input.full_name?.trim() || rosterStudent.full_name
   const identity = await (providers.identityProvider.createStudentIdentity
     ? providers.identityProvider.createStudentIdentity({
         username: input.nis,
@@ -62,20 +97,23 @@ export async function registerStudent(
     })
   }
 
-  // 6. Audit log
-  await providers.domainStore.insertAuditLog({
-    actor_id: identity.userId,
-    action: 'student_signup',
-    entity_type: 'profile',
-    entity_id: identity.userId,
-    details: {
-      nis: input.nis,
-      email: input.email,
-      full_name: fullName,
-      class_name: rosterStudent.class_name,
-      student_id: rosterStudent.student_id ?? null,
-    },
-  })
+  // 6. Audit log (idempotent check in case of partial recovery)
+  const existingAudits = await providers.domainStore.getAuditLogs('profile', identity.userId)
+  if (!existingAudits.some((entry) => entry.action === 'student_signup')) {
+    await providers.domainStore.insertAuditLog({
+      actor_id: identity.userId,
+      action: 'student_signup',
+      entity_type: 'profile',
+      entity_id: identity.userId,
+      details: {
+        nis: input.nis,
+        email: input.email,
+        full_name: fullName,
+        class_name: rosterStudent.class_name,
+        student_id: rosterStudent.student_id ?? null,
+      },
+    })
+  }
 
   return profile
 }
@@ -99,11 +137,12 @@ export async function resetStudentPassword(
     throw AppError.authInvalid('Invalid or expired password reset code.')
   }
 
-  // 3. Mark reset code as used (cannot be reused)
-  await providers.domainStore.markPasswordResetCodeUsed(resetCode.id)
-
-  // 4. Update password in identity provider
+  // 3. Update password in identity provider BEFORE consuming the one-time reset code
+  // so transient 500/network failures do not burn the student's one-time recovery code.
   await providers.identityProvider.updatePassword(profile.user_id, input.new_password)
+
+  // 4. Mark reset code as used (cannot be reused)
+  await providers.domainStore.markPasswordResetCodeUsed(resetCode.id)
 
   // 5. Revoke sessions for security
   if (providers.identityProvider.revokeUserSessions) {

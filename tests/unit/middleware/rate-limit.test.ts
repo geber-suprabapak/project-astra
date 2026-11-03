@@ -5,6 +5,7 @@ import {
   MemoryRateLimitStore,
   RedisRateLimitStore,
   createRateLimitStore,
+  publicRateLimit,
   rateLimit,
 } from '../../../src/middleware/rate-limit.js'
 import type { AppEnv } from '../../../src/types/context.js'
@@ -130,5 +131,45 @@ describe('rateLimit middleware', () => {
 
     expect(first.status).toBe(200)
     expect(second.status).toBe(429)
+  })
+
+  it('publicRateLimit enforces per-IP limits and fails open on store error', async () => {
+    const app = new Hono<AppEnv>()
+    const store = new MemoryRateLimitStore()
+
+    app.post(
+      '/signup',
+      publicRateLimit({ windowMs: 900_000, max: 2, routeKey: 'auth-signup', store }),
+      (c) => c.json({ ok: true }),
+    )
+    app.onError((err) => {
+      const status = err instanceof AppError ? err.httpStatus : 500
+      return new Response(JSON.stringify({ error: err.message }), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      })
+    })
+
+    const headersA = { 'x-forwarded-for': '203.0.113.10, 10.0.0.1' }
+    const headersB = { 'x-forwarded-for': '203.0.113.20' }
+
+    expect((await app.request('/signup', { method: 'POST', headers: headersA })).status).toBe(200)
+    expect((await app.request('/signup', { method: 'POST', headers: headersA })).status).toBe(200)
+    expect((await app.request('/signup', { method: 'POST', headers: headersA })).status).toBe(429)
+    // Different IP is unaffected
+    expect((await app.request('/signup', { method: 'POST', headers: headersB })).status).toBe(200)
+
+    // Fail-open when store throws
+    const brokenStore = {
+      increment: vi.fn().mockRejectedValue(new Error('Redis down')),
+      reset: vi.fn(),
+    }
+    const failOpenApp = new Hono<AppEnv>()
+    failOpenApp.post(
+      '/signup',
+      publicRateLimit({ windowMs: 900_000, max: 1, routeKey: 'auth-signup', store: brokenStore }),
+      (c) => c.json({ ok: true }),
+    )
+    expect((await failOpenApp.request('/signup', { method: 'POST' })).status).toBe(200)
   })
 })

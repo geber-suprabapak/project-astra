@@ -35,7 +35,7 @@ describe.skipIf(!process.env.TEST_POSTGRES_URL)('PostgreSQL leave lifecycle', ()
     const id = randomUUID()
     await sql`
       INSERT INTO leave_requests (id, user_id, category, description, status, date, approval_status)
-      VALUES (${id}, 'qa-temporary-student', 'sakit', 'Temporary QA leave request', false,
+      VALUES (${id}, ${`qa-temporary-student-${id}`}, 'sakit', 'Temporary QA leave request', false,
               '2035-01-15T00:00:00+07:00', 'pending')
     `
     return id
@@ -185,19 +185,31 @@ describe.skipIf(!process.env.TEST_POSTGRES_URL)('PostgreSQL leave lifecycle', ()
     expect(legacy.kind).toBe('string')
   })
 
-  it('rolls back a rejection if its required audit insert fails', async () => {
+  it.each([
+    { status: 'approved' as const, action: 'approve_leave_request' },
+    { status: 'rejected' as const, action: 'reject_leave_request' },
+    { status: 'pending' as const, action: 'reopen_leave_request' },
+  ])('rolls back $action if its required audit insert fails', async ({ status, action }) => {
     const id = await pending()
-    await sql`ALTER TABLE audit_logs ADD CONSTRAINT qa_audit_failure CHECK (action <> 'reject_leave_request') NOT VALID`
+    if (status === 'pending') {
+      await sql`UPDATE leave_requests SET approval_status = 'rejected', rejection_reason = 'Original reason', rejected_at = '2035-01-16T00:00:00Z' WHERE id = ${id}`
+    }
+    const [before] =
+      await sql`SELECT approval_status, status, duration_days, original_end_date, effective_end_date, rejection_reason, rejected_at, updated_at FROM leave_requests WHERE id = ${id}`
+    await sql`ALTER TABLE audit_logs ADD CONSTRAINT qa_audit_failure CHECK (action NOT IN ('approve_leave_request', 'reject_leave_request', 'reopen_leave_request')) NOT VALID`
     try {
       await expect(
         store.updateLeaveRequestStatus({
           id,
-          approvalStatus: 'rejected',
-          audit: { actorId: 'qa-temporary-admin', action: 'reject_leave_request' },
+          approvalStatus: status,
+          durationDays: 3,
+          rejectionReason: 'New reason',
+          audit: { actorId: 'qa-temporary-admin', action },
         }),
       ).rejects.toThrow()
-      const [row] = await sql`SELECT approval_status FROM leave_requests WHERE id = ${id}`
-      expect(row.approval_status).toBe('pending')
+      const [after] =
+        await sql`SELECT approval_status, status, duration_days, original_end_date, effective_end_date, rejection_reason, rejected_at, updated_at FROM leave_requests WHERE id = ${id}`
+      expect(after).toEqual(before)
       const [{ count }] =
         await sql`SELECT count(*)::int AS count FROM audit_logs WHERE entity_id = ${id}`
       expect(count).toBe(0)

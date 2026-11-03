@@ -1617,6 +1617,7 @@ describe('PostgresDomainStore (Greenfield)', () => {
           ]
         }
         if (query.includes('INSERT INTO audit_logs')) return [{ id: 'audit-manual-1' }]
+        if (query.includes('SELECT status, action_type')) return []
         if (query.includes('SELECT') && query.includes('FROM attendances')) {
           return [
             {

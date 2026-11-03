@@ -135,6 +135,19 @@
     "leave_request_range_semantics": "GET /v1/admin/leave-requests returns periods overlapping the inclusive WIB range: requested_start_date <= end_date and COALESCE(effective_end_date, original_end_date, requested_start_date) >= start_date. A legacy approved row with only date is a one-day period.",
     "response": "Versioned success envelope; list resources return complete arrays or valid offset pagination metadata."
   },
+  "mobile_leave_period": {
+    "route": "GET /v1/mobile/permits",
+    "semantics": "Only approved Leave Requests form effective Leave Periods. Mobile uses an inclusive Asia/Jakarta date range from requested_start_date through effective_end_date, falling back to original_end_date and then requested_start_date. Pending and rejected requests remain visible as requests but never become effective calendar periods.",
+    "history": "Force-finish changes the effective end without rewriting the original end. Legacy approved rows with only date are one-day periods. Date-only values are school dates, not device-local dates.",
+    "response": "Existing v1 envelope and fields are unchanged."
+  },
+  "mobile_attendance_submission": {
+    "route": "POST /v1/mobile/attendance/submit",
+    "action_transition": "check_in is accepted only when no check-in is recorded for the Student/WIB date; check_out is accepted only after check-in and before check-out. Astra rechecks the action under the per-Student transaction lock after face verification.",
+    "persistence": "Attendance and its successful Attempt commit in one PostgreSQL transaction; failure to persist either does not leave the other committed.",
+    "same_action_replay": "HTTP 409 ATTENDANCE_BLOCKED; Astra does not replay a prior success because v1 has no operation-specific idempotency key. After an ambiguous timeout, inspect Attendance history before starting a new action.",
+    "response": "Existing v1 success/error envelope; request and response fields are unchanged."
+  },
   "backup_audit": {
     "routes": ["POST /v1/admin/backups", "GET /v1/admin/backups/status"],
     "allowed_roles": ["platform_admin", "school_admin"],

@@ -1,10 +1,14 @@
-import postgres, { type Sql } from 'postgres'
+import postgres, { type Sql, type TransactionSql } from 'postgres'
 import { z } from 'zod'
 import { env } from '../../config/env.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { ErrorCode } from '../../lib/errors/codes.js'
 import { logger } from '../../lib/logging/logger.js'
-import { normalizeAttendanceRecord, notificationPayloadSchema } from '../types.js'
+import {
+  canRecordAttendanceAction,
+  normalizeAttendanceRecord,
+  notificationPayloadSchema,
+} from '../types.js'
 import { getLeavePeriodFields } from '../types.js'
 import type {
   Absence,
@@ -1323,6 +1327,9 @@ export class PostgresDomainStore implements DomainStore {
               throw AppError.internal('Failed to return inserted audit log record.')
             }
           }
+          if (params.notification) {
+            await this.insertNotificationOutboxRow(sql, params.notification)
+          }
           return rows[0]
         })
 
@@ -1401,6 +1408,9 @@ export class PostgresDomainStore implements DomainStore {
           if (!auditRows[0]) {
             throw AppError.internal('Failed to return inserted audit log record.')
           }
+        }
+        if (params.notification) {
+          await this.insertNotificationOutboxRow(sql, params.notification)
         }
 
         return rows[0]
@@ -1655,6 +1665,7 @@ export class PostgresDomainStore implements DomainStore {
     actionType: 'check_in' | 'check_out'
     latitude: number
     longitude: number
+    successAttempt?: Omit<RecordAttendanceAttemptParams, 'userId' | 'actionType' | 'status'>
   }): Promise<SaveAttendanceRecordRpcResponse> {
     try {
       const now = new Date()
@@ -1676,7 +1687,7 @@ export class PostgresDomainStore implements DomainStore {
         }
       }
 
-      await this.sql.begin(async (sql) => {
+      return await this.sql.begin(async (sql) => {
         await sql`SELECT pg_advisory_xact_lock(hashtextextended(${params.userId}, 0))`
         const blocking = await sql<
           {
@@ -1704,13 +1715,43 @@ export class PostgresDomainStore implements DomainStore {
             effective_end_date: blocking[0].effective_end_date,
           })
         }
+        const current = await sql<
+          Array<{ status: string; action_type: AttendanceActionType | null }>
+        >`
+          SELECT status, action_type
+          FROM attendances
+          WHERE user_id = ${params.userId} AND date = ${todayWIB}
+          ORDER BY created_at ASC, id ASC
+        `
+        if (!canRecordAttendanceAction(current, params.actionType)) {
+          return {
+            success: false,
+            conflict: true,
+            message: 'Attendance action is already recorded or is not the next action.',
+          }
+        }
         await sql`
           INSERT INTO attendances (user_id, date, status, action_type, latitude, longitude, created_at)
           VALUES (${params.userId}, ${todayWIB}, ${status}, ${params.actionType}, ${params.latitude}, ${params.longitude}, ${now.toISOString()})
         `
+        if (params.successAttempt) {
+          const attempts = await sql<{ id: string }[]>`
+            INSERT INTO attendance_attempts (
+              user_id, action_type, status, reason, quality_score, confidence,
+              latitude, longitude, process_time_ms
+            )
+            VALUES (
+              ${params.userId}, ${params.actionType}, 'success', ${params.successAttempt.reason ?? null},
+              ${params.successAttempt.qualityScore ?? null}, ${params.successAttempt.confidence ?? null},
+              ${params.successAttempt.latitude ?? null}, ${params.successAttempt.longitude ?? null},
+              ${params.successAttempt.processTimeMs ?? null}
+            )
+            RETURNING id
+          `
+          if (!attempts[0]) throw AppError.internal('Failed to record attendance attempt.')
+        }
+        return { success: true }
       })
-
-      return { success: true }
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, params }, 'Failed to save attendance record')
@@ -1836,6 +1877,19 @@ export class PostgresDomainStore implements DomainStore {
             effective_end_date: blocking[0].effective_end_date,
           })
         }
+        const current = await sql<
+          Array<{ status: string; action_type: AttendanceActionType | null }>
+        >`
+          SELECT status, action_type
+          FROM attendances
+          WHERE user_id = ${params.userId} AND date = ${todayWIB}
+          ORDER BY created_at ASC, id ASC
+        `
+        if (!canRecordAttendanceAction(current, params.actionType)) {
+          throw AppError.conflict(
+            'Attendance action is already recorded or is not the next action.',
+          )
+        }
         const rows = await sql<AttendanceRecord[]>`
           INSERT INTO attendances (user_id, date, status, action_type, latitude, longitude, created_at)
           VALUES (${params.userId}, ${todayWIB}, ${status}, ${params.actionType}, ${params.latitude ?? null}, ${params.longitude ?? null}, ${now.toISOString()})
@@ -1867,6 +1921,21 @@ export class PostgresDomainStore implements DomainStore {
         `
         if (!auditRows[0]) {
           throw AppError.internal('Failed to record manual attendance audit.')
+        }
+        if (params.notification) {
+          await this.insertNotificationOutboxRow(sql, {
+            ...params.notification,
+            payload: {
+              ...params.notification.payload,
+              status: attendance.status,
+              date: attendance.date,
+              body:
+                typeof params.notification.payload.body === 'string' &&
+                params.notification.payload.body.length > 0
+                  ? params.notification.payload.body
+                  : `Presensi manual (${params.actionType}) berhasil dicatat. Status: ${attendance.status}.`,
+            },
+          })
         }
         return attendance
       })
@@ -4000,28 +4069,20 @@ export class PostgresDomainStore implements DomainStore {
   // Notification Outbox domain methods
   // ---------------------------------------------------------------------------
 
-  async enqueueNotification(params: EnqueueNotificationParams): Promise<NotificationRecord> {
-    try {
-      const payloadJson = JSON.stringify(params.payload ?? {})
-      const nextRetryAtVal = params.nextRetryAt ? new Date(params.nextRetryAt).toISOString() : null
-      const rows = await this.sql`
-        INSERT INTO notification_outbox (
-          user_id,
-          channel,
-          payload,
-          status,
-          retry_count,
-          next_retry_at
-        )
-        VALUES (
-          ${params.userId},
-          ${params.channel},
-          ${payloadJson}::text::jsonb,
-          ${params.status ?? 'pending'},
-          0,
-          ${nextRetryAtVal ? this.sql`${nextRetryAtVal}::timestamptz` : null}
-        )
-        RETURNING
+  private async insertNotificationOutboxRow(
+    sql: Sql | TransactionSql,
+    params: EnqueueNotificationParams,
+  ): Promise<NotificationRecord> {
+    const eventKey =
+      params.eventKey ??
+      (typeof params.payload?.event_key === 'string' ? params.payload.event_key : null)
+    const normalizedPayload = eventKey
+      ? { ...params.payload, event_key: eventKey }
+      : { ...params.payload }
+
+    if (eventKey) {
+      const existing = await sql`
+        SELECT
           id,
           user_id,
           channel,
@@ -4032,11 +4093,58 @@ export class PostgresDomainStore implements DomainStore {
           error_message,
           created_at::text,
           updated_at::text
+        FROM notification_outbox
+        WHERE user_id = ${params.userId}
+          AND channel = ${params.channel}
+          AND payload->>'event_key' = ${eventKey}
+        ORDER BY created_at DESC
+        LIMIT 1
       `
-      if (!rows || rows.length === 0) {
-        throw AppError.internal('Failed to enqueue notification.')
+      if (existing && existing.length > 0) {
+        return this.mapNotificationRow(existing[0])
       }
-      return this.mapNotificationRow(rows[0])
+    }
+
+    const payloadJson = JSON.stringify(normalizedPayload)
+    const nextRetryAtVal = params.nextRetryAt ? new Date(params.nextRetryAt).toISOString() : null
+    const rows = await sql`
+      INSERT INTO notification_outbox (
+        user_id,
+        channel,
+        payload,
+        status,
+        retry_count,
+        next_retry_at
+      )
+      VALUES (
+        ${params.userId},
+        ${params.channel},
+        ${payloadJson}::text::jsonb,
+        ${params.status ?? 'pending'},
+        0,
+        ${nextRetryAtVal ? sql`${nextRetryAtVal}::timestamptz` : null}
+      )
+      RETURNING
+        id,
+        user_id,
+        channel,
+        payload,
+        status,
+        retry_count,
+        next_retry_at::text,
+        error_message,
+        created_at::text,
+        updated_at::text
+    `
+    if (!rows || rows.length === 0) {
+      throw AppError.internal('Failed to enqueue notification.')
+    }
+    return this.mapNotificationRow(rows[0])
+  }
+
+  async enqueueNotification(params: EnqueueNotificationParams): Promise<NotificationRecord> {
+    try {
+      return await this.insertNotificationOutboxRow(this.sql, params)
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, params }, 'Failed to enqueue notification')
@@ -4123,22 +4231,27 @@ export class PostgresDomainStore implements DomainStore {
   ): Promise<NotificationRecord[]> {
     const limit = params?.limit ?? 10
     const maxRetries = params?.maxRetries ?? 3
-    const nowIso = params?.now ? new Date(params.now).toISOString() : new Date().toISOString()
+    const leaseMs = params?.leaseMs ?? 120_000
+    const nowMs = params?.now ? new Date(params.now).getTime() : Date.now()
+    const nowIso = new Date(nowMs).toISOString()
+    const leaseCutoffIso = new Date(nowMs - leaseMs).toISOString()
 
     try {
       const rows = await this.sql`
         WITH claimable AS (
           SELECT id
           FROM notification_outbox
-          WHERE status = 'pending'
-            AND (next_retry_at IS NULL OR next_retry_at <= ${nowIso}::timestamptz)
+          WHERE (
+            (status = 'pending' AND (next_retry_at IS NULL OR next_retry_at <= ${nowIso}::timestamptz))
+            OR (status = 'processing' AND updated_at <= ${leaseCutoffIso}::timestamptz)
+          )
             AND retry_count < ${maxRetries}
           ORDER BY created_at ASC
           LIMIT ${limit}
           FOR UPDATE SKIP LOCKED
         )
         UPDATE notification_outbox
-        SET status = 'processing', updated_at = NOW()
+        SET status = 'processing', updated_at = ${nowIso}::timestamptz
         FROM claimable
         WHERE notification_outbox.id = claimable.id
         RETURNING
@@ -4166,6 +4279,12 @@ export class PostgresDomainStore implements DomainStore {
   ): Promise<NotificationRecord> {
     try {
       const nextRetryAtVal = params.nextRetryAt ? new Date(params.nextRetryAt).toISOString() : null
+      const statusGuard = params.expectedCurrentStatus
+        ? this.sql`AND status = ${params.expectedCurrentStatus}`
+        : this.sql``
+      const leaseGuard = params.expectedUpdatedAt
+        ? this.sql`AND updated_at = ${params.expectedUpdatedAt}::timestamptz`
+        : this.sql``
       const rows = await this.sql`
         UPDATE notification_outbox
         SET
@@ -4175,6 +4294,8 @@ export class PostgresDomainStore implements DomainStore {
           next_retry_at = ${params.nextRetryAt !== undefined ? (nextRetryAtVal ? this.sql`${nextRetryAtVal}::timestamptz` : null) : this.sql`next_retry_at`},
           updated_at = NOW()
         WHERE id = ${params.id}
+          ${statusGuard}
+          ${leaseGuard}
         RETURNING
           id,
           user_id,
@@ -4188,6 +4309,12 @@ export class PostgresDomainStore implements DomainStore {
           updated_at::text
       `
       if (!rows || rows.length === 0) {
+        if (params.expectedCurrentStatus || params.expectedUpdatedAt) {
+          const existing = await this.getNotificationById(params.id)
+          if (existing) {
+            throw AppError.conflict('Notification claim lease is no longer active.')
+          }
+        }
         throw AppError.notFound('Notification')
       }
       return this.mapNotificationRow(rows[0])

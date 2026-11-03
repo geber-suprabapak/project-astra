@@ -67,6 +67,7 @@ import {
   type NotificationRecord,
   type ObjectStorage,
   normalizeAttendanceRecord,
+  canRecordAttendanceAction,
   type PasswordResetCode,
   type Permission,
   type Permit,
@@ -1978,6 +1979,34 @@ export class MemoryDomainStore implements DomainStore {
       }
     }
 
+    if (params.notification) {
+      const existingNotifIds = new Set(this.notifications.keys())
+      try {
+        await this.enqueueNotification(params.notification)
+      } catch (err) {
+        Object.assign(p, previousPermit)
+        for (let i = this.auditLogs.length - 1; i >= 0; i--) {
+          const item = this.auditLogs[i]
+          if (
+            item &&
+            !existingAuditIds.has(item.id) &&
+            audit &&
+            item.actor_id === audit.actorId &&
+            item.entity_type === 'leave_request' &&
+            item.entity_id === params.id
+          ) {
+            this.auditLogs.splice(i, 1)
+          }
+        }
+        for (const id of this.notifications.keys()) {
+          if (!existingNotifIds.has(id)) {
+            this.notifications.delete(id)
+          }
+        }
+        throw err
+      }
+    }
+
     const studentFields = await this.leaveStudentFields(p.user_id)
     return {
       id: p.id,
@@ -2163,9 +2192,20 @@ export class MemoryDomainStore implements DomainStore {
     actionType: 'check_in' | 'check_out'
     latitude: number
     longitude: number
+    successAttempt?: Omit<RecordAttendanceAttemptParams, 'userId' | 'actionType' | 'status'>
   }): Promise<SaveAttendanceRecordRpcResponse> {
     const todayWIB = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
     assertAttendanceAllowed(this.permits, params.userId, todayWIB)
+    const current = this.attendancesList.filter(
+      (record) => record.user_id === params.userId && record.date === todayWIB,
+    )
+    if (!canRecordAttendanceAction(current, params.actionType)) {
+      return {
+        success: false,
+        conflict: true,
+        message: 'Attendance action is already recorded or is not the next action.',
+      }
+    }
     const status = params.actionType === 'check_in' ? 'Hadir' : 'Pulang'
     const record: AttendanceRecord = {
       id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -2184,6 +2224,21 @@ export class MemoryDomainStore implements DomainStore {
       created_at: record.created_at,
     })
     this.attendancesList.unshift(record)
+    if (params.successAttempt) {
+      this.attendanceAttempts.unshift({
+        id: `attempt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        user_id: params.userId,
+        action_type: params.actionType,
+        status: 'success',
+        reason: params.successAttempt.reason ?? null,
+        quality_score: params.successAttempt.qualityScore ?? null,
+        confidence: params.successAttempt.confidence ?? null,
+        latitude: params.successAttempt.latitude ?? null,
+        longitude: params.successAttempt.longitude ?? null,
+        process_time_ms: params.successAttempt.processTimeMs ?? null,
+        created_at: new Date().toISOString(),
+      })
+    }
     return { success: true }
   }
 
@@ -2235,6 +2290,12 @@ export class MemoryDomainStore implements DomainStore {
     const todayWIB =
       params.date ?? new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
     assertAttendanceAllowed(this.permits, params.userId, todayWIB)
+    const current = this.attendancesList.filter(
+      (attendance) => attendance.user_id === params.userId && attendance.date === todayWIB,
+    )
+    if (!canRecordAttendanceAction(current, params.actionType)) {
+      throw AppError.conflict('Attendance action is already recorded or is not the next action.')
+    }
     const status: AttendanceStatus =
       params.status ?? (params.actionType === 'check_in' ? 'Hadir' : 'Pulang')
 
@@ -2259,6 +2320,7 @@ export class MemoryDomainStore implements DomainStore {
       attempt_id: params.attemptId ?? null,
     }
     const existingAuditIds = new Set(this.auditLogs.map((item) => item.id))
+    const existingNotifIds = new Set(this.notifications.keys())
     try {
       await this.insertAuditLog({
         actor_id: params.actorId,
@@ -2267,6 +2329,21 @@ export class MemoryDomainStore implements DomainStore {
         entity_id: record.id,
         details: auditDetails,
       })
+      if (params.notification) {
+        await this.enqueueNotification({
+          ...params.notification,
+          payload: {
+            ...params.notification.payload,
+            status: record.status,
+            date: record.date,
+            body:
+              typeof params.notification.payload.body === 'string' &&
+              params.notification.payload.body.length > 0
+                ? params.notification.payload.body
+                : `Presensi manual (${params.actionType}) berhasil dicatat. Status: ${record.status}.`,
+          },
+        })
+      }
     } catch (error) {
       // SAFETY: test/custom stores may persist the audit row before reporting failure.
       for (let i = this.auditLogs.length - 1; i >= 0; i--) {
@@ -2280,6 +2357,11 @@ export class MemoryDomainStore implements DomainStore {
           item.entity_id === record.id
         ) {
           this.auditLogs.splice(i, 1)
+        }
+      }
+      for (const id of this.notifications.keys()) {
+        if (!existingNotifIds.has(id)) {
+          this.notifications.delete(id)
         }
       }
       throw error
@@ -3179,12 +3261,31 @@ export class MemoryDomainStore implements DomainStore {
   // ---------------------------------------------------------------------------
 
   async enqueueNotification(params: EnqueueNotificationParams): Promise<NotificationRecord> {
+    const eventKey =
+      params.eventKey ??
+      (typeof params.payload?.event_key === 'string' ? params.payload.event_key : null)
+    const normalizedPayload = eventKey
+      ? { ...params.payload, event_key: eventKey }
+      : { ...params.payload }
+
+    if (eventKey) {
+      for (const existing of this.notifications.values()) {
+        if (
+          existing.user_id === params.userId &&
+          existing.channel === params.channel &&
+          existing.payload?.event_key === eventKey
+        ) {
+          return { ...existing }
+        }
+      }
+    }
+
     const now = new Date().toISOString()
     const record: NotificationRecord = {
       id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       user_id: params.userId,
       channel: params.channel,
-      payload: { ...params.payload },
+      payload: normalizedPayload,
       status: params.status ?? 'pending',
       retry_count: 0,
       next_retry_at: params.nextRetryAt ?? null,
@@ -3227,19 +3328,28 @@ export class MemoryDomainStore implements DomainStore {
   ): Promise<NotificationRecord[]> {
     const limit = params?.limit ?? 10
     const maxRetries = params?.maxRetries ?? 3
+    const leaseMs = params?.leaseMs ?? 120_000
     const now = params?.now ? new Date(params.now).getTime() : Date.now()
+    const leaseCutoff = now - leaseMs
     const claimed: NotificationRecord[] = []
 
     for (const record of this.notifications.values()) {
       if (claimed.length >= limit) break
-      if (record.status !== 'pending') continue
       if (record.retry_count >= maxRetries) continue
-      if (record.next_retry_at && new Date(record.next_retry_at).getTime() > now) continue
+
+      const isClaimablePending =
+        record.status === 'pending' &&
+        (!record.next_retry_at || new Date(record.next_retry_at).getTime() <= now)
+      const isStaleProcessing =
+        record.status === 'processing' &&
+        (!record.updated_at || new Date(record.updated_at).getTime() <= leaseCutoff)
+
+      if (!isClaimablePending && !isStaleProcessing) continue
 
       const updated: NotificationRecord = {
         ...record,
         status: 'processing',
-        updated_at: new Date().toISOString(),
+        updated_at: new Date(now).toISOString(),
       }
       this.notifications.set(record.id, updated)
       claimed.push({ ...updated })
@@ -3254,6 +3364,12 @@ export class MemoryDomainStore implements DomainStore {
     const record = this.notifications.get(params.id)
     if (!record) {
       throw AppError.notFound('Notification')
+    }
+    if (
+      (params.expectedCurrentStatus && record.status !== params.expectedCurrentStatus) ||
+      (params.expectedUpdatedAt && record.updated_at !== params.expectedUpdatedAt)
+    ) {
+      throw AppError.conflict('Notification claim lease is no longer active.')
     }
     const updated: NotificationRecord = {
       ...record,
@@ -3387,6 +3503,19 @@ export class MemoryIdentityProvider implements IdentityProvider {
   public suspendedUsers = new Set<string>()
   public revokedSessions = new Set<string>()
   async createStudentIdentity(params: CreateStudentIdentityParams): Promise<{ userId: string }> {
+    for (const [existingUserId, existingUser] of this.users.entries()) {
+      if (existingUser.email === params.email && this.suspendedUsers.has(existingUserId)) {
+        this.users.set(existingUserId, {
+          ...existingUser,
+          roles: [...(params.roles ?? ['student'])],
+        })
+        if (params.password) {
+          this.passwords.set(params.email, params.password)
+        }
+        return { userId: existingUserId }
+      }
+    }
+
     const userId = `student-identity-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     this.users.set(userId, {
       userId,

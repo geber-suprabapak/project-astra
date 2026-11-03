@@ -15,14 +15,23 @@ describe('Adiwiyata image processing', () => {
       .png()
       .toBuffer()
     const decodedImage = await decodeAdiwiyataImage(input, 'image/png')
-    const output = await createWatermarkedJpeg({
+    const watermark = {
       decodedImage,
       fullName: 'Ayu & <Sari> 東京',
       className: 'XII RPL 1',
       submittedAt: new Date('2026-09-29T05:30:00.000Z'),
+    }
+    const output = await createWatermarkedJpeg({
+      ...watermark,
+      fullName: 'Ayu\u0000\u001f\u007f & <Sari> 東京',
+    })
+    const sanitizedOutput = await createWatermarkedJpeg({
+      ...watermark,
+      fullName: 'Ayu    & <Sari> 東京',
     })
     const pixels = await sharp(output).removeAlpha().raw().toBuffer({ resolveWithObject: true })
 
+    expect(output).toEqual(sanitizedOutput)
     expect(output.length).toBeLessThanOrEqual(MAX_ADIWIYATA_OUTPUT_BYTES)
     expect(pixels.info.width).toBeGreaterThanOrEqual(640)
     expect(pixels.info.height).toBeGreaterThanOrEqual(180)

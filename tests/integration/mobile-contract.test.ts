@@ -287,6 +287,42 @@ describe('integration: /v1/mobile contract boundary', () => {
   })
 
   describe('Permits endpoints', () => {
+    it.each([
+      ['shortened', '2026-11-05', '2026-11-02', '2026-11-02'],
+      ['original-end fallback', '2026-11-05', null, '2026-11-05'],
+      ['legacy one-day', null, null, '2026-11-01'],
+    ])(
+      'GET permits preserves approved %s period in WIB',
+      async (_, originalEnd, effectiveEnd, expectedEnd) => {
+        domainStore.permits.push({
+          id: 'approved-period',
+          user_id: userId,
+          kategori_izin: 'sakit',
+          deskripsi: 'Synthetic leave period',
+          status: true,
+          link_foto: null,
+          tanggal: '2026-10-31T17:00:00.000Z',
+          approval_status: 'approved',
+          original_end_date: originalEnd,
+          effective_end_date: effectiveEnd,
+        })
+        const res = await app.request('/v1/mobile/permits', {
+          headers: { Authorization: authHeader },
+        })
+        expect(res.status).toBe(200)
+        const body = await res.json()
+        expect(body.data.items).toEqual([
+          expect.objectContaining({
+            id: 'approved-period',
+            requested_start_date: '2026-11-01',
+            original_end_date: originalEnd ?? '2026-11-01',
+            effective_end_date: expectedEnd,
+            approval_status: 'approved',
+          }),
+        ])
+      },
+    )
+
     it('POST /v1/mobile/permits creates a new permit', async () => {
       const today = getTodayWIB()
       const formData = new FormData()

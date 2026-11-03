@@ -497,6 +497,7 @@ export class OidcIdentityProvider implements IdentityProvider {
 
     try {
       const token = await this.getManagementToken()
+      const baseUrl = this.logtoEndpoint.replace(/\/$/, '')
       const userPayload: LogtoCreateUserPayload = {
         primaryEmail: params.email,
         password: params.password,
@@ -509,7 +510,8 @@ export class OidcIdentityProvider implements IdentityProvider {
         userPayload.username = params.username
       }
 
-      const response = await fetch(`${this.logtoEndpoint.replace(/\/$/, '')}/api/users`, {
+      let userId: string | null = null
+      const response = await fetch(`${baseUrl}/api/users`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -518,14 +520,41 @@ export class OidcIdentityProvider implements IdentityProvider {
         body: JSON.stringify(userPayload),
       })
 
-      if (!response.ok) {
+      if (response.ok) {
+        // SAFETY: Logto user creation response contains an id field.
+        const data = (await response.json()) as { id: string }
+        userId = data.id
+      } else if (response.status === 409 || response.status === 422) {
+        const searchRes = await fetch(
+          `${baseUrl}/api/users?search.primaryEmail=${encodeURIComponent(params.email)}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        ).catch(() => null)
+        if (searchRes?.ok) {
+          const candidates = (await searchRes.json()) as Array<{
+            id: string
+            primaryEmail?: string | null
+            isSuspended?: boolean
+            customData?: { nis?: string }
+          }>
+          const match = candidates.find(
+            (u) =>
+              u.primaryEmail === params.email &&
+              (!params.username || u.customData?.nis === params.username),
+          )
+          if (match) {
+            userId = match.id
+          }
+        }
+      }
+
+      if (!userId) {
         throw AppError.internal('Failed to create student identity in identity provider.')
       }
 
-      // SAFETY: Logto user creation response contains an id field.
-      const data = (await response.json()) as { id: string }
-      await this.assignRoles(data.id, params.roles ?? ['student'])
-      return { userId: data.id }
+      await this.assignRoles(userId, params.roles ?? ['student'])
+      return { userId }
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, username: params.username }, 'Logto create student identity error')

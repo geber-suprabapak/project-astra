@@ -148,6 +148,51 @@ export function rateLimit(opts: RateLimitOptions): MiddlewareHandler<AppEnv> {
   }
 }
 
+export interface PublicRateLimitOptions extends RateLimitOptions {
+  failOpen?: boolean
+}
+
+export function extractPublicClientIp(c: { req: { header: (name: string) => string | undefined } }): string {
+  const cfIp = c.req.header('cf-connecting-ip')?.trim()
+  if (cfIp) return cfIp
+  const realIp = c.req.header('x-real-ip')?.trim()
+  if (realIp) return realIp
+  const forwardedFor = c.req.header('x-forwarded-for')
+  if (forwardedFor) {
+    const firstIp = forwardedFor.split(',')[0]?.trim()
+    if (firstIp) return firstIp
+  }
+  return 'anon'
+}
+
+export function publicRateLimit(opts: PublicRateLimitOptions): MiddlewareHandler<AppEnv> {
+  const store = opts.store ?? defaultStore
+  const failOpen = opts.failOpen ?? true
+
+  return async (c, next) => {
+    const clientIp = extractPublicClientIp(c)
+    const key = `${env.tenantKey}:ip:${clientIp}:${opts.routeKey}`
+
+    let hits = 0
+    try {
+      hits = await store.increment(key, opts.windowMs)
+    } catch {
+      if (failOpen) {
+        await next()
+        return
+      }
+      throw AppError.internal('Rate limit store is unavailable.')
+    }
+
+    if (hits > opts.max) {
+      c.header('Retry-After', String(Math.ceil(opts.windowMs / 1000)))
+      throw new AppError('VALIDATION_ERROR', 429, 'Rate limit exceeded. Please slow down.')
+    }
+
+    await next()
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Named presets — sesuai plan.md §6.5
 // ---------------------------------------------------------------------------
@@ -165,6 +210,8 @@ export const rateLimits = {
   adminSession: rateLimit({ windowMs: 60_000, max: 30, routeKey: 'admin-session' }),
   standard: rateLimit({ windowMs: 60_000, max: 60, routeKey: 'standard' }),
   files: rateLimit({ windowMs: 60_000, max: 30, routeKey: 'files' }),
+  authSignup: publicRateLimit({ windowMs: 900_000, max: 10, routeKey: 'auth-signup' }),
+  authResetPassword: publicRateLimit({ windowMs: 900_000, max: 10, routeKey: 'auth-reset' }),
 }
 
 export { RATE_LIMIT_SCRIPT, defaultStore, rateLimitBackend }

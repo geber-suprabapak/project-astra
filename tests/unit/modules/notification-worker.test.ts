@@ -185,4 +185,35 @@ describe('NotificationWorker Unit Tests', () => {
     await worker.stop()
     expect(worker.getRunningStatus().isRunning).toBe(false)
   })
+
+  it('reclaims stale processing rows after claim lease expires and deduplicates eventKey', async () => {
+    const first = await domainStore.enqueueNotification({
+      userId: 'user-1',
+      channel: 'push',
+      eventKey: 'leave_approved:lr-100',
+      payload: { title: 'Pengajuan Izin Disetujui', body: 'Disetujui' },
+    })
+    const duplicate = await domainStore.enqueueNotification({
+      userId: 'user-1',
+      channel: 'push',
+      eventKey: 'leave_approved:lr-100',
+      payload: { title: 'Pengajuan Izin Disetujui', body: 'Disetujui' },
+    })
+    expect(duplicate.id).toBe(first.id)
+
+    // Simulate a crashed worker that claimed the row 3 minutes ago
+    const staleTimestamp = new Date(Date.now() - 180_000).toISOString()
+    domainStore.notifications.set(first.id, {
+      ...first,
+      status: 'processing',
+      updated_at: staleTimestamp,
+    })
+
+    const batchResult = await worker.processBatch()
+    expect(batchResult.claimed).toBe(1)
+    expect(batchResult.delivered).toBe(1)
+
+    const delivered = await domainStore.getNotificationById(first.id)
+    expect(delivered?.status).toBe('delivered')
+  })
 })

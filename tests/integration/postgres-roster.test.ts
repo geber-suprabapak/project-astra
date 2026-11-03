@@ -19,9 +19,26 @@ describe.skipIf(!process.env.TEST_POSTGRES_URL)('PostgreSQL roster JSON round tr
         created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now()
       )
     `
+    await sql`CREATE TEMP TABLE schools (LIKE public.schools INCLUDING DEFAULTS)`
+    await sql`CREATE TEMP TABLE academic_periods (LIKE public.academic_periods INCLUDING DEFAULTS)`
     await sql`CREATE TEMP TABLE classes (LIKE public.classes INCLUDING DEFAULTS INCLUDING INDEXES)`
     await sql`CREATE TEMP TABLE students (LIKE public.students INCLUDING DEFAULTS INCLUDING INDEXES)`
     await sql`CREATE TEMP TABLE class_enrollments (LIKE public.class_enrollments INCLUDING DEFAULTS INCLUDING INDEXES)`
+    await sql`
+      INSERT INTO schools (id, name, slug)
+      VALUES ('a0000000-0000-0000-0000-000000000001', 'QA School', 'qa-roster-test')
+    `
+    await sql`
+      INSERT INTO academic_periods (id, school_id, name, start_date, end_date, is_active)
+      VALUES (
+        'b0000000-0000-0000-0000-000000000001',
+        'a0000000-0000-0000-0000-000000000001',
+        'QA Period',
+        '2035-01-01',
+        '2035-12-31',
+        true
+      )
+    `
   })
 
   afterAll(async () => {

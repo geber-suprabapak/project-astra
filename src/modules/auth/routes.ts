@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { successResponse } from '../../lib/http/responses.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { auth } from '../../middleware/auth.js'
+import { rateLimits } from '../../middleware/rate-limit.js'
 import { defaultProviders } from '../../providers/index.js'
 import type { AppProviders } from '../../providers/types.js'
 import type { AppEnv } from '../../types/context.js'
@@ -16,7 +17,7 @@ export function createStudentAuthRouter(deps: StudentAuthRouterDeps = {}) {
   const router = new Hono<AppEnv>()
 
   // POST /signup
-  router.post('/signup', async (c) => {
+  router.post('/signup', rateLimits.authSignup, async (c) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const body = await c.req.json()
     const parsed = studentSignupSchema.safeParse(body)
@@ -34,7 +35,7 @@ export function createStudentAuthRouter(deps: StudentAuthRouterDeps = {}) {
   })
 
   // POST /reset-password
-  router.post('/reset-password', async (c) => {
+  router.post('/reset-password', rateLimits.authResetPassword, async (c) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const body = await c.req.json()
     const parsed = studentResetPasswordSchema.safeParse(body)

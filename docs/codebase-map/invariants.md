@@ -5,6 +5,11 @@
 **Rule:** Approval, rejection, reopening and force-finish audit rows snapshot the actor's profile name and role. The authorized history endpoint returns only those actions, timestamp and snapshot fields; legacy values remain null, actor IDs/raw details stay internal, and the existing audit retention behavior applies without a second store or TTL.
 **Evidence:** `src/modules/admin/routes.ts`, `src/modules/admin/service.ts`, `src/providers/postgres/domain-store.ts`, `src/providers/memory/index.ts`, `contracts/astra-v1.json`, `tests/integration/leave-requests.test.ts`.
 
+## INV-ASTRA-021 — Attendance and its successful Attempt commit together
+
+**Rule:** Mobile Attendance and its success Attempt commit in one transaction after the per-Student lock rechecks that the requested action remains available. Concurrent or replayed duplicate actions return `ATTENDANCE_BLOCKED`; v1 does not promise replay-equivalent success without an operation-specific idempotency key. Manual Attendance shares the lock and action guard.
+**Evidence:** `src/modules/attendance/service.ts`, `src/providers/types.ts`, `src/providers/postgres/domain-store.ts`, `src/providers/memory/index.ts`, `contracts/astra-v1.json`, `tests/integration/postgres-attendance-submission.test.ts`.
+
 ## INV-ASTRA-018 — Manual Attendance and audit commit together
 
 **Rule:** A Manual Attendance is persisted with its actor, reason, and related Attempt audit record in the same PostgreSQL transaction. If the audit insert fails, the transaction fails and the Attendance does not commit. The Memory provider removes any partially persisted audit before returning the failure. Notification enqueue occurs after the Attendance/audit commit and may fail independently.

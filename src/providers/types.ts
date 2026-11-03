@@ -255,6 +255,7 @@ export interface UpdateLeaveRequestStatusParams {
     actorRole?: IdentityRole | null
     action: 'approve_leave_request' | 'reject_leave_request' | 'reopen_leave_request'
   }
+  notification?: EnqueueNotificationParams
 }
 
 export interface ForceFinishLeaveRequestParams {
@@ -311,6 +312,24 @@ export interface AttendanceRecord {
   created_at: string
 }
 
+export function canRecordAttendanceAction(
+  records: Array<{ status: string; action_type: AttendanceActionType | null }>,
+  actionType: AttendanceActionType,
+): boolean {
+  const hasCheckedIn = records.some(
+    (record) =>
+      record.action_type === 'check_in' ||
+      record.status === 'Hadir' ||
+      record.status === 'Terlambat' ||
+      record.status === 'Datang',
+  )
+  const hasCheckedOut = records.some(
+    (record) => record.action_type === 'check_out' || record.status === 'Pulang',
+  )
+
+  return actionType === 'check_in' ? !hasCheckedIn : hasCheckedIn && !hasCheckedOut
+}
+
 /**
  * ADR-002: Deterministically maps historical attendance records with status 'Datang'
  * to canonical status 'Hadir' and action_type 'check_in'.
@@ -364,6 +383,7 @@ export interface CreateManualAttendanceParams {
   attemptId?: string | null
   actorId: string
   auditDetails?: AuditLogDetails
+  notification?: EnqueueNotificationParams
 }
 
 export interface AttendanceActionValidationResult {
@@ -382,6 +402,7 @@ export type AttendanceActionRpcResponse = AttendanceActionValidationResult
 export interface SaveAttendanceRecordResult {
   success: boolean
   message?: string
+  conflict?: boolean
 }
 
 /** @deprecated Alias for backwards compatibility */
@@ -904,6 +925,7 @@ export interface DomainStore {
     actionType: 'check_in' | 'check_out'
     latitude: number
     longitude: number
+    successAttempt?: Omit<RecordAttendanceAttemptParams, 'userId' | 'actionType' | 'status'>
   }): Promise<SaveAttendanceRecordRpcResponse>
 
   // Attendance & Attempts domain methods
@@ -1273,6 +1295,7 @@ export interface EnqueueNotificationParams {
   userId: string
   channel: NotificationChannel
   payload: NotificationPayload
+  eventKey?: string | null
   nextRetryAt?: string | null
   status?: NotificationStatus
 }
@@ -1291,10 +1314,13 @@ export interface UpdateNotificationStatusParams {
   errorMessage?: string | null
   retryCount?: number
   nextRetryAt?: string | null
+  expectedCurrentStatus?: NotificationStatus
+  expectedUpdatedAt?: string
 }
 
 export interface ClaimPendingNotificationsParams {
   limit?: number
   maxRetries?: number
   now?: Date | string
+  leaseMs?: number
 }
