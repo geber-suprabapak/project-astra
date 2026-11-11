@@ -1,5 +1,28 @@
+import type { PklSupervisorAssignment } from '../modules/pkl/resources.js'
+import type {
+  CmsAccountList,
+  CmsAccountInsert,
+  CmsAccountMutation,
+} from '../modules/cms/accounts.js'
+import type { CertificateVerification } from '../modules/pkl/certificates.js'
+import type { PklAssessment } from '../modules/pkl/assessment-command.js'
+import type { PklCheckIn, PklCheckOut } from '../modules/pkl/attendance.js'
+import type {
+  PklImport,
+  PklList,
+  PklMutation,
+  PklRow,
+  PklTransition,
+} from '../modules/pkl/resources.js'
+import type {
+  CmsContentImport,
+  CmsContentList,
+  CmsContentMutation,
+  CmsContentRow,
+} from '../modules/cms/content.js'
 import { z } from 'zod'
 import type { RobinClient } from '../clients/robin/client.js'
+import type { CmsProfile } from '../modules/cms/schema.js'
 
 export const profileLifecycleStatusSchema = z.enum(['pending', 'approved', 'rejected', 'disabled'])
 export type ProfileLifecycleStatus = z.infer<typeof profileLifecycleStatusSchema>
@@ -65,6 +88,11 @@ export interface CreateStudentIdentityParams {
 }
 
 export interface IdentityProvider {
+  createCmsIdentity?(params: {
+    email: string
+    fullName: string
+    password: string
+  }): Promise<{ userId: string }>
   verifyToken(token: string): Promise<IdentityUser>
   verifyLegacyToken?(token: string): Promise<IdentityUser>
   verifyPassword(email: string, password: string): Promise<void>
@@ -866,6 +894,24 @@ export interface InsertAttendanceData {
 }
 
 export interface DomainStore {
+  checkInPkl(params: PklCheckIn): Promise<PklRow>
+  checkOutPkl(params: PklCheckOut): Promise<PklRow>
+  importPklRecords(params: PklImport): Promise<PklRow[]>
+  listPklRecords(params: PklList): Promise<PklRow[]>
+  countPklRecords(params: PklList): Promise<number>
+  mutatePklRecord(params: PklMutation): Promise<PklRow>
+  verifyPklCertificate(code: string): Promise<CertificateVerification | null>
+  assignPklIndustrySupervisor(params: PklSupervisorAssignment): Promise<PklRow>
+  savePklAssessment(params: PklAssessment): Promise<PklRow>
+  transitionPklRegistration(params: PklTransition): Promise<PklRow>
+  listCmsContent(params: CmsContentList): Promise<CmsContentRow[]>
+  countCmsContent(params: CmsContentList): Promise<number>
+  mutateCmsContent(params: CmsContentMutation): Promise<CmsContentRow>
+  importCmsContent(params: CmsContentImport): Promise<CmsContentRow[]>
+  listCmsAccounts(params: CmsAccountList): Promise<CmsProfile[]>
+  insertCmsAccount(params: CmsAccountInsert): Promise<CmsProfile>
+  mutateCmsAccount(params: CmsAccountMutation): Promise<CmsProfile>
+  getCmsProfileBySubject(subject: string): Promise<CmsProfile | null>
   getUserProfile(userId: string): Promise<UserProfile>
   getAdiwiyataEligibility(userId: string): Promise<AdiwiyataEligibility | null>
   listAdiwiyataEligibility(): Promise<AdiwiyataEligibility[]>
@@ -1239,6 +1285,8 @@ export interface ObjectStorage {
   /** Delete one object belonging to an Astra file record. */
   deleteObject(purpose: FilePurpose, path: string): Promise<void>
   getSignedFaceEnrollmentUrl(path: string): Promise<string | null>
+  uploadPublicFile?(path: string, file: Buffer, contentType: string): Promise<string>
+  getPublicUrl?(path: string): string
   getPresignedUploadUrl?(params: {
     bucket?: string
     key: string

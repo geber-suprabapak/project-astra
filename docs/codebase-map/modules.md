@@ -31,6 +31,15 @@
 **Depends on:** Existing profiles, roster/bindings, academic periods, enrollment, schedules, calendar, `DomainStore`, file metadata and the dedicated S3 bucket. Verification and submission share the pair lock in `src/providers/adiwiyata-lock.ts`.
 **Read next:** `contracts/astra-v1.json`, `tests/integration/adiwiyata-admin-reports.test.ts`, `tests/integration/adiwiyata-dashboard.test.ts`.
 
+## CMS identity access
+
+**Purpose:** Resolve the current CMS/PKL session from a verified Logto identity, independently of attendance/mobile roles and profiles.
+**Entry points:** `src/modules/cms/routes.ts`, `src/modules/cms/service.ts`, `src/modules/cms/schema.ts`.
+**Owns:** Explicit legacy CMS UUID-to-Logto-subject bindings, protected CMS role/jurusan authority, enablement and session cutoff in `cms.profiles`.
+**Depends on:** `IdentityProvider.verifyToken`, the `cms:access` scope and `DomainStore.getCmsProfileBySubject`.
+**Boundary:** `/v1/cms/session` projects session fields only. It never creates/enables/binds accounts or accepts legacy Supabase tokens; CMS resource/PKL workflow APIs are still pending.
+**Read next:** `db/migrations/0003_cms_identity.sql`, `tests/integration/cms-session.test.ts`, `contracts/astra-v1.json`.
+
 ## Providers and clients
 
 **Purpose:** Adapt PostgreSQL, S3-compatible storage, OIDC, Redis, and Robin.

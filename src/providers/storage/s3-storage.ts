@@ -510,6 +510,25 @@ export class S3ObjectStorage implements ObjectStorage {
     return this.signUrl(bucket, params.key, ttl, 'PUT', params.contentType)
   }
 
+  async uploadPublicFile(path: string, file: Buffer, contentType: string): Promise<string> {
+    const bucket = this.bucketAvatars
+    const response = await this.executeS3Request('PUT', bucket, path, file, contentType)
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '')
+      logger.error({ status: response.status, errorText }, 'S3 public upload failed')
+      throw AppError.storageUploadFailed()
+    }
+    return path
+  }
+
+  getPublicUrl(path: string): string {
+    const cleanPath = path.replace(/^\//, '')
+    if (this.publicUrl) {
+      return `${this.publicUrl.replace(/\/$/, '')}/${this.bucketAvatars}/${cleanPath}`
+    }
+    return `${this.endpoint}/${this.bucketAvatars}/${cleanPath}`
+  }
+
   async checkHealth(): Promise<boolean> {
     try {
       const res = await this.executeS3Request(

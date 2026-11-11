@@ -11,4 +11,5 @@ Project Astra is the Skanida domain backend and API gateway. It exposes mobile a
 | Audited Manual Attendance | [Manual Attendance](flows/manual-attendance.md) |
 | Administrative leave reopen | [Leave reopen](flows/leave-reopen.md) |
 | Notification outbox delivery | [Notification delivery](flows/notification-delivery.md) |
+| CMS/PKL identity boundary | [CMS identity access](modules.md#cms-identity-access) |
 | Rules to preserve | [Invariants](invariants.md) |

@@ -11,3 +11,9 @@ _Avoid_: Token role, permission
 **Permission Scope**:
 An API capability issued in a Logto access token through a Logto global role. Astra uses it to authorize privileged or cross-user actions.
 _Avoid_: Astra role, custom JWT role
+
+**CMS Profile**:
+A person's approved content-management and PKL access, including role, department
+scope and enablement. Its identity binding does not grant school-attendance access,
+and a school-attendance role does not grant this access.
+_Avoid_: Mobile Profile, Platform Role

@@ -1,3 +1,45 @@
+import type { PklSupervisorAssignment } from '../../modules/pkl/resources.js'
+import { listCmsAccounts, insertCmsAccount, mutateCmsAccount } from './cms-accounts.js'
+import type {
+  CmsAccountList,
+  CmsAccountInsert,
+  CmsAccountMutation,
+} from '../../modules/cms/accounts.js'
+import type { CertificateVerification } from '../../modules/pkl/certificates.js'
+import type { PklAssessment } from '../../modules/pkl/assessment-command.js'
+import type { PklCheckIn, PklCheckOut } from '../../modules/pkl/attendance.js'
+import {
+  verifyPklCertificate,
+  assignPklIndustrySupervisor,
+  savePklAssessment,
+  checkInPkl,
+  checkOutPkl,
+  importPklRecords,
+  listPklRecords,
+  countPklRecords,
+  mutatePklRecord,
+  transitionPklRegistration,
+} from './pkl.js'
+import type {
+  PklImport,
+  PklList,
+  PklMutation,
+  PklRow,
+  PklTransition,
+} from '../../modules/pkl/resources.js'
+import {
+  countCmsContent,
+  importCmsContent,
+  listCmsContent,
+  mutateCmsContent,
+} from './cms-content.js'
+import type {
+  CmsContentImport,
+  CmsContentList,
+  CmsContentMutation,
+  CmsContentRow,
+} from '../../modules/cms/content.js'
+import type { CmsProfile } from '../../modules/cms/schema.js'
 import postgres, { type Sql, type TransactionSql } from 'postgres'
 import { z } from 'zod'
 import { env } from '../../config/env.js'
@@ -183,6 +225,91 @@ export class PostgresDomainStore implements DomainStore {
       })
       this.ownsSql = true
     }
+  }
+
+  async checkInPkl(params: PklCheckIn): Promise<PklRow> {
+    return checkInPkl(this.sql, params)
+  }
+  async checkOutPkl(params: PklCheckOut): Promise<PklRow> {
+    return checkOutPkl(this.sql, params)
+  }
+
+  async importPklRecords(params: PklImport): Promise<PklRow[]> {
+    return importPklRecords(this.sql, params)
+  }
+
+  async listPklRecords(params: PklList): Promise<PklRow[]> {
+    return listPklRecords(this.sql, params)
+  }
+
+  async countPklRecords(params: PklList): Promise<number> {
+    return countPklRecords(this.sql, params)
+  }
+
+  async mutatePklRecord(params: PklMutation): Promise<PklRow> {
+    return mutatePklRecord(this.sql, params)
+  }
+
+  async verifyPklCertificate(code: string): Promise<CertificateVerification | null> {
+    return verifyPklCertificate(this.sql, code)
+  }
+
+  async assignPklIndustrySupervisor(params: PklSupervisorAssignment): Promise<PklRow> {
+    return assignPklIndustrySupervisor(this.sql, params)
+  }
+  async savePklAssessment(params: PklAssessment): Promise<PklRow> {
+    return savePklAssessment(this.sql, params)
+  }
+
+  async transitionPklRegistration(params: PklTransition): Promise<PklRow> {
+    return transitionPklRegistration(this.sql, params)
+  }
+
+  async listCmsContent(params: CmsContentList): Promise<CmsContentRow[]> {
+    return listCmsContent(this.sql, params)
+  }
+
+  async countCmsContent(params: CmsContentList): Promise<number> {
+    return countCmsContent(this.sql, params)
+  }
+
+  async importCmsContent(params: CmsContentImport): Promise<CmsContentRow[]> {
+    return importCmsContent(this.sql, params)
+  }
+
+  async mutateCmsContent(params: CmsContentMutation): Promise<CmsContentRow> {
+    return mutateCmsContent(this.sql, params)
+  }
+
+  async listCmsAccounts(params: CmsAccountList): Promise<CmsProfile[]> {
+    return listCmsAccounts(this.sql, params)
+  }
+  async insertCmsAccount(params: CmsAccountInsert): Promise<CmsProfile> {
+    return insertCmsAccount(this.sql, params)
+  }
+  async mutateCmsAccount(params: CmsAccountMutation): Promise<CmsProfile> {
+    return mutateCmsAccount(this.sql, params)
+  }
+
+  async getCmsProfileBySubject(subject: string): Promise<CmsProfile | null> {
+    const rows = await this.sql<
+      (Omit<CmsProfile, 'session_valid_after'> & {
+        session_valid_after: Date | null
+      })[]
+    >`
+      SELECT id, logto_subject, full_name, email, role, jurusan_id, jurusan_slug,
+             authz_version, access_enabled, session_valid_after
+      FROM cms.profiles
+      WHERE logto_subject = ${subject}
+      LIMIT 1
+    `
+    const profile = rows[0]
+    return profile
+      ? {
+          ...profile,
+          session_valid_after: profile.session_valid_after?.toISOString() ?? null,
+        }
+      : null
   }
 
   async getUserProfile(userId: string): Promise<UserProfile> {
@@ -866,10 +993,17 @@ export class PostgresDomainStore implements DomainStore {
 
   async unbindStudentByNis(nis: string): Promise<void> {
     try {
-      await this.sql`
-        DELETE FROM student_bindings
-        WHERE student_id IN (SELECT id FROM students WHERE nis = ${nis})
-      `
+      await this.sql.begin(async (sql) => {
+        await sql`
+          DELETE FROM student_bindings
+          WHERE student_id IN (SELECT id FROM students WHERE nis = ${nis})
+        `
+        await sql`
+          UPDATE class_enrollments
+          SET user_id = NULL, updated_at = NOW()
+          WHERE student_id IN (SELECT id FROM students WHERE nis = ${nis})
+        `
+      })
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, nis }, 'Failed to unbind student by NIS')
@@ -1376,6 +1510,27 @@ export class PostgresDomainStore implements DomainStore {
           FOR UPDATE
         `
         if (!current[0]) throw AppError.notFound('Leave request')
+        await sql`SELECT pg_advisory_xact_lock(hashtextextended(${current[0].user_id}, 0))`
+        if (current[0].approval_status === 'approved') {
+          throw AppError.conflict('Approved Leave Period cannot be edited or extended.')
+        }
+        if (params.approvalStatus === 'pending') {
+          const pending = await sql<{ id: string }[]>`
+            SELECT id
+            FROM leave_requests
+            WHERE user_id = ${current[0].user_id}
+              AND approval_status = 'pending'
+              AND id <> ${params.id}
+            ORDER BY created_at ASC, id ASC
+            LIMIT 1
+          `
+          if (pending[0]) {
+            throw AppError.leaveRequestPending({
+              pending_request_id: pending[0].id,
+              requested_start_date: current[0].date.slice(0, 10),
+            })
+          }
+        }
 
         const rows = await sql<LeaveRequest[]>`
           UPDATE leave_requests
@@ -2510,7 +2665,7 @@ export class PostgresDomainStore implements DomainStore {
           ) => cb(this.sql)
       return await beginFn(async (sql) => {
         const activeRows = await sql<ClassEnrollment[]>`
-          SELECT id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+          SELECT id, student_id, user_id, class_id, academic_period_id, absence_number, status, created_at::text, updated_at::text
           FROM class_enrollments
           WHERE user_id = ${params.userId} AND academic_period_id = ${params.academicPeriodId}::uuid AND status = 'active'
           LIMIT 1
@@ -2527,13 +2682,13 @@ export class PostgresDomainStore implements DomainStore {
           UPDATE class_enrollments
           SET status = 'transferred', updated_at = NOW()
           WHERE id = ${prev.id}
-          RETURNING id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+          RETURNING id, student_id, user_id, class_id, academic_period_id, absence_number, status, created_at::text, updated_at::text
         `
 
         const newRows = await sql<ClassEnrollment[]>`
-          INSERT INTO class_enrollments (user_id, class_id, academic_period_id, status)
-          VALUES (${params.userId}, ${params.toClassId}::uuid, ${params.academicPeriodId}::uuid, 'active')
-          RETURNING id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+          INSERT INTO class_enrollments (student_id, user_id, class_id, academic_period_id, absence_number, status)
+          VALUES (${prev.student_id ?? null}, ${params.userId}, ${params.toClassId}::uuid, ${params.academicPeriodId}::uuid, ${prev.absence_number ?? null}, 'active')
+          RETURNING id, student_id, user_id, class_id, academic_period_id, absence_number, status, created_at::text, updated_at::text
         `
 
         await sql`
@@ -2571,7 +2726,7 @@ export class PostgresDomainStore implements DomainStore {
           ) => cb(this.sql)
       return await beginFn(async (sql) => {
         const sourceRows = await sql<ClassEnrollment[]>`
-          SELECT id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+          SELECT id, student_id, user_id, class_id, academic_period_id, absence_number, status, created_at::text, updated_at::text
           FROM class_enrollments
           WHERE user_id = ${params.userId} AND academic_period_id = ${params.fromAcademicPeriodId}::uuid AND status = 'active'
           LIMIT 1
@@ -2595,13 +2750,13 @@ export class PostgresDomainStore implements DomainStore {
           UPDATE class_enrollments
           SET status = 'promoted', updated_at = NOW()
           WHERE id = ${sourceRows[0].id}
-          RETURNING id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+          RETURNING id, student_id, user_id, class_id, academic_period_id, absence_number, status, created_at::text, updated_at::text
         `
 
         const newRows = await sql<ClassEnrollment[]>`
-          INSERT INTO class_enrollments (user_id, class_id, academic_period_id, status)
-          VALUES (${params.userId}, ${params.toClassId}::uuid, ${params.toAcademicPeriodId}::uuid, 'active')
-          RETURNING id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+          INSERT INTO class_enrollments (student_id, user_id, class_id, academic_period_id, absence_number, status)
+          VALUES (${sourceRows[0].student_id ?? null}, ${params.userId}, ${params.toClassId}::uuid, ${params.toAcademicPeriodId}::uuid, ${sourceRows[0].absence_number ?? null}, 'active')
+          RETURNING id, student_id, user_id, class_id, academic_period_id, absence_number, status, created_at::text, updated_at::text
         `
 
         await sql`

@@ -5,6 +5,12 @@
 **Meaning:** Server-side eligibility result before an image is submitted.
 **Evidence:** `src/modules/attendance/service.ts`.
 
+## CMS profile
+
+**Meaning:** A person's protected content-management/PKL access, with an explicit identity binding, role, department scope, enablement and session validity. This access is separate from attendance/mobile access.
+**Owned by:** CMS.
+**Evidence:** `src/modules/cms/schema.ts`, `src/modules/cms/service.ts`.
+
 ## DomainStore
 
 **Meaning:** Astra provider interface for domain persistence.

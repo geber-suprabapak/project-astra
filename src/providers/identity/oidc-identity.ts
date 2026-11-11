@@ -20,6 +20,7 @@ export interface OidcIdentityProviderOptions {
   audience?: string
   logtoEndpoint?: string
   logtoAppId?: string
+  logtoCmsAccessRoleName?: string
   logtoAppSecret?: string
   legacyJwtSecret?: string
   legacyIssuer?: string
@@ -65,6 +66,7 @@ export class OidcIdentityProvider implements IdentityProvider {
   private readonly audience: string
   private readonly logtoEndpoint?: string
   private readonly logtoAppId?: string
+  private readonly logtoCmsAccessRoleName?: string
   private readonly logtoAppSecret?: string
   private readonly legacyJwtSecret?: string
   private readonly legacyIssuer?: string
@@ -80,6 +82,7 @@ export class OidcIdentityProvider implements IdentityProvider {
     this.logtoEndpoint = 'logtoEndpoint' in options ? options.logtoEndpoint : env.logtoEndpoint
     this.logtoAppId = 'logtoAppId' in options ? options.logtoAppId : env.logtoAppId
     this.logtoAppSecret = 'logtoAppSecret' in options ? options.logtoAppSecret : env.logtoAppSecret
+    this.logtoCmsAccessRoleName = options.logtoCmsAccessRoleName ?? env.logtoCmsAccessRoleName
     this.legacyJwtSecret =
       'legacyJwtSecret' in options ? options.legacyJwtSecret : env.legacySupabaseJwtSecret
     this.legacyIssuer =
@@ -258,6 +261,8 @@ export class OidcIdentityProvider implements IdentityProvider {
         `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/password`,
         {
           method: 'PATCH',
+          signal: AbortSignal.timeout(10000),
+          redirect: 'error',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
@@ -309,6 +314,59 @@ export class OidcIdentityProvider implements IdentityProvider {
       logger.error({ err, userId }, 'Logto update user metadata error')
       throw AppError.internal('Failed to update user metadata in identity provider.')
     }
+  }
+
+  async createCmsIdentity(params: {
+    email: string
+    fullName: string
+    password: string
+  }): Promise<{ userId: string }> {
+    if (
+      !this.logtoEndpoint ||
+      !this.logtoAppId ||
+      !this.logtoAppSecret ||
+      !this.logtoCmsAccessRoleName
+    )
+      throw AppError.dependencyUnavailable('CMS identity provisioning')
+    const token = await this.getManagementToken()
+    const roleIds = await this.getRoleIds([this.logtoCmsAccessRoleName], token)
+    const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+    const response = await fetch(`${this.logtoEndpoint.replace(/\/$/, '')}/api/users`, {
+      method: 'POST',
+      headers,
+      signal: AbortSignal.timeout(10000),
+      redirect: 'error',
+      body: JSON.stringify({
+        primaryEmail: params.email,
+        name: params.fullName,
+        password: params.password,
+        isSuspended: true,
+      }),
+    })
+    if ([409, 422].includes(response.status))
+      throw AppError.conflict(
+        'Identity could not be created; verify the email and password policy. Existing identities are never claimed automatically.',
+      )
+    if (!response.ok) throw AppError.dependencyUnavailable('CMS identity provisioning')
+    const { id } = z.object({ id: z.string().min(1) }).parse(await response.json())
+    const assigned = await fetch(
+      `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(id)}/roles`,
+      {
+        method: 'POST',
+        headers,
+        signal: AbortSignal.timeout(10000),
+        redirect: 'error',
+        body: JSON.stringify({ roleIds }),
+      },
+    )
+    if (!assigned.ok) {
+      logger.error(
+        { userId: id, status: assigned.status },
+        'CMS identity remains suspended after role assignment failure',
+      )
+      throw AppError.dependencyUnavailable('CMS identity provisioning')
+    }
+    return { userId: id }
   }
 
   async createStaffIdentity(params: {
@@ -440,7 +498,11 @@ export class OidcIdentityProvider implements IdentityProvider {
     for (let page = 1; names.some((name) => !ids.has(name)); page++) {
       const response = await fetch(
         `${this.logtoEndpoint?.replace(/\/$/, '')}/api/roles?type=User&page_size=100&page=${page}`,
-        { headers: { Authorization: `Bearer ${token}` } },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(10000),
+          redirect: 'error',
+        },
       )
       if (!response.ok) throw AppError.internal('Failed to retrieve identity provider roles.')
       const roles = z
@@ -471,6 +533,8 @@ export class OidcIdentityProvider implements IdentityProvider {
     const credentials = Buffer.from(`${this.logtoAppId}:${this.logtoAppSecret}`).toString('base64')
     const response = await fetch(`${this.logtoEndpoint.replace(/\/$/, '')}/oidc/token`, {
       method: 'POST',
+      signal: AbortSignal.timeout(10000),
+      redirect: 'error',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         Authorization: `Basic ${credentials}`,

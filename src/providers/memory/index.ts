@@ -1,3 +1,44 @@
+import type { PklSupervisorAssignment } from '../../modules/pkl/resources.js'
+import {
+  listMemoryCmsAccounts,
+  insertMemoryCmsAccount,
+  mutateMemoryCmsAccount,
+} from './cms-accounts.js'
+import type {
+  CmsAccountList,
+  CmsAccountInsert,
+  CmsAccountMutation,
+} from '../../modules/cms/accounts.js'
+import type { CertificateVerification } from '../../modules/pkl/certificates.js'
+import type { PklAssessment } from '../../modules/pkl/assessment-command.js'
+import type { PklCheckIn, PklCheckOut } from '../../modules/pkl/attendance.js'
+import {
+  verifyMemoryPklCertificate,
+  assignMemoryPklIndustrySupervisor,
+  saveMemoryPklAssessment,
+  checkInMemoryPkl,
+  checkOutMemoryPkl,
+  importMemoryPklRecords,
+  listMemoryPklRecords,
+  mutateMemoryPklRecord,
+  transitionMemoryPklRegistration,
+  type MemoryPklState,
+} from './pkl.js'
+import type {
+  PklImport,
+  PklList,
+  PklMutation,
+  PklRow,
+  PklTransition,
+} from '../../modules/pkl/resources.js'
+import { listMemoryCmsContent, mutateMemoryCmsContent, type MemoryCmsState } from './cms-content.js'
+import type {
+  CmsContentImport,
+  CmsContentList,
+  CmsContentMutation,
+  CmsContentRow,
+} from '../../modules/cms/content.js'
+import type { CmsProfile } from '../../modules/cms/schema.js'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { AppError } from '../../lib/errors/app-error.js'
@@ -405,6 +446,103 @@ function assertAttendanceAllowed(permits: Permit[], userId: string, date: string
 }
 
 export class MemoryDomainStore implements DomainStore {
+  public cmsContent = new Map<string, Map<string, CmsContentRow>>()
+  public cmsContentAudit: MemoryCmsState['cmsContentAudit'] = []
+
+  async checkInPkl(params: PklCheckIn): Promise<PklRow> {
+    return checkInMemoryPkl(this, params)
+  }
+  async checkOutPkl(params: PklCheckOut): Promise<PklRow> {
+    return checkOutMemoryPkl(this, params)
+  }
+
+  async importPklRecords(params: PklImport): Promise<PklRow[]> {
+    return importMemoryPklRecords(this, params)
+  }
+
+  async listPklRecords(params: PklList): Promise<PklRow[]> {
+    return listMemoryPklRecords(this, params)
+  }
+
+  async countPklRecords(params: PklList): Promise<number> {
+    return listMemoryPklRecords(this, {
+      ...params,
+      query: { ...params.query, limit: Number.MAX_SAFE_INTEGER, offset: 0 },
+    }).length
+  }
+
+  async mutatePklRecord(params: PklMutation): Promise<PklRow> {
+    return mutateMemoryPklRecord(this, params)
+  }
+
+  async verifyPklCertificate(code: string): Promise<CertificateVerification | null> {
+    return verifyMemoryPklCertificate(this, code)
+  }
+
+  async assignPklIndustrySupervisor(params: PklSupervisorAssignment): Promise<PklRow> {
+    return assignMemoryPklIndustrySupervisor(this, params)
+  }
+  async savePklAssessment(params: PklAssessment): Promise<PklRow> {
+    return saveMemoryPklAssessment(this, params)
+  }
+
+  async transitionPklRegistration(params: PklTransition): Promise<PklRow> {
+    return transitionMemoryPklRegistration(this, params)
+  }
+
+  public pklRecords: MemoryPklState['pklRecords'] = new Map()
+  public pklAudit: MemoryPklState['pklAudit'] = []
+
+  async listCmsContent(params: CmsContentList): Promise<CmsContentRow[]> {
+    return listMemoryCmsContent(this, params)
+  }
+
+  async countCmsContent(params: CmsContentList): Promise<number> {
+    return listMemoryCmsContent(this, {
+      ...params,
+      query: { ...params.query, limit: Number.MAX_SAFE_INTEGER, offset: 0 },
+    }).length
+  }
+
+  async importCmsContent(params: CmsContentImport): Promise<CmsContentRow[]> {
+    if (params.upsert_by_slug && params.resource !== 'berita')
+      throw AppError.validationError('Slug upsert is only supported for news imports.')
+    const before = this.cmsContent.has(params.resource)
+      ? structuredClone(this.cmsContent.get(params.resource)!)
+      : null
+    const auditLength = this.cmsContentAudit.length
+    try {
+      return params.data.map((data) => {
+        let id: string | undefined
+        if (params.upsert_by_slug) {
+          const slug = z.string().min(1).safeParse(data.slug)
+          if (!slug.success) throw AppError.validationError('News slug is required.')
+          id = listMemoryCmsContent(this, {
+            resource: 'berita',
+            access: params.access,
+            query: { slug: slug.data, limit: 1, offset: 0, sort: 'id', direction: 'asc' },
+          })[0]?.id
+        }
+        return mutateMemoryCmsContent(this, {
+          ...params,
+          data,
+          id,
+          action: id ? 'update' : 'create',
+        })
+      })
+    } catch (error) {
+      if (before) this.cmsContent.set(params.resource, before)
+      else this.cmsContent.delete(params.resource)
+      this.cmsContentAudit.length = auditLength
+      throw error
+    }
+  }
+
+  async mutateCmsContent(params: CmsContentMutation): Promise<CmsContentRow> {
+    return mutateMemoryCmsContent(this, params)
+  }
+
+  public cmsProfiles = new Map<string, CmsProfile>()
   public profiles = new Map<string, UserProfile>()
   public students = new Map<string, Student>()
   public studentBindings = new Map<string, StudentBinding>()
@@ -435,6 +573,21 @@ export class MemoryDomainStore implements DomainStore {
   public attendancesList: AttendanceRecord[] = []
   public signupOpen = false
   public isHealthy = true
+
+  async listCmsAccounts(params: CmsAccountList): Promise<CmsProfile[]> {
+    return listMemoryCmsAccounts(this, params)
+  }
+  async insertCmsAccount(params: CmsAccountInsert): Promise<CmsProfile> {
+    return insertMemoryCmsAccount(this, params)
+  }
+  async mutateCmsAccount(params: CmsAccountMutation): Promise<CmsProfile> {
+    return mutateMemoryCmsAccount(this, params)
+  }
+
+  async getCmsProfileBySubject(subject: string): Promise<CmsProfile | null> {
+    const profile = this.cmsProfiles.get(subject)
+    return profile ? { ...profile } : null
+  }
 
   constructor() {
     for (const perm of DEFAULT_PERMISSIONS) {
@@ -1480,9 +1633,11 @@ export class MemoryDomainStore implements DomainStore {
 
     const newEnrollment: ClassEnrollment = {
       id: `enrollment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      student_id: currentActive.student_id,
       user_id: params.userId,
       class_id: params.toClassId,
       academic_period_id: params.academicPeriodId,
+      absence_number: currentActive.absence_number,
       status: 'active',
       created_at: now,
       updated_at: now,
@@ -1538,9 +1693,11 @@ export class MemoryDomainStore implements DomainStore {
 
     const newEnrollment: ClassEnrollment = {
       id: `enrollment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      student_id: sourceActive.student_id,
       user_id: params.userId,
       class_id: params.toClassId,
       academic_period_id: params.toAcademicPeriodId,
+      absence_number: sourceActive.absence_number,
       status: 'active',
       created_at: now,
       updated_at: now,
@@ -1892,6 +2049,29 @@ export class MemoryDomainStore implements DomainStore {
           requested_start_date: start,
           requested_end_date: end,
         })
+      }
+    } else {
+      if (p.approval_status === 'approved') {
+        throw AppError.conflict('Approved Leave Period cannot be edited or extended.')
+      }
+      if (params.approvalStatus === 'pending') {
+        const pending = this.permits
+          .filter(
+            (permit) =>
+              permit.id !== p.id &&
+              permit.user_id === p.user_id &&
+              permit.approval_status === 'pending',
+          )
+          .sort(
+            (a, b) =>
+              (a.created_at ?? '').localeCompare(b.created_at ?? '') || a.id.localeCompare(b.id),
+          )[0]
+        if (pending) {
+          throw AppError.leaveRequestPending({
+            pending_request_id: pending.id,
+            requested_start_date: toWibDate(p.tanggal),
+          })
+        }
       }
     }
 
@@ -3485,6 +3665,15 @@ export class MemoryObjectStorage implements ObjectStorage {
     return `https://storage.local/signed/${encodeURIComponent(path)}?expires=86400`
   }
 
+  async uploadPublicFile(path: string, file: Buffer, contentType: string): Promise<string> {
+    this.objects.set(path, { buffer: file, contentType })
+    return path
+  }
+
+  getPublicUrl(path: string): string {
+    return `https://storage.local/public/${encodeURIComponent(path)}`
+  }
+
   async getPresignedUploadUrl(params: {
     bucket?: string
     key: string
@@ -3660,6 +3849,25 @@ export class MemoryIdentityProvider implements IdentityProvider {
     if (existing) {
       this.users.set(userId, { ...existing, ...metadata })
     }
+  }
+
+  async createCmsIdentity(params: {
+    email: string
+    fullName: string
+    password: string
+  }): Promise<{ userId: string }> {
+    if ([...this.users.values()].some((user) => user.email === params.email))
+      throw AppError.conflict('Identity already exists.')
+    const userId = randomUUID()
+    this.users.set(userId, {
+      userId,
+      email: params.email,
+      authSource: 'logto',
+      scopes: ['cms:access'],
+    })
+    this.passwords.set(params.email, params.password)
+    await this.setUserSuspended(userId, true)
+    return { userId }
   }
 
   async createStaffIdentity(params: {

@@ -54,6 +54,7 @@ export const envSchema = z
     LOGTO_ENDPOINT: z.string().url().optional(),
     LOGTO_APP_ID: z.string().min(1).optional(),
     LOGTO_APP_SECRET: z.string().min(1).optional(),
+    LOGTO_CMS_ACCESS_ROLE_NAME: z.string().min(1).optional(),
     AUTH_USER_ID: z.string().min(1).optional(),
     AUTH_EMAIL: z.string().min(1).optional(),
 
@@ -188,6 +189,7 @@ export const env = {
   logtoEndpoint: raw.LOGTO_ENDPOINT,
   logtoAppId: raw.LOGTO_APP_ID,
   logtoAppSecret: raw.LOGTO_APP_SECRET,
+  logtoCmsAccessRoleName: raw.LOGTO_CMS_ACCESS_ROLE_NAME,
   authUserId: raw.AUTH_USER_ID,
   authEmail: raw.AUTH_EMAIL,
 

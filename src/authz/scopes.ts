@@ -5,6 +5,7 @@
  * scopes; the role name itself is not an authorization input to this service.
  */
 export const logtoScopes = {
+  cmsAccess: 'cms:access',
   mobileAccess: 'mobile:access',
   adminRead: 'admin:read',
   filesReadAny: 'files:read:any',

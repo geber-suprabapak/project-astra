@@ -19,6 +19,8 @@ describe('integration: published Astra contract manifest', () => {
       mobile_routes: string[]
       adiwiyata_routes: string[]
       admin_routes: string[]
+      cms_routes: string[]
+      pkl_routes: string[]
       identity_routes: string[]
     }
     const publishedRoutes = [
@@ -26,6 +28,8 @@ describe('integration: published Astra contract manifest', () => {
       ...contract.adiwiyata_routes,
       ...contract.admin_routes,
       ...contract.identity_routes,
+      ...contract.cms_routes,
+      ...contract.pkl_routes,
     ]
     const implementedRoutes = new Set(
       createApp().routes.map((route) => `${route.method} ${normalizeImplementedPath(route.path)}`),

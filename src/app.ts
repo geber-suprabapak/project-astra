@@ -1,3 +1,5 @@
+import { createPklRouter } from './modules/pkl/routes.js'
+import { createCmsRouter } from './modules/cms/routes.js'
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { cors } from 'hono/cors'
@@ -175,6 +177,9 @@ export function createApp(deps: AppDeps = {}) {
     deps.adiwiyataRouter ??
     (deps.providers ? createAdiwiyataRouter({ providers: resolvedProviders }) : adiwiyataRouter)
   app.route('/v1/adiwiyata', resolvedAdiwiyataRouter)
+
+  app.route('/v1/cms', createCmsRouter({ providers: resolvedProviders }))
+  app.route('/v1/pkl', createPklRouter({ providers: resolvedProviders }))
 
   // Mobile API routes
   app.route('/v1/mobile', mobileRouter)

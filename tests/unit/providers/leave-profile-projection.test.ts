@@ -52,6 +52,7 @@ describe('leave profile projection', () => {
       category: 'sakit',
       description: 'Projection test',
       date: '2035-02-01',
+      approval_status: 'pending',
     })
     const updated = await store.updateLeaveRequestStatus({
       id: created.id,
