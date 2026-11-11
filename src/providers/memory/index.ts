@@ -1480,9 +1480,11 @@ export class MemoryDomainStore implements DomainStore {
 
     const newEnrollment: ClassEnrollment = {
       id: `enrollment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      student_id: currentActive.student_id,
       user_id: params.userId,
       class_id: params.toClassId,
       academic_period_id: params.academicPeriodId,
+      absence_number: currentActive.absence_number,
       status: 'active',
       created_at: now,
       updated_at: now,
@@ -1538,9 +1540,11 @@ export class MemoryDomainStore implements DomainStore {
 
     const newEnrollment: ClassEnrollment = {
       id: `enrollment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      student_id: sourceActive.student_id,
       user_id: params.userId,
       class_id: params.toClassId,
       academic_period_id: params.toAcademicPeriodId,
+      absence_number: sourceActive.absence_number,
       status: 'active',
       created_at: now,
       updated_at: now,
@@ -1892,6 +1896,29 @@ export class MemoryDomainStore implements DomainStore {
           requested_start_date: start,
           requested_end_date: end,
         })
+      }
+    } else {
+      if (p.approval_status === 'approved') {
+        throw AppError.conflict('Approved Leave Period cannot be edited or extended.')
+      }
+      if (params.approvalStatus === 'pending') {
+        const pending = this.permits
+          .filter(
+            (permit) =>
+              permit.id !== p.id &&
+              permit.user_id === p.user_id &&
+              permit.approval_status === 'pending',
+          )
+          .sort(
+            (a, b) =>
+              (a.created_at ?? '').localeCompare(b.created_at ?? '') || a.id.localeCompare(b.id),
+          )[0]
+        if (pending) {
+          throw AppError.leaveRequestPending({
+            pending_request_id: pending.id,
+            requested_start_date: toWibDate(p.tanggal),
+          })
+        }
       }
     }
 

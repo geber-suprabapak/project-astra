@@ -866,10 +866,17 @@ export class PostgresDomainStore implements DomainStore {
 
   async unbindStudentByNis(nis: string): Promise<void> {
     try {
-      await this.sql`
-        DELETE FROM student_bindings
-        WHERE student_id IN (SELECT id FROM students WHERE nis = ${nis})
-      `
+      await this.sql.begin(async (sql) => {
+        await sql`
+          DELETE FROM student_bindings
+          WHERE student_id IN (SELECT id FROM students WHERE nis = ${nis})
+        `
+        await sql`
+          UPDATE class_enrollments
+          SET user_id = NULL, updated_at = NOW()
+          WHERE student_id IN (SELECT id FROM students WHERE nis = ${nis})
+        `
+      })
     } catch (err) {
       if (err instanceof AppError) throw err
       logger.error({ err, nis }, 'Failed to unbind student by NIS')
@@ -1376,6 +1383,27 @@ export class PostgresDomainStore implements DomainStore {
           FOR UPDATE
         `
         if (!current[0]) throw AppError.notFound('Leave request')
+        await sql`SELECT pg_advisory_xact_lock(hashtextextended(${current[0].user_id}, 0))`
+        if (current[0].approval_status === 'approved') {
+          throw AppError.conflict('Approved Leave Period cannot be edited or extended.')
+        }
+        if (params.approvalStatus === 'pending') {
+          const pending = await sql<{ id: string }[]>`
+            SELECT id
+            FROM leave_requests
+            WHERE user_id = ${current[0].user_id}
+              AND approval_status = 'pending'
+              AND id <> ${params.id}
+            ORDER BY created_at ASC, id ASC
+            LIMIT 1
+          `
+          if (pending[0]) {
+            throw AppError.leaveRequestPending({
+              pending_request_id: pending[0].id,
+              requested_start_date: current[0].date.slice(0, 10),
+            })
+          }
+        }
 
         const rows = await sql<LeaveRequest[]>`
           UPDATE leave_requests
@@ -2510,7 +2538,7 @@ export class PostgresDomainStore implements DomainStore {
           ) => cb(this.sql)
       return await beginFn(async (sql) => {
         const activeRows = await sql<ClassEnrollment[]>`
-          SELECT id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+          SELECT id, student_id, user_id, class_id, academic_period_id, absence_number, status, created_at::text, updated_at::text
           FROM class_enrollments
           WHERE user_id = ${params.userId} AND academic_period_id = ${params.academicPeriodId}::uuid AND status = 'active'
           LIMIT 1
@@ -2527,13 +2555,13 @@ export class PostgresDomainStore implements DomainStore {
           UPDATE class_enrollments
           SET status = 'transferred', updated_at = NOW()
           WHERE id = ${prev.id}
-          RETURNING id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+          RETURNING id, student_id, user_id, class_id, academic_period_id, absence_number, status, created_at::text, updated_at::text
         `
 
         const newRows = await sql<ClassEnrollment[]>`
-          INSERT INTO class_enrollments (user_id, class_id, academic_period_id, status)
-          VALUES (${params.userId}, ${params.toClassId}::uuid, ${params.academicPeriodId}::uuid, 'active')
-          RETURNING id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+          INSERT INTO class_enrollments (student_id, user_id, class_id, academic_period_id, absence_number, status)
+          VALUES (${prev.student_id ?? null}, ${params.userId}, ${params.toClassId}::uuid, ${params.academicPeriodId}::uuid, ${prev.absence_number ?? null}, 'active')
+          RETURNING id, student_id, user_id, class_id, academic_period_id, absence_number, status, created_at::text, updated_at::text
         `
 
         await sql`
@@ -2571,7 +2599,7 @@ export class PostgresDomainStore implements DomainStore {
           ) => cb(this.sql)
       return await beginFn(async (sql) => {
         const sourceRows = await sql<ClassEnrollment[]>`
-          SELECT id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+          SELECT id, student_id, user_id, class_id, academic_period_id, absence_number, status, created_at::text, updated_at::text
           FROM class_enrollments
           WHERE user_id = ${params.userId} AND academic_period_id = ${params.fromAcademicPeriodId}::uuid AND status = 'active'
           LIMIT 1
@@ -2595,13 +2623,13 @@ export class PostgresDomainStore implements DomainStore {
           UPDATE class_enrollments
           SET status = 'promoted', updated_at = NOW()
           WHERE id = ${sourceRows[0].id}
-          RETURNING id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+          RETURNING id, student_id, user_id, class_id, academic_period_id, absence_number, status, created_at::text, updated_at::text
         `
 
         const newRows = await sql<ClassEnrollment[]>`
-          INSERT INTO class_enrollments (user_id, class_id, academic_period_id, status)
-          VALUES (${params.userId}, ${params.toClassId}::uuid, ${params.toAcademicPeriodId}::uuid, 'active')
-          RETURNING id, user_id, class_id, academic_period_id, status, created_at::text, updated_at::text
+          INSERT INTO class_enrollments (student_id, user_id, class_id, academic_period_id, absence_number, status)
+          VALUES (${sourceRows[0].student_id ?? null}, ${params.userId}, ${params.toClassId}::uuid, ${params.toAcademicPeriodId}::uuid, ${sourceRows[0].absence_number ?? null}, 'active')
+          RETURNING id, student_id, user_id, class_id, academic_period_id, absence_number, status, created_at::text, updated_at::text
         `
 
         await sql`
