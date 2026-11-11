@@ -57,7 +57,7 @@ export const pklInternshipSchema = z.object({
   supervisor_id: z.uuid().nullish(),
   start_date: z.iso.date().nullish(),
   end_date: z.iso.date().nullish(),
-  status: z.enum(['pending','active','completed','cancelled','withdrawn']).default('pending'),
+  status: z.enum(['pending', 'active', 'completed', 'cancelled', 'withdrawn']).default('pending'),
   notes: z.string().nullish(),
 })
 

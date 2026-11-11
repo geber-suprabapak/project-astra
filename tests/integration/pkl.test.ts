@@ -121,10 +121,10 @@ describe('native authenticated PKL API', () => {
   )
   it('filters exact NIS inside the protected student ownership scope', async () => {
     const env = await environment()
-    expect((await (await env.request('/students?nis=001','student')).json()).data).toHaveLength(1)
-    expect((await (await env.request('/students?nis=002','student')).json()).data).toHaveLength(0)
-    expect((await (await env.request('/students?nis=002','admin')).json()).data).toHaveLength(1)
-    expect((await env.request('/industries?nis=001','admin')).status).toBe(422)
+    expect((await (await env.request('/students?nis=001', 'student')).json()).data).toHaveLength(1)
+    expect((await (await env.request('/students?nis=002', 'student')).json()).data).toHaveLength(0)
+    expect((await (await env.request('/students?nis=002', 'admin')).json()).data).toHaveLength(1)
+    expect((await env.request('/industries?nis=001', 'admin')).status).toBe(422)
   })
   it('checks in/out only for the student owner and keeps repeated check-in idempotent', async () => {
     const env = await environment()

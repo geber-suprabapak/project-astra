@@ -145,9 +145,13 @@ describe.skipIf(!databaseUrl)('PostgreSQL native PKL domain', () => {
     },
   )
   it('combines exact NIS lookup with student ownership rather than bypassing it', async () => {
-    expect((await list('students', student, { nis: String(pupil.nis) })).map(row => row.id)).toEqual([pupil.id])
+    expect(
+      (await list('students', student, { nis: String(pupil.nis) })).map((row) => row.id),
+    ).toEqual([pupil.id])
     expect(await list('students', student, { nis: String(otherPupil.nis) })).toHaveLength(0)
-    expect((await list('students', admin, { nis: String(otherPupil.nis) })).map(row => row.id)).toEqual([otherPupil.id])
+    expect(
+      (await list('students', admin, { nis: String(otherPupil.nis) })).map((row) => row.id),
+    ).toEqual([otherPupil.id])
   })
   it('keeps monitoring read-only and counts independently of pagination', async () => {
     const query = validatePklQuery('internships', {
