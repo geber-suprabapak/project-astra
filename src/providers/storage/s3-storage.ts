@@ -1,250 +1,113 @@
-import { createHash, createHmac } from 'node:crypto'
 import { env } from '../../config/env.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { logger } from '../../lib/logging/logger.js'
 import { getRedisClient } from '../../clients/redis.js'
-import type { ObjectStorage } from '../types.js'
+import type { FilePurpose, ObjectStorage } from '../types.js'
+import {
+  executeS3Request,
+  extFromContentType,
+  signS3Url,
+  type RedisCacheClient,
+  type S3EndpointConfig,
+  type S3ObjectStorageOptions,
+} from './s3-signing.js'
+
+export type { RedisCacheClient, S3ObjectStorageOptions }
 
 const AVATAR_TTL_SECONDS = 86400 // 24h
 const SIGNED_AVATAR_URL_CACHE_TTL_SECONDS = 43200 // 12h (well within 24h SigV4 expiration)
 const PERMIT_TTL_SECONDS = 604800 // 7 days
 const SIGNED_PERMIT_URL_CACHE_TTL_SECONDS = 7200 // 2h
 
-export type RedisCacheClient = {
-  isOpen: boolean
-  get(key: string): Promise<string | null>
-  set(key: string, value: string, options?: { EX?: number }): Promise<string | null>
-  del(key: string): Promise<number>
-}
-
-export interface S3ObjectStorageOptions {
-  endpoint?: string
-  region?: string
-  accessKeyId?: string
-  secretAccessKey?: string
-  bucketAvatars?: string
-  bucketPermits?: string
-  bucketAdiwiyata?: string
-  forcePathStyle?: boolean
-  publicUrl?: string
-  redisClient?: RedisCacheClient | null
-}
-
-function sha256(data: string | Buffer): string {
-  return createHash('sha256').update(data).digest('hex')
-}
-
-function hmacSha256(key: Buffer | string, data: string): Buffer {
-  return createHmac('sha256', key).update(data).digest()
-}
-
-function getSigningKey(
-  secretKey: string,
-  dateStamp: string,
-  region: string,
-  service: string,
-): Buffer {
-  const kDate = hmacSha256(`AWS4${secretKey}`, dateStamp)
-  const kRegion = hmacSha256(kDate, region)
-  const kService = hmacSha256(kRegion, service)
-  return hmacSha256(kService, 'aws4_request')
-}
-
-function extFromContentType(contentType: string): string {
-  if (contentType === 'image/png') return 'png'
-  if (contentType === 'image/webp') return 'webp'
-  return 'jpg'
-}
-
 export class S3ObjectStorage implements ObjectStorage {
-  private readonly endpoint: string
-  private readonly region: string
-  private readonly accessKeyId: string
-  private readonly secretAccessKey: string
+  private readonly config: S3EndpointConfig
   private readonly bucketAvatars: string
   private readonly bucketPermits: string
   private readonly bucketAdiwiyata: string
-  private readonly forcePathStyle: boolean
-  private readonly publicUrl: string
   private readonly redisClient: RedisCacheClient | null
 
   constructor(options: S3ObjectStorageOptions = {}) {
-    this.endpoint = (options.endpoint ?? env.s3Endpoint).replace(/\/$/, '')
-    this.region = options.region ?? env.s3Region
-    this.accessKeyId = options.accessKeyId ?? env.s3AccessKeyId
-    this.secretAccessKey = options.secretAccessKey ?? env.s3SecretAccessKey
+    const endpoint = (options.endpoint ?? env.s3Endpoint).replace(/\/$/, '')
+    this.config = {
+      endpoint,
+      publicUrl: (options.publicUrl ?? env.s3PublicUrl ?? endpoint).replace(/\/$/, ''),
+      region: options.region ?? env.s3Region,
+      accessKeyId: options.accessKeyId ?? env.s3AccessKeyId,
+      secretAccessKey: options.secretAccessKey ?? env.s3SecretAccessKey,
+      forcePathStyle: options.forcePathStyle ?? env.s3ForcePathStyle,
+    }
     this.bucketAvatars = options.bucketAvatars ?? env.s3BucketAvatars
     this.bucketPermits = options.bucketPermits ?? env.s3BucketPermits
     this.bucketAdiwiyata = options.bucketAdiwiyata ?? env.s3BucketAdiwiyata
-    this.forcePathStyle = options.forcePathStyle ?? env.s3ForcePathStyle
-    this.publicUrl = (options.publicUrl ?? env.s3PublicUrl ?? this.endpoint).replace(/\/$/, '')
     this.redisClient = options.redisClient !== undefined ? options.redisClient : getRedisClient()
   }
 
-  private buildObjectUrl(bucket: string, key: string, usePublic = false): URL {
-    const base = usePublic ? this.publicUrl : this.endpoint
-    const encodedKey = key.split('/').map(encodeURIComponent).join('/')
-    if (this.forcePathStyle) {
-      return new URL(`${base}/${bucket}/${encodedKey}`)
+  private async uploadObject(
+    bucket: string,
+    path: string,
+    file: Buffer,
+    contentType: string,
+    label: string,
+  ): Promise<void> {
+    try {
+      const response = await executeS3Request(this.config, 'PUT', bucket, path, file, contentType)
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '')
+        logger.error({ status: response.status, errorText }, `S3 ${label} upload failed`)
+        throw AppError.storageUploadFailed()
+      }
+    } catch (err) {
+      if (err instanceof AppError) throw err
+      logger.error({ err }, `S3 ${label} upload failed with unexpected error`)
+      throw AppError.storageUploadFailed()
     }
-    const host = new URL(base).host
-    return new URL(`${new URL(base).protocol}//${bucket}.${host}/${encodedKey}`)
   }
 
-  private signUrl(
+  private async getSignedCachedUrl(
     bucket: string,
-    key: string,
-    expiresInSeconds: number,
-    method: 'GET' | 'PUT' = 'GET',
-    contentType?: string,
-  ): string {
-    const now = new Date()
-    const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '')
-    const dateStamp = amzDate.slice(0, 8)
-    const credential = `${this.accessKeyId}/${dateStamp}/${this.region}/s3/aws4_request`
+    path: string,
+    cacheKeyPrefix: string,
+    urlTtlSeconds: number,
+    cacheTtlSeconds: number,
+    label: string,
+  ): Promise<string | null> {
+    if (!path) return null
+    const cacheKey = `${cacheKeyPrefix}:${path}`
+    const redis = this.redisClient
 
-    const targetUrl = this.buildObjectUrl(bucket, key, true)
-    const host = targetUrl.host
-
-    const normalizedContentType = contentType?.trim()
-    const signedHeaders = normalizedContentType ? 'content-type;host' : 'host'
-    const canonicalHeaders = normalizedContentType
-      ? `content-type:${normalizedContentType}\nhost:${host}\n`
-      : `host:${host}\n`
-
-    const queryParams = {
-      'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
-      'X-Amz-Credential': credential,
-      'X-Amz-Date': amzDate,
-      'X-Amz-Expires': expiresInSeconds.toString(),
-      'X-Amz-SignedHeaders': signedHeaders,
-    }
-
-    const canonicalQuery = Object.entries(queryParams)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-      .join('&')
-
-    const canonicalUri = targetUrl.pathname
-    const payloadHash = 'UNSIGNED-PAYLOAD'
-
-    const canonicalRequest = [
-      method,
-      canonicalUri,
-      canonicalQuery,
-      canonicalHeaders,
-      signedHeaders,
-      payloadHash,
-    ].join('\n')
-
-    const stringToSign = [
-      'AWS4-HMAC-SHA256',
-      amzDate,
-      `${dateStamp}/${this.region}/s3/aws4_request`,
-      sha256(canonicalRequest),
-    ].join('\n')
-
-    const signingKey = getSigningKey(this.secretAccessKey, dateStamp, this.region, 's3')
-    const signature = hmacSha256(signingKey, stringToSign).toString('hex')
-
-    return `${targetUrl.origin}${canonicalUri}?${canonicalQuery}&X-Amz-Signature=${signature}`
-  }
-
-  private async executeS3Request(
-    method: 'PUT' | 'DELETE' | 'GET' | 'HEAD',
-    bucket: string,
-    key: string,
-    body?: Buffer,
-    contentType?: string,
-    timeoutMs: number = env.storageUploadTimeoutMs,
-  ): Promise<Response> {
-    const url = this.buildObjectUrl(bucket, key, false)
-    const now = new Date()
-    const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '')
-    const dateStamp = amzDate.slice(0, 8)
-    const credential = `${this.accessKeyId}/${dateStamp}/${this.region}/s3/aws4_request`
-    const payloadHash = body ? sha256(body) : sha256('')
-
-    const headers: Record<string, string> = {}
-    headers.host = url.host
-    headers['x-amz-date'] = amzDate
-    headers['x-amz-content-sha256'] = payloadHash
-    if (contentType) {
-      headers['content-type'] = contentType
-    }
-
-    const headerKeys = Object.keys(headers).sort()
-    const canonicalHeaders = headerKeys.map((k) => `${k.toLowerCase()}:${headers[k]}\n`).join('')
-    const signedHeaders = headerKeys.map((k) => k.toLowerCase()).join(';')
-
-    const canonicalRequest = [
-      method,
-      url.pathname,
-      '',
-      canonicalHeaders,
-      signedHeaders,
-      payloadHash,
-    ].join('\n')
-
-    const stringToSign = [
-      'AWS4-HMAC-SHA256',
-      amzDate,
-      `${dateStamp}/${this.region}/s3/aws4_request`,
-      sha256(canonicalRequest),
-    ].join('\n')
-
-    const signingKey = getSigningKey(this.secretAccessKey, dateStamp, this.region, 's3')
-    const signature = hmacSha256(signingKey, stringToSign).toString('hex')
-
-    const authorization = `AWS4-HMAC-SHA256 Credential=${credential}, SignedHeaders=${signedHeaders}, Signature=${signature}`
-    headers['Authorization'] = authorization
-
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
-
-    const init: RequestInit = {
-      method,
-      headers,
-      signal: controller.signal,
-    }
-    if (body && method !== 'GET' && method !== 'HEAD') {
-      init.body = new Uint8Array(body)
+    if (redis?.isOpen) {
+      try {
+        const cached = await redis.get(cacheKey)
+        if (cached) return cached
+      } catch (err) {
+        logger.warn({ err, path }, `Failed to read signed ${label} URL from cache`)
+      }
     }
 
     try {
-      return await fetch(url.toString(), init)
-    } finally {
-      clearTimeout(timer)
+      const signed = signS3Url(this.config, bucket, path, urlTtlSeconds)
+      if (redis?.isOpen && signed) {
+        try {
+          await redis.set(cacheKey, signed, { EX: cacheTtlSeconds })
+        } catch (err) {
+          logger.warn({ err, path }, `Failed to cache signed ${label} URL`)
+        }
+      }
+      return signed
+    } catch {
+      return null
     }
   }
 
   async uploadAvatar(userId: string, file: Buffer, contentType: string): Promise<string> {
     const ext = extFromContentType(contentType)
     const path = `${userId}/avatar.${ext}`
-
-    try {
-      const response = await this.executeS3Request(
-        'PUT',
-        this.bucketAvatars,
-        path,
-        file,
-        contentType,
-      )
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => '')
-        logger.error({ status: response.status, errorText }, 'S3 avatar upload failed')
-        throw AppError.storageUploadFailed()
-      }
-      const redis = this.redisClient
-      if (redis?.isOpen) {
-        await redis.del(`astra:signed_avatar:${path}`).catch(() => {})
-      }
-      return path
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      logger.error({ err }, 'S3 avatar upload failed with unexpected error')
-      throw AppError.storageUploadFailed()
+    await this.uploadObject(this.bucketAvatars, path, file, contentType, 'avatar')
+    const redis = this.redisClient
+    if (redis?.isOpen) {
+      await redis.del(`astra:signed_avatar:${path}`).catch(() => {})
     }
+    return path
   }
 
   async deleteAvatar(userId: string): Promise<void> {
@@ -252,7 +115,7 @@ export class S3ObjectStorage implements ObjectStorage {
     const redis = this.redisClient
     await Promise.allSettled([
       ...extensions.map((ext) =>
-        this.executeS3Request('DELETE', this.bucketAvatars, `${userId}/avatar.${ext}`),
+        executeS3Request(this.config, 'DELETE', this.bucketAvatars, `${userId}/avatar.${ext}`),
       ),
       ...(redis?.isOpen
         ? extensions.map((ext) =>
@@ -263,86 +126,32 @@ export class S3ObjectStorage implements ObjectStorage {
   }
 
   async getSignedAvatarUrl(path: string): Promise<string | null> {
-    if (!path) return null
-    const cacheKey = `astra:signed_avatar:${path}`
-    const redis = this.redisClient
-
-    if (redis?.isOpen) {
-      try {
-        const cached = await redis.get(cacheKey)
-        if (cached) return cached
-      } catch (err) {
-        logger.warn({ err, path }, 'Failed to read signed avatar URL from cache')
-      }
-    }
-
-    try {
-      const signed = this.signUrl(this.bucketAvatars, path, AVATAR_TTL_SECONDS)
-      if (redis?.isOpen && signed) {
-        try {
-          await redis.set(cacheKey, signed, { EX: SIGNED_AVATAR_URL_CACHE_TTL_SECONDS })
-        } catch (err) {
-          logger.warn({ err, path }, 'Failed to cache signed avatar URL')
-        }
-      }
-      return signed
-    } catch {
-      return null
-    }
+    return this.getSignedCachedUrl(
+      this.bucketAvatars,
+      path,
+      'astra:signed_avatar',
+      AVATAR_TTL_SECONDS,
+      SIGNED_AVATAR_URL_CACHE_TTL_SECONDS,
+      'avatar',
+    )
   }
 
   async uploadPermitAttachment(userId: string, file: Buffer, contentType: string): Promise<string> {
     const ext = extFromContentType(contentType)
     const path = `${userId}/${Date.now()}.${ext}`
-
-    try {
-      const response = await this.executeS3Request(
-        'PUT',
-        this.bucketPermits,
-        path,
-        file,
-        contentType,
-      )
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => '')
-        logger.error({ status: response.status, errorText }, 'S3 permit attachment upload failed')
-        throw AppError.storageUploadFailed()
-      }
-      return path
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      logger.error({ err }, 'S3 permit attachment upload failed with unexpected error')
-      throw AppError.storageUploadFailed()
-    }
+    await this.uploadObject(this.bucketPermits, path, file, contentType, 'permit attachment')
+    return path
   }
 
   async getSignedPermitUrl(path: string): Promise<string | null> {
-    if (!path) return null
-    const cacheKey = `astra:signed_permit:${path}`
-    const redis = this.redisClient
-
-    if (redis?.isOpen) {
-      try {
-        const cached = await redis.get(cacheKey)
-        if (cached) return cached
-      } catch (err) {
-        logger.warn({ err, path }, 'Failed to read signed permit URL from cache')
-      }
-    }
-
-    try {
-      const signed = this.signUrl(this.bucketPermits, path, PERMIT_TTL_SECONDS)
-      if (redis?.isOpen && signed) {
-        try {
-          await redis.set(cacheKey, signed, { EX: SIGNED_PERMIT_URL_CACHE_TTL_SECONDS })
-        } catch (err) {
-          logger.warn({ err, path }, 'Failed to cache signed permit URL')
-        }
-      }
-      return signed
-    } catch {
-      return null
-    }
+    return this.getSignedCachedUrl(
+      this.bucketPermits,
+      path,
+      'astra:signed_permit',
+      PERMIT_TTL_SECONDS,
+      SIGNED_PERMIT_URL_CACHE_TTL_SECONDS,
+      'permit',
+    )
   }
 
   async deletePermitAttachment(path: string): Promise<void> {
@@ -352,7 +161,7 @@ export class S3ObjectStorage implements ObjectStorage {
       await redis.del(`astra:signed_permit:${path}`).catch(() => {})
     }
     try {
-      await this.executeS3Request('DELETE', this.bucketPermits, path)
+      await executeS3Request(this.config, 'DELETE', this.bucketPermits, path)
     } catch (err) {
       logger.warn({ err, path }, 'Failed to delete permit attachment from S3')
     }
@@ -366,26 +175,8 @@ export class S3ObjectStorage implements ObjectStorage {
   ): Promise<string> {
     const ext = extFromContentType(contentType)
     const path = `${userId}/face_${imageIndex}.${ext}`
-
-    try {
-      const response = await this.executeS3Request(
-        'PUT',
-        this.bucketAvatars,
-        path,
-        file,
-        contentType,
-      )
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => '')
-        logger.error({ status: response.status, errorText }, 'S3 face enrollment upload failed')
-        throw AppError.storageUploadFailed()
-      }
-      return path
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      logger.error({ err }, 'S3 face enrollment upload failed with unexpected error')
-      throw AppError.storageUploadFailed()
-    }
+    await this.uploadObject(this.bucketAvatars, path, file, contentType, 'face enrollment')
+    return path
   }
 
   async deleteFaceEnrollmentImages(userId: string): Promise<void> {
@@ -394,7 +185,7 @@ export class S3ObjectStorage implements ObjectStorage {
     for (let i = 1; i <= 20; i++) {
       for (const ext of extensions) {
         deletePromises.push(
-          this.executeS3Request('DELETE', this.bucketAvatars, `${userId}/face_${i}.${ext}`),
+          executeS3Request(this.config, 'DELETE', this.bucketAvatars, `${userId}/face_${i}.${ext}`),
         )
       }
     }
@@ -402,50 +193,32 @@ export class S3ObjectStorage implements ObjectStorage {
   }
 
   async uploadAdiwiyataReport(path: string, file: Buffer): Promise<void> {
-    try {
-      const response = await this.executeS3Request(
-        'PUT',
-        this.bucketAdiwiyata,
-        path,
-        file,
-        'image/jpeg',
-      )
-      if (!response.ok) {
-        logger.error({ status: response.status }, 'S3 Adiwiyata report upload failed')
-        throw AppError.storageUploadFailed()
-      }
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      logger.error({ err }, 'S3 Adiwiyata report upload failed with unexpected error')
-      throw AppError.storageUploadFailed()
-    }
+    await this.uploadObject(this.bucketAdiwiyata, path, file, 'image/jpeg', 'Adiwiyata report')
   }
 
   async getSignedAdiwiyataReportUrl(path: string, expiresInSeconds = 900): Promise<string | null> {
     if (!path || expiresInSeconds <= 0) return null
     try {
-      return this.signUrl(this.bucketAdiwiyata, path, expiresInSeconds)
+      return signS3Url(this.config, this.bucketAdiwiyata, path, expiresInSeconds)
     } catch {
       return null
     }
   }
 
-  private bucketForPurpose(
-    purpose: 'avatar' | 'permit_attachment' | 'face_enrollment' | 'adiwiyata_report',
-  ): string {
+  private bucketForPurpose(purpose: FilePurpose): string {
     if (purpose === 'permit_attachment') return this.bucketPermits
     if (purpose === 'adiwiyata_report') return this.bucketAdiwiyata
     return this.bucketAvatars
   }
 
   async statObject(
-    purpose: 'avatar' | 'permit_attachment' | 'face_enrollment' | 'adiwiyata_report',
+    purpose: FilePurpose,
     path: string,
   ): Promise<{ sizeBytes: number; contentType: string } | null> {
     if (!path) return null
     let response: Response
     try {
-      response = await this.executeS3Request('HEAD', this.bucketForPurpose(purpose), path)
+      response = await executeS3Request(this.config, 'HEAD', this.bucketForPurpose(purpose), path)
     } catch (err) {
       logger.error({ err, purpose }, 'S3 object HEAD failed with unexpected error')
       throw AppError.dependencyUnavailable('object storage')
@@ -464,13 +237,10 @@ export class S3ObjectStorage implements ObjectStorage {
     return { sizeBytes, contentType: response.headers.get('content-type') ?? '' }
   }
 
-  async deleteObject(
-    purpose: 'avatar' | 'permit_attachment' | 'face_enrollment' | 'adiwiyata_report',
-    path: string,
-  ): Promise<void> {
+  async deleteObject(purpose: FilePurpose, path: string): Promise<void> {
     const bucket = this.bucketForPurpose(purpose)
     try {
-      const response = await this.executeS3Request('DELETE', bucket, path)
+      const response = await executeS3Request(this.config, 'DELETE', bucket, path)
       if (!response.ok) {
         logger.error({ status: response.status, purpose }, 'S3 object deletion failed')
         throw AppError.dependencyUnavailable('object storage')
@@ -493,7 +263,7 @@ export class S3ObjectStorage implements ObjectStorage {
   async getSignedFaceEnrollmentUrl(path: string): Promise<string | null> {
     if (!path) return null
     try {
-      return this.signUrl(this.bucketAvatars, path, AVATAR_TTL_SECONDS)
+      return signS3Url(this.config, this.bucketAvatars, path, AVATAR_TTL_SECONDS)
     } catch {
       return null
     }
@@ -507,12 +277,12 @@ export class S3ObjectStorage implements ObjectStorage {
   }): Promise<string> {
     const bucket = params.bucket ?? this.bucketAvatars
     const ttl = params.expiresInSeconds ?? 900
-    return this.signUrl(bucket, params.key, ttl, 'PUT', params.contentType)
+    return signS3Url(this.config, bucket, params.key, ttl, 'PUT', params.contentType)
   }
 
   async uploadPublicFile(path: string, file: Buffer, contentType: string): Promise<string> {
     const bucket = this.bucketAvatars
-    const response = await this.executeS3Request('PUT', bucket, path, file, contentType)
+    const response = await executeS3Request(this.config, 'PUT', bucket, path, file, contentType)
     if (!response.ok) {
       const errorText = await response.text().catch(() => '')
       logger.error({ status: response.status, errorText }, 'S3 public upload failed')
@@ -523,15 +293,16 @@ export class S3ObjectStorage implements ObjectStorage {
 
   getPublicUrl(path: string): string {
     const cleanPath = path.replace(/^\//, '')
-    if (this.publicUrl) {
-      return `${this.publicUrl.replace(/\/$/, '')}/${this.bucketAvatars}/${cleanPath}`
+    if (this.config.publicUrl) {
+      return `${this.config.publicUrl.replace(/\/$/, '')}/${this.bucketAvatars}/${cleanPath}`
     }
-    return `${this.endpoint}/${this.bucketAvatars}/${cleanPath}`
+    return `${this.config.endpoint}/${this.bucketAvatars}/${cleanPath}`
   }
 
   async checkHealth(): Promise<boolean> {
     try {
-      const res = await this.executeS3Request(
+      const res = await executeS3Request(
+        this.config,
         'HEAD',
         this.bucketAvatars,
         '',

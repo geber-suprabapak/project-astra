@@ -1,790 +1,143 @@
-import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyOptions } from 'jose'
-import { z } from 'zod'
 import { env } from '../../config/env.js'
-import { AppError } from '../../lib/errors/app-error.js'
-import { logger } from '../../lib/logging/logger.js'
-import {
-  identityRoleSchema,
-  type CreateStudentIdentityParams,
-  type IdentityProvider,
-  type IdentityRole,
-  type IdentityUser,
-  type UserMetadata,
+import type {
+  CreateStudentIdentityParams,
+  IdentityProvider,
+  IdentityRole,
+  IdentityUser,
+  UserMetadata,
 } from '../types.js'
-import { isMfaVerified } from './claims.js'
+import {
+  deleteUser,
+  requestPasswordResetEmail,
+  revokeUserSessions,
+  setUserSuspended,
+  updatePassword,
+  updateUserEmail,
+  updateUserMetadata,
+  verifyPassword,
+} from './logto-account.js'
+import { LogtoManagementClient } from './logto-client.js'
+import {
+  assignRoles,
+  assignUserRole,
+  createCmsIdentity,
+  createStaffIdentity,
+  createStudentIdentity,
+  revokeUserRole,
+} from './logto-provisioning.js'
+import {
+  getOidcVerificationFailureMetadata,
+  OidcTokenVerifier,
+  type OidcIdentityProviderOptions,
+} from './oidc-verification.js'
 
-export interface OidcIdentityProviderOptions {
-  issuer?: string
-  jwksUrl?: string
-  jwtSecret?: string
-  audience?: string
-  logtoEndpoint?: string
-  logtoAppId?: string
-  logtoCmsAccessRoleName?: string
-  logtoAppSecret?: string
-  legacyJwtSecret?: string
-  legacyIssuer?: string
-  legacyAudience?: string
-  legacyBridgeExpiresAt?: string
-}
-
-type LogtoCreateUserPayload = {
-  username?: string
-  primaryEmail: string
-  password?: string
-  name?: string
-  isSuspended: boolean
-  customData: { nis?: string }
-}
-
-type OidcVerificationError = Error & {
-  code?: string
-  claim?: string
-}
-
-type OidcVerificationFailureMetadata = {
-  name: string
-  code?: string
-  claim?: string
-}
-
-const safeOidcClaimNames = new Set(['iss', 'aud', 'exp', 'nbf'])
-
-export function getOidcVerificationFailureMetadata(
-  error: OidcVerificationError,
-): OidcVerificationFailureMetadata {
-  const metadata: OidcVerificationFailureMetadata = { name: error.name }
-  if (error.code) metadata.code = error.code
-  if (error.claim && safeOidcClaimNames.has(error.claim)) metadata.claim = error.claim
-  return metadata
-}
+export { getOidcVerificationFailureMetadata, type OidcIdentityProviderOptions }
 
 export class OidcIdentityProvider implements IdentityProvider {
-  private readonly issuer?: string
-  private readonly jwksUrl?: string
-  private readonly jwtSecret?: string
-  private readonly audience: string
-  private readonly logtoEndpoint?: string
-  private readonly logtoAppId?: string
-  private readonly logtoCmsAccessRoleName?: string
-  private readonly logtoAppSecret?: string
-  private readonly legacyJwtSecret?: string
-  private readonly legacyIssuer?: string
-  private readonly legacyAudience: string
-  private readonly legacyBridgeExpiresAt?: string
-  private jwksGetter: ReturnType<typeof createRemoteJWKSet> | null = null
+  private readonly verifier: OidcTokenVerifier
+  private readonly logtoClient: LogtoManagementClient
 
   constructor(options: OidcIdentityProviderOptions = {}) {
-    this.issuer = 'issuer' in options ? options.issuer : env.oidcIssuer
-    this.jwksUrl = 'jwksUrl' in options ? options.jwksUrl : env.oidcJwksUrl
-    this.jwtSecret = 'jwtSecret' in options ? options.jwtSecret : env.oidcJwtSecret
-    this.audience = options.audience ?? env.oidcAudience
-    this.logtoEndpoint = 'logtoEndpoint' in options ? options.logtoEndpoint : env.logtoEndpoint
-    this.logtoAppId = 'logtoAppId' in options ? options.logtoAppId : env.logtoAppId
-    this.logtoAppSecret = 'logtoAppSecret' in options ? options.logtoAppSecret : env.logtoAppSecret
-    this.logtoCmsAccessRoleName = options.logtoCmsAccessRoleName ?? env.logtoCmsAccessRoleName
-    this.legacyJwtSecret =
-      'legacyJwtSecret' in options ? options.legacyJwtSecret : env.legacySupabaseJwtSecret
-    this.legacyIssuer =
-      'legacyIssuer' in options ? options.legacyIssuer : env.legacySupabaseJwtIssuer
-    this.legacyAudience =
-      'legacyAudience' in options
-        ? (options.legacyAudience ?? 'authenticated')
-        : env.legacySupabaseJwtAudience
-    this.legacyBridgeExpiresAt =
-      'legacyBridgeExpiresAt' in options
-        ? options.legacyBridgeExpiresAt
-        : env.legacyAuthBridgeExpiresAt
+    this.verifier = new OidcTokenVerifier({
+      issuer: 'issuer' in options ? options.issuer : env.oidcIssuer,
+      jwksUrl: 'jwksUrl' in options ? options.jwksUrl : env.oidcJwksUrl,
+      jwtSecret: 'jwtSecret' in options ? options.jwtSecret : env.oidcJwtSecret,
+      audience: options.audience ?? env.oidcAudience,
+      legacyJwtSecret:
+        'legacyJwtSecret' in options ? options.legacyJwtSecret : env.legacySupabaseJwtSecret,
+      legacyIssuer: 'legacyIssuer' in options ? options.legacyIssuer : env.legacySupabaseJwtIssuer,
+      legacyAudience:
+        'legacyAudience' in options
+          ? (options.legacyAudience ?? 'authenticated')
+          : env.legacySupabaseJwtAudience,
+      legacyBridgeExpiresAt:
+        'legacyBridgeExpiresAt' in options
+          ? options.legacyBridgeExpiresAt
+          : env.legacyAuthBridgeExpiresAt,
+    })
+
+    this.logtoClient = new LogtoManagementClient({
+      logtoEndpoint: 'logtoEndpoint' in options ? options.logtoEndpoint : env.logtoEndpoint,
+      logtoAppId: 'logtoAppId' in options ? options.logtoAppId : env.logtoAppId,
+      logtoAppSecret: 'logtoAppSecret' in options ? options.logtoAppSecret : env.logtoAppSecret,
+      logtoCmsAccessRoleName: options.logtoCmsAccessRoleName ?? env.logtoCmsAccessRoleName,
+    })
   }
 
-  private getJwksGetter() {
-    if (!this.jwksGetter && this.jwksUrl) {
-      this.jwksGetter = createRemoteJWKSet(new URL(this.jwksUrl))
-    }
-    return this.jwksGetter
+  verifyToken(token: string): Promise<IdentityUser> {
+    return this.verifier.verifyToken(token)
   }
 
-  async verifyToken(token: string): Promise<IdentityUser> {
-    try {
-      if (!this.issuer) {
-        throw AppError.authInvalid('OIDC issuer configuration missing.')
-      }
-
-      const verifyOptions: JWTVerifyOptions = {
-        audience: this.audience,
-        issuer: this.issuer,
-        requiredClaims: ['exp'],
-      }
-
-      let payload: JWTPayload
-
-      if (this.jwtSecret) {
-        const secret = new TextEncoder().encode(this.jwtSecret)
-        const { payload: p } = await jwtVerify(token, secret, verifyOptions)
-        payload = p
-      } else {
-        const jwks = this.getJwksGetter()
-        if (!jwks) {
-          throw AppError.authInvalid('JWKS configuration missing.')
-        }
-        const { payload: p } = await jwtVerify(token, jwks, verifyOptions)
-        payload = p
-      }
-
-      const parsedSub = z.string().min(1).safeParse(payload.sub)
-      if (!parsedSub.success) {
-        throw AppError.authInvalid('Token missing subject claim.')
-      }
-
-      const parsedEmail = z.string().safeParse(payload.email)
-      const parsedRoles = z.array(identityRoleSchema).safeParse(payload.roles)
-      const parsedScope = z.string().min(1).safeParse(payload.scope)
-      if (!parsedScope.success) {
-        throw AppError.authInvalid('Token missing scope claim.')
-      }
-      const scopes = parsedScope.data.split(' ').filter(Boolean)
-      if (scopes.length === 0) {
-        throw AppError.authInvalid('Token missing scope claim.')
-      }
-      const parsedMfa = z.boolean().safeParse(payload.mfa_verified)
-      const parsedAmr = z.array(z.string().min(1)).safeParse(payload.amr)
-      const parsedMustChangePassword = z.boolean().safeParse(payload.must_change_password)
-      const issuedAt = z.number().int().nonnegative().safeParse(payload.iat)
-
-      return {
-        userId: parsedSub.data,
-        issuedAt: issuedAt.success ? issuedAt.data : undefined,
-        authSource: 'logto',
-        email: parsedEmail.success ? parsedEmail.data : null,
-        roles: parsedRoles.success ? parsedRoles.data : [],
-        scopes,
-        mfaVerified: isMfaVerified(
-          parsedMfa.success ? parsedMfa.data : undefined,
-          parsedAmr.success ? parsedAmr.data : undefined,
-        ),
-        mustChangePassword: parsedMustChangePassword.success
-          ? parsedMustChangePassword.data
-          : undefined,
-      }
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      // SAFETY: this branch narrows the caught value to Error; jose verification
-      // errors expose their optional machine-readable code as a string.
-      const verification =
-        err instanceof Error
-          ? getOidcVerificationFailureMetadata(err as OidcVerificationError)
-          : { name: 'UnknownError' }
-      logger.warn({ verification }, 'OIDC token verification failed')
-      throw AppError.authInvalid()
-    }
+  verifyLegacyToken(token: string): Promise<IdentityUser> {
+    return this.verifier.verifyLegacyToken(token)
   }
 
-  async verifyLegacyToken(token: string): Promise<IdentityUser> {
-    try {
-      if (!this.legacyJwtSecret || !this.legacyIssuer || !this.legacyBridgeExpiresAt) {
-        throw AppError.authInvalid('Legacy mobile authentication bridge is not configured.')
-      }
-      if (new Date(this.legacyBridgeExpiresAt).getTime() <= Date.now()) {
-        throw AppError.authInvalid('Legacy mobile authentication bridge has expired.')
-      }
-
-      const secret = new TextEncoder().encode(this.legacyJwtSecret)
-      const { payload } = await jwtVerify(token, secret, {
-        audience: this.legacyAudience,
-        issuer: this.legacyIssuer,
-        requiredClaims: ['exp', 'sub'],
-      })
-      // Loose UUID shape (zod 3 `z.string().uuid()` semantics): zod 4's uuid()
-      // additionally requires valid version/variant nibbles.
-      const parsedSub = z
-        .string()
-        .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)
-        .safeParse(payload.sub)
-      if (!parsedSub.success) {
-        throw AppError.authInvalid('Legacy token has an invalid subject claim.')
-      }
-      const appMetadata = z
-        .object({ role: z.string().optional() })
-        .passthrough()
-        .safeParse(payload.app_metadata)
-      if (!appMetadata.success || appMetadata.data.role !== 'siswa') {
-        throw AppError.forbidden('Legacy bridge accepts student mobile identities only.')
-      }
-      const parsedEmail = z.string().safeParse(payload.email)
-      return {
-        userId: parsedSub.data,
-        legacyUserId: parsedSub.data,
-        authSource: 'legacy_supabase',
-        email: parsedEmail.success ? parsedEmail.data : null,
-        roles: ['student'],
-        scopes: ['legacy:mobile'],
-        mfaVerified: false,
-      }
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      throw AppError.authInvalid()
-    }
+  verifyPassword(email: string, password: string): Promise<void> {
+    return verifyPassword(this.logtoClient, email, password)
   }
 
-  async verifyPassword(email: string, password: string): Promise<void> {
-    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
-      throw AppError.internal('Identity provider management API is not configured.')
-    }
-
-    try {
-      const response = await fetch(
-        `${this.logtoEndpoint.replace(/\/$/, '')}/api/interaction/verification`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password }),
-        },
-      )
-      if (!response.ok) {
-        throw AppError.authInvalid('Current password is incorrect.')
-      }
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      logger.error({ err, email }, 'Logto password verification failed with error')
-      throw AppError.authInvalid('Current password is incorrect.')
-    }
+  updatePassword(userId: string, newPassword: string): Promise<void> {
+    return updatePassword(this.logtoClient, userId, newPassword)
   }
 
-  async updatePassword(userId: string, newPassword: string): Promise<void> {
-    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
-      throw AppError.internal('Identity provider management API is not configured.')
-    }
-
-    try {
-      const token = await this.getManagementToken()
-      const response = await fetch(
-        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/password`,
-        {
-          method: 'PATCH',
-          signal: AbortSignal.timeout(10000),
-          redirect: 'error',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ password: newPassword }),
-        },
-      )
-      if (!response.ok) {
-        logger.error(
-          { userId, status: response.status },
-          'Logto update password returned error status',
-        )
-        throw AppError.internal('Failed to update password in identity provider.')
-      }
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      logger.error({ err, userId }, 'Logto update password error')
-      throw AppError.internal('Failed to update password in identity provider.')
-    }
+  updateUserMetadata(userId: string, metadata: UserMetadata): Promise<void> {
+    return updateUserMetadata(this.logtoClient, userId, metadata)
   }
 
-  async updateUserMetadata(userId: string, metadata: UserMetadata): Promise<void> {
-    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
-      throw AppError.internal('Identity provider management API is not configured.')
-    }
-
-    try {
-      const token = await this.getManagementToken()
-      const response = await fetch(
-        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/custom-data`,
-        {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ customData: metadata }),
-        },
-      )
-      if (!response.ok) {
-        logger.error(
-          { userId, status: response.status },
-          'Logto update user metadata returned error status',
-        )
-        throw AppError.internal('Failed to update user metadata in identity provider.')
-      }
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      logger.error({ err, userId }, 'Logto update user metadata error')
-      throw AppError.internal('Failed to update user metadata in identity provider.')
-    }
-  }
-
-  async createCmsIdentity(params: {
+  createCmsIdentity(params: {
     email: string
     fullName: string
     password: string
   }): Promise<{ userId: string }> {
-    if (
-      !this.logtoEndpoint ||
-      !this.logtoAppId ||
-      !this.logtoAppSecret ||
-      !this.logtoCmsAccessRoleName
-    )
-      throw AppError.dependencyUnavailable('CMS identity provisioning')
-    const token = await this.getManagementToken()
-    const roleIds = await this.getRoleIds([this.logtoCmsAccessRoleName], token)
-    const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
-    const response = await fetch(`${this.logtoEndpoint.replace(/\/$/, '')}/api/users`, {
-      method: 'POST',
-      headers,
-      signal: AbortSignal.timeout(10000),
-      redirect: 'error',
-      body: JSON.stringify({
-        primaryEmail: params.email,
-        name: params.fullName,
-        password: params.password,
-        isSuspended: true,
-      }),
-    })
-    if ([409, 422].includes(response.status))
-      throw AppError.conflict(
-        'Identity could not be created; verify the email and password policy. Existing identities are never claimed automatically.',
-      )
-    if (!response.ok) throw AppError.dependencyUnavailable('CMS identity provisioning')
-    const { id } = z.object({ id: z.string().min(1) }).parse(await response.json())
-    const assigned = await fetch(
-      `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(id)}/roles`,
-      {
-        method: 'POST',
-        headers,
-        signal: AbortSignal.timeout(10000),
-        redirect: 'error',
-        body: JSON.stringify({ roleIds }),
-      },
-    )
-    if (!assigned.ok) {
-      logger.error(
-        { userId: id, status: assigned.status },
-        'CMS identity remains suspended after role assignment failure',
-      )
-      throw AppError.dependencyUnavailable('CMS identity provisioning')
-    }
-    return { userId: id }
+    return createCmsIdentity(this.logtoClient, params)
   }
 
-  async createStaffIdentity(params: {
+  createStaffIdentity(params: {
     email: string
     fullName: string
     role: string
     password?: string
   }): Promise<{ userId: string; email: string }> {
-    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
-      return {
-        userId: `logto-staff-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        email: params.email,
-      }
-    }
-
-    try {
-      const token = await this.getManagementToken()
-      const response = await fetch(`${this.logtoEndpoint.replace(/\/$/, '')}/api/users`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          primaryEmail: params.email,
-          name: params.fullName,
-          password: params.password,
-          customData: { role: params.role },
-        }),
-      })
-      if (!response.ok) {
-        logger.error({ status: response.status, email: params.email }, 'Logto create user failed')
-        if (response.status === 409 || response.status === 422) {
-          throw AppError.conflict(`Identity already exists for email "${params.email}".`)
-        }
-        throw AppError.internal('Failed to create user in identity provider.')
-      }
-      // SAFETY: response JSON contains id from Logto user creation
-      const data = (await response.json()) as { id: string }
-      return { userId: data.id, email: params.email }
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      logger.error({ err, email: params.email }, 'Logto create user error')
-      throw AppError.internal('Failed to create user in identity provider.')
-    }
+    return createStaffIdentity(this.logtoClient, params)
   }
 
-  async requestPasswordResetEmail(email: string): Promise<void> {
-    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
-      return
-    }
-
-    try {
-      const response = await fetch(
-        `${this.logtoEndpoint.replace(/\/$/, '')}/api/interaction/verification/password-reset`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email }),
-        },
-      )
-      if (!response.ok) {
-        logger.warn({ status: response.status, email }, 'Logto password reset email request failed')
-      }
-    } catch (err) {
-      logger.warn({ err, email }, 'Logto password reset email error')
-    }
+  requestPasswordResetEmail(email: string): Promise<void> {
+    return requestPasswordResetEmail(this.logtoClient, email)
   }
 
-  async revokeUserSessions(userId: string): Promise<void> {
-    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
-      throw AppError.internal('Identity provider management API is not configured.')
-    }
-
-    try {
-      const token = await this.getManagementToken()
-      const url = `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/sessions`
-      const headers = { Authorization: `Bearer ${token}` }
-      const response = await fetch(url, { headers })
-      if (!response.ok) throw AppError.internal('Failed to list identity provider sessions.')
-      const { sessions } = z
-        .object({
-          sessions: z.array(z.object({ payload: z.object({ uid: z.string().min(1) }) })),
-        })
-        .parse(await response.json())
-      for (const session of sessions) {
-        const revoked = await fetch(
-          `${url}/${encodeURIComponent(session.payload.uid)}?revokeGrantsTarget=all`,
-          { method: 'DELETE', headers },
-        )
-        if (!revoked.ok && revoked.status !== 404) {
-          throw AppError.internal('Failed to revoke identity provider session.')
-        }
-      }
-    } catch (err) {
-      logger.warn({ err, userId }, 'Logto sign-out error during session revocation')
-      throw AppError.internal('Failed to revoke identity provider sessions.')
-    }
+  revokeUserSessions(userId: string): Promise<void> {
+    return revokeUserSessions(this.logtoClient, userId)
   }
 
-  async assignRoles(userId: string, roles: readonly string[]): Promise<void> {
-    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
-      throw AppError.internal('Identity provider management API is not configured.')
-    }
-
-    try {
-      const token = await this.getManagementToken()
-      const roleIds = await this.getRoleIds(roles, token)
-      const response = await fetch(
-        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/roles`,
-        {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ roleIds }),
-        },
-      )
-      if (!response.ok) throw AppError.internal('Failed to assign roles in identity provider.')
-    } catch (err) {
-      logger.warn({ err, userId, roles }, 'Logto role assignment error')
-      throw AppError.internal('Failed to assign roles in identity provider.')
-    }
+  assignRoles(userId: string, roles: readonly string[]): Promise<void> {
+    return assignRoles(this.logtoClient, userId, roles)
   }
 
-  private async getRoleIds(names: readonly string[], token: string): Promise<string[]> {
-    const ids = new Map<string, string>()
-    for (let page = 1; names.some((name) => !ids.has(name)); page++) {
-      const response = await fetch(
-        `${this.logtoEndpoint?.replace(/\/$/, '')}/api/roles?type=User&page_size=100&page=${page}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          signal: AbortSignal.timeout(10000),
-          redirect: 'error',
-        },
-      )
-      if (!response.ok) throw AppError.internal('Failed to retrieve identity provider roles.')
-      const roles = z
-        .array(z.object({ id: z.string(), name: z.string() }))
-        .parse(await response.json())
-      for (const role of roles) ids.set(role.name, role.id)
-      if (roles.length < 100) break
-    }
-    return names.map((name) => {
-      const id = ids.get(name)
-      if (!id) throw AppError.internal(`Identity provider role is not configured: ${name}`)
-      return id
-    })
+  createStudentIdentity(params: CreateStudentIdentityParams): Promise<{ userId: string }> {
+    return createStudentIdentity(this.logtoClient, params)
   }
 
-  private m2mToken: string | null = null
-  private m2mTokenExpiresAt = 0
-
-  private async getManagementToken(): Promise<string> {
-    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
-      throw AppError.internal('Identity provider management API is not configured.')
-    }
-
-    if (this.m2mToken && Date.now() < this.m2mTokenExpiresAt - 60000) {
-      return this.m2mToken
-    }
-
-    const credentials = Buffer.from(`${this.logtoAppId}:${this.logtoAppSecret}`).toString('base64')
-    const response = await fetch(`${this.logtoEndpoint.replace(/\/$/, '')}/oidc/token`, {
-      method: 'POST',
-      signal: AbortSignal.timeout(10000),
-      redirect: 'error',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: `Basic ${credentials}`,
-      },
-      body: 'grant_type=client_credentials&resource=https://default.logto.app/api&scope=all',
-    })
-
-    if (!response.ok) {
-      logger.error({ status: response.status }, 'Failed to fetch Logto management token')
-      throw AppError.internal('Failed to authenticate with identity provider management API.')
-    }
-
-    // SAFETY: Successful Logto token responses contain a string access_token and optional expires_in.
-    const data = (await response.json()) as { access_token: string; expires_in?: number }
-    this.m2mToken = data.access_token
-    this.m2mTokenExpiresAt = Date.now() + (data.expires_in ?? 3600) * 1000
-    return this.m2mToken
+  setUserSuspended(userId: string, suspended: boolean): Promise<void> {
+    return setUserSuspended(this.logtoClient, userId, suspended)
   }
 
-  async createStudentIdentity(params: CreateStudentIdentityParams): Promise<{ userId: string }> {
-    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
-      throw AppError.internal('Identity provider management API is not configured.')
-    }
-
-    try {
-      const token = await this.getManagementToken()
-      const baseUrl = this.logtoEndpoint.replace(/\/$/, '')
-      const userPayload: LogtoCreateUserPayload = {
-        primaryEmail: params.email,
-        password: params.password,
-        name: params.name,
-        isSuspended: params.suspended ?? true,
-        customData: params.username ? { nis: params.username } : {},
-      }
-
-      if (params.username && !/^\d+$/.test(params.username)) {
-        userPayload.username = params.username
-      }
-
-      let userId: string | null = null
-      const response = await fetch(`${baseUrl}/api/users`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(userPayload),
-      })
-
-      if (response.ok) {
-        // SAFETY: Logto user creation response contains an id field.
-        const data = (await response.json()) as { id: string }
-        userId = data.id
-      } else if (response.status === 409 || response.status === 422) {
-        const searchRes = await fetch(
-          `${baseUrl}/api/users?search.primaryEmail=${encodeURIComponent(params.email)}`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          },
-        ).catch(() => null)
-        if (searchRes?.ok) {
-          // SAFETY: Logto Management API /api/users search returns a JSON array of user records
-          const candidates = (await searchRes.json()) as Array<{
-            id: string
-            primaryEmail?: string | null
-            isSuspended?: boolean
-            customData?: { nis?: string }
-          }>
-          const match = candidates.find(
-            (u) =>
-              u.primaryEmail === params.email &&
-              (!params.username || u.customData?.nis === params.username),
-          )
-          if (match) {
-            userId = match.id
-          }
-        }
-      }
-
-      if (!userId) {
-        throw AppError.internal('Failed to create student identity in identity provider.')
-      }
-
-      await this.assignRoles(userId, params.roles ?? ['student'])
-      return { userId }
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      logger.error({ err, username: params.username }, 'Logto create student identity error')
-      throw AppError.internal('Failed to create student identity in identity provider.')
-    }
+  assignUserRole(userId: string, role: IdentityRole): Promise<void> {
+    return assignUserRole(this.logtoClient, userId, role)
   }
 
-  async setUserSuspended(userId: string, suspended: boolean): Promise<void> {
-    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
-      throw AppError.internal('Identity provider management API is not configured.')
-    }
-
-    try {
-      const token = await this.getManagementToken()
-      const response = await fetch(
-        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/is-suspended`,
-        {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ isSuspended: suspended }),
-        },
-      )
-      if (!response.ok) {
-        throw AppError.internal('Failed to update user status in identity provider.')
-      }
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      logger.error({ err, userId, suspended }, 'Logto set user suspended error')
-      throw AppError.internal('Failed to update user status in identity provider.')
-    }
+  revokeUserRole(userId: string, role: IdentityRole): Promise<void> {
+    return revokeUserRole(this.logtoClient, userId, role)
   }
 
-  async assignUserRole(userId: string, role: IdentityRole): Promise<void> {
-    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
-      throw AppError.internal('Identity provider management API is not configured.')
-    }
-
-    try {
-      const token = await this.getManagementToken()
-      const roleIds = await this.getRoleIds([role], token)
-      const response = await fetch(
-        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/roles`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ roleIds }),
-        },
-      )
-      if (!response.ok) {
-        throw AppError.internal('Failed to assign role in identity provider.')
-      }
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      logger.error({ err, userId, role }, 'Logto assign user role error')
-      throw AppError.internal('Failed to assign role in identity provider.')
-    }
+  updateUserEmail(userId: string, email: string): Promise<void> {
+    return updateUserEmail(this.logtoClient, userId, email)
   }
 
-  async revokeUserRole(userId: string, role: IdentityRole): Promise<void> {
-    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
-      throw AppError.internal('Identity provider management API is not configured.')
-    }
-
-    try {
-      const token = await this.getManagementToken()
-      const [roleId] = await this.getRoleIds([role], token)
-      const response = await fetch(
-        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}/roles/${encodeURIComponent(roleId)}`,
-        {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      )
-      if (!response.ok && response.status !== 404) {
-        throw AppError.internal('Failed to revoke role in identity provider.')
-      }
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      logger.error({ err, userId, role }, 'Logto revoke user role error')
-      throw AppError.internal('Failed to revoke role in identity provider.')
-    }
+  deleteUser(userId: string): Promise<void> {
+    return deleteUser(this.logtoClient, userId)
   }
 
-  async updateUserEmail(userId: string, email: string): Promise<void> {
-    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
-      throw AppError.internal('Identity provider management API is not configured.')
-    }
-
-    try {
-      const token = await this.getManagementToken()
-      const response = await fetch(
-        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}`,
-        {
-          method: 'PATCH',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ primaryEmail: email }),
-        },
-      )
-      if (!response.ok) {
-        throw AppError.internal('Failed to update email in identity provider.')
-      }
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      logger.error({ err, userId }, 'Logto update user email error')
-      throw AppError.internal('Failed to update email in identity provider.')
-    }
-  }
-
-  async deleteUser(userId: string): Promise<void> {
-    if (!this.logtoEndpoint || !this.logtoAppId || !this.logtoAppSecret) {
-      throw AppError.internal('Identity provider management API is not configured.')
-    }
-
-    try {
-      const token = await this.getManagementToken()
-      const response = await fetch(
-        `${this.logtoEndpoint.replace(/\/$/, '')}/api/users/${encodeURIComponent(userId)}`,
-        {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      )
-      if (!response.ok && response.status !== 404) {
-        throw AppError.internal('Failed to delete user in identity provider.')
-      }
-    } catch (err) {
-      if (err instanceof AppError) throw err
-      logger.error({ err, userId }, 'Logto delete user error')
-      throw AppError.internal('Failed to delete user in identity provider.')
-    }
-  }
-
-  async checkHealth(): Promise<boolean> {
-    if (this.jwksUrl) {
-      try {
-        const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), 3000)
-        try {
-          const res = await fetch(this.jwksUrl, { method: 'GET', signal: controller.signal })
-          return res.ok
-        } finally {
-          clearTimeout(timer)
-        }
-      } catch {
-        return false
-      }
-    }
-
-    if (this.jwtSecret) {
-      return true
-    }
-
-    return false
+  checkHealth(): Promise<boolean> {
+    return this.verifier.checkHealth()
   }
 }
