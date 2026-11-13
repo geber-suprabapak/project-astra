@@ -1,106 +1,25 @@
 import { describe, expect, it } from 'vitest'
 import { AppError } from '../../../src/lib/errors/app-error.js'
 import {
-  MemoryDomainStore,
-  MemoryIdentityProvider,
-  MemoryObjectStorage,
-} from '../../../src/providers/memory/index.js'
-import type { RobinClient } from '../../../src/clients/robin/client.js'
-import type { AppProviders } from '../../../src/providers/types.js'
-import {
   createAcademicPeriod,
-  createCalendarException,
   createClass,
-  createLocation,
-  createSchedule,
-  deleteCalendarException,
-  deleteSchedule,
   enrollStudent,
   exitStudentEnrollment,
-  getCalendarException,
-  getSchedule,
   listAcademicPeriods,
-  listCalendarExceptions,
   listClasses,
   listClassEnrollments,
-  listSchedules,
   promoteStudentEnrollment,
   setActiveAcademicPeriod,
   transferStudentEnrollment,
   updateAcademicPeriod,
-  updateCalendarException,
   updateClass,
-  updateSchedule,
 } from '../../../src/modules/admin/service.js'
-
-const mockRobinClient: RobinClient = {
-  checkReadiness: async () => ({ healthy: true, modelReady: true, qdrantConnected: true }),
-  getEnrollmentStatus: async () => ({ status: 'enrolled', embeddingCount: 1, message: 'Ready' }),
-  enroll: async () => ({
-    status: 'ok',
-    userId: 'u1',
-    samplesReceived: 1,
-    embeddingsCreated: 1,
-    message: 'Done',
-  }),
-  identify: async () => ({
-    status: 'match',
-    candidateId: 'u1',
-    confidence: 0.9,
-    threshold: 0.7,
-    qualityScore: 0.9,
-    processTimeMs: 1,
-  }),
-  deleteEnrollment: async () => {},
-}
-
-interface TestSetup {
-  domainStore: MemoryDomainStore
-  providers: AppProviders
-}
-
-function createTestSetup(): TestSetup {
-  const domainStore = new MemoryDomainStore()
-  const identityProvider = new MemoryIdentityProvider()
-  const objectStorage = new MemoryObjectStorage()
-  const providers: AppProviders = {
-    domainStore,
-    identityProvider,
-    objectStorage,
-    robinClient: mockRobinClient,
-  }
-  return { domainStore, providers }
-}
+import { setupAdminPolicyTest } from './admin-policy-service-harness.js'
 
 describe('Admin Academic Policy Service', () => {
-  const setup = async () => {
-    const { domainStore, providers } = createTestSetup()
-    const school = await domainStore.createSchool({
-      name: 'SMK Negeri 2 Banjarmasin',
-      slug: 'smkn2-bjm',
-    })
-    const admin = await domainStore.createInitialSchoolAdmin({
-      userId: 'admin-1',
-      fullName: 'School Admin',
-      email: 'admin@smkn2.sch.id',
-    })
-    // Reset periods created during bootstrap to have clean slate for testing
-    domainStore.academicPeriods = []
-    // Create student profile
-    domainStore.profiles.set('student-1', {
-      user_id: 'student-1',
-      full_name: 'Student One',
-      nis: '12345',
-      role: 'student',
-      lifecycle_status: 'approved',
-      gender: null,
-    })
-    return { domainStore, providers, school, admin }
-  }
-
   describe('Academic Periods', () => {
     it('creates, lists, updates, and activates academic periods with audit logs', async () => {
-      const { domainStore, providers } = await setup()
+      const { domainStore, providers } = await setupAdminPolicyTest()
 
       const period1 = await createAcademicPeriod({
         name: '2026/2027 Ganjil',
@@ -164,7 +83,7 @@ describe('Admin Academic Policy Service', () => {
     })
 
     it('rejects unauthorized actor roles', async () => {
-      const { providers } = await setup()
+      const { providers } = await setupAdminPolicyTest()
       await expect(
         createAcademicPeriod({
           name: '2026/2027 Ganjil',
@@ -180,7 +99,7 @@ describe('Admin Academic Policy Service', () => {
 
   describe('Classes & Enrollments Lifecycle', () => {
     it('manages class creation and update', async () => {
-      const { providers } = await setup()
+      const { providers } = await setupAdminPolicyTest()
       const cls = await createClass({
         name: 'XII RPL 1',
         grade: 12,
@@ -208,7 +127,7 @@ describe('Admin Academic Policy Service', () => {
     })
 
     it('enforces student enrollment invariant: at most one active class per academic period', async () => {
-      const { providers } = await setup()
+      const { providers } = await setupAdminPolicyTest()
       const period = await createAcademicPeriod({
         name: '2026/2027 Ganjil',
         startDate: '2026-07-01',
@@ -262,7 +181,7 @@ describe('Admin Academic Policy Service', () => {
     })
 
     it('transfers student enrollment to another class in the same period preserving history', async () => {
-      const { providers } = await setup()
+      const { providers } = await setupAdminPolicyTest()
       const period = await createAcademicPeriod({
         name: '2026/2027 Ganjil',
         startDate: '2026-07-01',
@@ -324,7 +243,7 @@ describe('Admin Academic Policy Service', () => {
     })
 
     it('promotes student enrollment to next academic period preserving history', async () => {
-      const { providers } = await setup()
+      const { providers } = await setupAdminPolicyTest()
       const period1 = await createAcademicPeriod({
         name: '2025/2026 Genap',
         startDate: '2026-01-01',
@@ -386,7 +305,7 @@ describe('Admin Academic Policy Service', () => {
     })
 
     it('exits student enrollment with graduated / archived status', async () => {
-      const { providers } = await setup()
+      const { providers } = await setupAdminPolicyTest()
       const period = await createAcademicPeriod({
         name: '2026/2027 Ganjil',
         startDate: '2026-07-01',
@@ -426,119 +345,6 @@ describe('Admin Academic Policy Service', () => {
 
       const active = await providers.domainStore.getActiveClassEnrollment('student-1', period.id)
       expect(active).toBeNull()
-    })
-  })
-
-  describe('Schedules & Locations', () => {
-    it('manages schedules and locations CRUD with audit logs', async () => {
-      const { providers } = await setup()
-
-      const loc = await createLocation({
-        name: 'Kampus Utama SMKN 2',
-        latitude: -3.316694,
-        longitude: 114.590111,
-        radiusMeters: 150,
-        actorId: 'admin-1',
-        actorRole: 'school_admin',
-        providers,
-      })
-      expect(loc.name).toBe('Kampus Utama SMKN 2')
-
-      const sched = await createSchedule({
-        dayOfWeek: 'senin',
-        startTime: '07:00',
-        endTime: '08:00',
-        startCheckout: '15:00',
-        endCheckout: '17:00',
-        gracePeriodMinutes: 15,
-        locationId: loc.id,
-        actorId: 'admin-1',
-        actorRole: 'school_admin',
-        providers,
-      })
-      expect(sched.hari).toBe('senin')
-      expect(sched.kompensasi_waktu).toBe(15)
-
-      const fetchedSched = await getSchedule({
-        id: sched.id!,
-        actorRole: 'school_admin',
-        providers,
-      })
-      expect(fetchedSched.id).toBe(sched.id)
-
-      const updatedSched = await updateSchedule({
-        id: sched.id!,
-        startTime: '06:45',
-        actorId: 'admin-1',
-        actorRole: 'school_admin',
-        providers,
-      })
-      expect(updatedSched.mulai_masuk).toBe('06:45')
-
-      await deleteSchedule({
-        id: sched.id!,
-        actorId: 'admin-1',
-        actorRole: 'school_admin',
-        providers,
-      })
-
-      const schedList = await listSchedules({
-        actorRole: 'school_admin',
-        providers,
-      })
-      expect(schedList.some((s) => s.id === sched.id)).toBe(false)
-    })
-  })
-
-  describe('Calendar Exceptions', () => {
-    it('manages holiday and exception entries with audit logs', async () => {
-      const { providers } = await setup()
-
-      const exc = await createCalendarException({
-        date: '2026-08-17',
-        reason: 'Hari Kemerdekaan RI',
-        isHoliday: true,
-        actorId: 'admin-1',
-        actorRole: 'school_admin',
-        providers,
-      })
-      expect(exc.date).toBe('2026-08-17')
-      expect(exc.is_holiday).toBe(true)
-
-      const fetched = await getCalendarException({
-        id: exc.id,
-        actorRole: 'school_admin',
-        providers,
-      })
-      expect(fetched.reason).toBe('Hari Kemerdekaan RI')
-
-      const updated = await updateCalendarException({
-        id: exc.id,
-        reason: 'HUT RI ke-81',
-        actorId: 'admin-1',
-        actorRole: 'school_admin',
-        providers,
-      })
-      expect(updated.reason).toBe('HUT RI ke-81')
-
-      const list = await listCalendarExceptions({
-        actorRole: 'school_admin',
-        providers,
-      })
-      expect(list.some((e) => e.id === exc.id)).toBe(true)
-
-      await deleteCalendarException({
-        id: exc.id,
-        actorId: 'admin-1',
-        actorRole: 'school_admin',
-        providers,
-      })
-
-      const afterList = await listCalendarExceptions({
-        actorRole: 'school_admin',
-        providers,
-      })
-      expect(afterList.some((e) => e.id === exc.id)).toBe(false)
     })
   })
 })
