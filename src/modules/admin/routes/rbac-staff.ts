@@ -1,4 +1,5 @@
 import type { Hono } from 'hono'
+import { AppError } from '../../../lib/errors/app-error.js'
 import { successResponse } from '../../../lib/http/responses.js'
 import type { AppEnv } from '../../../types/context.js'
 import {
@@ -191,20 +192,22 @@ export function registerRbacStaffRoutes(router: Hono<AppEnv>, deps: AdminRouterD
   router.post('/staff/:userId/reset-password', async (c) => {
     const providers = resolveAdminProviders(c, deps)
     const userId = c.req.param('userId')
-    let email: string | undefined
-    try {
-      const body = await c.req.json()
-      const parsed = requestStaffPasswordResetSchema.safeParse(body)
-      if (parsed.success) {
-        email = parsed.data.email
+    const rawBody = await c.req.text()
+    if (rawBody.trim().length > 0) {
+      let body: unknown
+      try {
+        body = JSON.parse(rawBody)
+      } catch {
+        throw AppError.validationError('Invalid JSON request body.')
       }
-    } catch {
-      // Body is optional
+      const parsed = requestStaffPasswordResetSchema.safeParse(body)
+      if (!parsed.success) {
+        throw AppError.validationError(parsed.error.flatten())
+      }
     }
 
     const result = await requestStaffPasswordReset({
       userId,
-      email,
       actorId: c.get('userId'),
       actorRole: c.get('profileRole'),
       providers,

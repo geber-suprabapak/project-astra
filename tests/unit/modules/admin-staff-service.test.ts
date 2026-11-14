@@ -325,6 +325,39 @@ describe('admin staff identity & profile lifecycle service unit tests (Ticket 05
     expect(resetLog?.actor_id).toBe('school-admin-1')
   })
 
+  it('blocks school_admin from initiating password reset for a platform_admin while allowing platform_admin', async () => {
+    const { providers, identityProvider } = createAdminStaffTestProviders()
+    const resetSpy = vi.spyOn(identityProvider, 'requestPasswordResetEmail')
+
+    const platformAdmin = await createStaff({
+      email: 'root@school.sch.id',
+      fullName: 'Root Platform Admin',
+      role: 'platform_admin',
+      actorId: 'platform-admin-0',
+      actorRole: 'platform_admin',
+      providers,
+    })
+
+    await expect(
+      requestStaffPasswordReset({
+        userId: platformAdmin.user_id,
+        actorId: 'school-admin-1',
+        actorRole: 'school_admin',
+        providers,
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect(resetSpy).not.toHaveBeenCalled()
+
+    const res = await requestStaffPasswordReset({
+      userId: platformAdmin.user_id,
+      actorId: 'platform-admin-0',
+      actorRole: 'platform_admin',
+      providers,
+    })
+    expect(res.success).toBe(true)
+    expect(resetSpy).toHaveBeenCalledWith('root@school.sch.id')
+  })
+
   it('listStaff and getStaff return active staff records with effective permissions', async () => {
     const { providers } = createAdminStaffTestProviders()
 

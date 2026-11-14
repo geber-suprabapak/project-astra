@@ -19,6 +19,23 @@ async function assertRolesExistAndActive(
   }
 }
 
+async function assertCanTargetStaffMember(params: {
+  actorRole: IdentityRole | null
+  targetUserId: string
+  targetRole: string | null | undefined
+  providers: AppProviders
+}): Promise<void> {
+  if (
+    params.actorRole === 'school_admin' &&
+    (params.targetRole === 'platform_admin' ||
+      (await params.providers.domainStore.getUserRoles(params.targetUserId)).includes(
+        'platform_admin',
+      ))
+  ) {
+    throw AppError.forbidden()
+  }
+}
+
 export async function listStaff(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
@@ -164,13 +181,12 @@ export async function updateStaff(params: {
 
   const existing = await params.providers.domainStore.getStaffProfile(params.userId)
   if (!existing) throw AppError.notFound('Staff profile')
-  if (
-    params.actorRole === 'school_admin' &&
-    (existing.role === 'platform_admin' ||
-      (await params.providers.domainStore.getUserRoles(params.userId)).includes('platform_admin'))
-  ) {
-    throw AppError.forbidden()
-  }
+  await assertCanTargetStaffMember({
+    actorRole: params.actorRole,
+    targetUserId: params.userId,
+    targetRole: existing.role,
+    providers: params.providers,
+  })
 
   if (params.actorRole === 'school_admin') {
     if (params.role === 'platform_admin' || params.roles?.includes('platform_admin')) {
@@ -241,7 +257,6 @@ export async function updateStaff(params: {
 
 export async function requestStaffPasswordReset(params: {
   userId: string
-  email?: string
   actorId: string
   actorRole: IdentityRole | null
   providers: AppProviders
@@ -249,7 +264,14 @@ export async function requestStaffPasswordReset(params: {
   assertAdminAccess(params.actorRole)
 
   const staff = await params.providers.domainStore.getUserProfile(params.userId)
-  const targetEmail = params.email ?? staff.email
+  await assertCanTargetStaffMember({
+    actorRole: params.actorRole,
+    targetUserId: params.userId,
+    targetRole: staff.role,
+    providers: params.providers,
+  })
+
+  const targetEmail = staff.email
   if (!targetEmail) {
     throw AppError.validationError('Staff profile has no associated email.')
   }

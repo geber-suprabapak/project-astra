@@ -201,6 +201,50 @@ describe('integration: manage staff, roles, and permissions (Ticket 05)', () => 
 
       const auditLogs = await domainStore.getAuditLogs('profile', staff.data.user_id)
       expect(auditLogs.some((l) => l.action === 'request_staff_password_reset')).toBe(true)
+
+      const overrideAttempt = await app.request(
+        `/v1/admin/staff/${staff.data.user_id}/reset-password`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${schoolAdminToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ email: 'attacker@evil.test' }),
+        },
+      )
+      expect(overrideAttempt.status).toBe(422)
+    })
+
+    it('rejects school_admin attempting password reset against a platform_admin account', async () => {
+      const { app, platformAdminToken, schoolAdminToken } = setupTestEnvironment()
+
+      const createRes = await app.request('/v1/admin/staff', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${platformAdminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: 'platform.target@school.sch.id',
+          fullName: 'Platform Admin Target',
+          role: 'platform_admin',
+        }),
+      })
+      expect(createRes.status).toBe(201)
+      // SAFETY: response JSON follows standard envelope
+      const platformStaff = (await createRes.json()) as { data: UserProfile }
+
+      const resetRes = await app.request(
+        `/v1/admin/staff/${platformStaff.data.user_id}/reset-password`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${schoolAdminToken}`,
+          },
+        },
+      )
+      expect(resetRes.status).toBe(403)
     })
 
     it('revokes active sessions immediately when staff profile is disabled or rejected', async () => {

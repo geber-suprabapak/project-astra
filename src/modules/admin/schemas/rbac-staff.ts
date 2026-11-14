@@ -106,9 +106,7 @@ export const staffResponseSchema = z.object({
 
 export type StaffResponse = z.infer<typeof staffResponseSchema>
 
-export const requestStaffPasswordResetSchema = z.object({
-  email: z.string().email().optional(),
-})
+export const requestStaffPasswordResetSchema = z.object({}).strict()
 
 export type RequestStaffPasswordResetInput = z.infer<typeof requestStaffPasswordResetSchema>
 
