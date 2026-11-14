@@ -442,7 +442,8 @@ describe('native CMS content API', () => {
   it('supports multipart file uploads for authorized CMS operators', async () => {
     const env = environment()
     const form = new FormData()
-    const file = new File(['fake image binary data'], 'sample-slide.png', { type: 'image/png' })
+    const validPng = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00])
+    const file = new File([validPng], 'sample-slide.png', { type: 'image/png' })
     form.append('file', file)
     form.append('folder', 'hero-slides')
 
@@ -459,6 +460,44 @@ describe('native CMS content API', () => {
     const json = await response.json()
     expect(json.data.path).toMatch(/^cms\/hero-slides\/\d+-[a-z0-9]+\.png$/)
     expect(json.data.url).toContain(encodeURIComponent(json.data.path))
+
+    // Rejects SVG uploads (XSS vector)
+    const svgForm = new FormData()
+    svgForm.append(
+      'file',
+      new File(
+        ['<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'],
+        'xss.svg',
+        {
+          type: 'image/svg+xml',
+        },
+      ),
+    )
+    const svgResponse = await env.app.request('/v1/cms/uploads', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer root',
+        'X-Astra-Contract-Version': 'v1',
+      },
+      body: svgForm,
+    })
+    expect(svgResponse.status).toBe(422)
+
+    // Rejects MIME spoofing when magic bytes do not match declared content type
+    const spoofForm = new FormData()
+    spoofForm.append(
+      'file',
+      new File(['<svg><script>alert(1)</script></svg>'], 'fake.png', { type: 'image/png' }),
+    )
+    const spoofResponse = await env.app.request('/v1/cms/uploads', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer root',
+        'X-Astra-Contract-Version': 'v1',
+      },
+      body: spoofForm,
+    })
+    expect(spoofResponse.status).toBe(422)
 
     // Unauthorized role (e.g. student) is rejected
     const unauthResponse = await env.app.request('/v1/cms/uploads', {

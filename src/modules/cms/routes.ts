@@ -17,6 +17,37 @@ import type { AppEnv } from '../../types/context.js'
 import type { AppProviders } from '../../providers/types.js'
 import { getCmsSession } from './service.js'
 
+const CMS_UPLOAD_SIGNATURES = new Map<string, (buf: Buffer) => boolean>([
+  ['image/jpeg', (b) => b.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))],
+  [
+    'image/png',
+    (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  ],
+  [
+    'image/webp',
+    (b) =>
+      b.length >= 12 &&
+      b.subarray(0, 4).toString('ascii') === 'RIFF' &&
+      b.subarray(8, 12).toString('ascii') === 'WEBP',
+  ],
+  [
+    'image/gif',
+    (b) => {
+      const header = b.subarray(0, 6).toString('ascii')
+      return header === 'GIF87a' || header === 'GIF89a'
+    },
+  ],
+  ['application/pdf', (b) => b.subarray(0, 5).toString('ascii') === '%PDF-'],
+  [
+    'application/msword',
+    (b) => b.subarray(0, 8).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])),
+  ],
+  [
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    (b) => b.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])),
+  ],
+])
+
 export function createCmsRouter(deps: { providers?: AppProviders } = {}) {
   const router = new Hono<AppEnv>()
   router.get('/session', async (c) => {
@@ -157,18 +188,12 @@ export function createCmsRouter(deps: { providers?: AppProviders } = {}) {
       throw AppError.validationError('File is required.')
     }
 
-    const allowedMime = new Set([
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-      'image/gif',
-      'image/svg+xml',
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    ])
-    if (!allowedMime.has(fileEntry.type)) {
+    const verifySignature = CMS_UPLOAD_SIGNATURES.get(fileEntry.type)
+    if (!verifySignature) {
       throw AppError.validationError(`Unsupported file type: ${fileEntry.type}`)
+    }
+    if (fileEntry.size === 0) {
+      throw AppError.validationError('Uploaded file cannot be empty.')
     }
     if (fileEntry.size > 15 * 1024 * 1024) {
       throw AppError.validationError('File exceeds 15MB limit.')
@@ -182,6 +207,9 @@ export function createCmsRouter(deps: { providers?: AppProviders } = {}) {
     const safePath = `cms/${safeFolder}/${Date.now()}-${Math.random().toString(36).substring(2)}.${safeExt}`
 
     const buffer = Buffer.from(await fileEntry.arrayBuffer())
+    if (buffer.length === 0 || !verifySignature(buffer)) {
+      throw AppError.validationError('File contents do not match the declared file type.')
+    }
     if (providers.objectStorage.uploadPublicFile) {
       await providers.objectStorage.uploadPublicFile(safePath, buffer, fileEntry.type)
     }
