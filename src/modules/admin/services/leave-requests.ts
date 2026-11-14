@@ -14,6 +14,7 @@ import {
   type AdminLeaveRequestResponse,
 } from '../schema.js'
 import { assertAdminAccess, assertChronosStaffAccess } from './shared.js'
+import { confirmFileUpload } from '../../files/service.js'
 
 const CHRONOS_STAFF_ROLES: ReadonlySet<IdentityRole> = new Set([
   'platform_admin',
@@ -122,7 +123,11 @@ export async function createAdminLeaveRequest(params: {
       throw AppError.validationError('Attachment file is no longer available.')
     }
     if (fileRecord.lifecycle === 'pending_upload') {
-      await params.providers.domainStore.updateFileLifecycle(fileRecord.id, 'available')
+      await confirmFileUpload({
+        userId: params.actorId,
+        fileId: fileRecord.id,
+        providers: params.providers,
+      })
     }
     storagePath = fileRecord.object_path
   }

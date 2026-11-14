@@ -6,7 +6,7 @@ describe('Admin Leave Requests Service — createAdminLeaveRequest', () => {
   it.each(['platform_admin', 'school_admin', 'teacher', 'staff'] as const)(
     'allows Chronos %s to create a pending request with their own attachment and audit actor',
     async (actorRole) => {
-      const { domainStore, providers } = setupAdminLeaveTestEnvironment()
+      const { domainStore, objectStorage, providers } = setupAdminLeaveTestEnvironment()
       const actorId = `${actorRole}-creator`
       domainStore.profiles.set(actorId, {
         user_id: actorId,
@@ -20,6 +20,10 @@ describe('Admin Leave Requests Service — createAdminLeaveRequest', () => {
         objectPath: `${actorId}/note.jpg`,
         contentType: 'image/jpeg',
         lifecycle: 'pending_upload',
+      })
+      objectStorage.objects.set(file.object_path, {
+        buffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+        contentType: 'image/jpeg',
       })
       const created = await createAdminLeaveRequest({
         userId: 'student-1',
@@ -156,7 +160,7 @@ describe('Admin Leave Requests Service — createAdminLeaveRequest', () => {
   )
 
   it('creates leave request with explicit pending status and file_id attachment', async () => {
-    const { domainStore, providers } = setupAdminLeaveTestEnvironment()
+    const { domainStore, objectStorage, providers } = setupAdminLeaveTestEnvironment()
 
     const file = await domainStore.createFileRecord({
       userId: 'student-1',
@@ -164,6 +168,10 @@ describe('Admin Leave Requests Service — createAdminLeaveRequest', () => {
       objectPath: 'student-1/surat_dokter.pdf',
       contentType: 'application/pdf',
       lifecycle: 'pending_upload',
+    })
+    objectStorage.objects.set(file.object_path, {
+      buffer: Buffer.from('%PDF-1.4 surat dokter'),
+      contentType: 'application/pdf',
     })
 
     const created = await createAdminLeaveRequest({
@@ -186,6 +194,53 @@ describe('Admin Leave Requests Service — createAdminLeaveRequest', () => {
     // Verify file lifecycle changed to available
     const updatedFile = await domainStore.getFileRecord(file.id)
     expect(updatedFile?.lifecycle).toBe('available')
+  })
+
+  it('does not promote pending_upload attachment when object is missing in storage or statObject is unavailable', async () => {
+    const { domainStore, objectStorage, providers } = setupAdminLeaveTestEnvironment()
+
+    const file = await domainStore.createFileRecord({
+      userId: 'admin-1',
+      purpose: 'permit_attachment',
+      objectPath: 'admin-1/missing.pdf',
+      contentType: 'application/pdf',
+      lifecycle: 'pending_upload',
+    })
+
+    await expect(
+      createAdminLeaveRequest({
+        userId: 'student-1',
+        category: 'sakit',
+        description: 'File belum ada di object storage',
+        date: '2026-08-29',
+        fileId: file.id,
+        actorRole: 'school_admin',
+        actorId: 'admin-1',
+        providers,
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect((await domainStore.getFileRecord(file.id))?.lifecycle).toBe('pending_upload')
+
+    objectStorage.objects.set(file.object_path, {
+      buffer: Buffer.from('%PDF-1.4 surat dokter'),
+      contentType: 'application/pdf',
+    })
+    // SAFETY: shadows prototype statObject with undefined to test fail-closed verification
+    Object.defineProperty(objectStorage, 'statObject', { value: undefined })
+
+    await expect(
+      createAdminLeaveRequest({
+        userId: 'student-1',
+        category: 'sakit',
+        description: 'statObject tidak tersedia',
+        date: '2026-08-29',
+        fileId: file.id,
+        actorRole: 'school_admin',
+        actorId: 'admin-1',
+        providers,
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect((await domainStore.getFileRecord(file.id))?.lifecycle).toBe('pending_upload')
   })
 
   it('rejects an attachment owned by another student before lifecycle promotion', async () => {

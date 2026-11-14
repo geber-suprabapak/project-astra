@@ -113,15 +113,19 @@ describe('Permits / Leave Requests Service - Student Flows', () => {
   })
 
   it('creates a leave request referencing an existing Astra file_id', async () => {
-    const { domainStore, providers } = setupTestEnvironment()
+    const { domainStore, objectStorage, providers } = setupTestEnvironment()
 
-    // Create a pending Astra file
+    // Create a pending Astra file and matching stored object
     const fileRecord = await domainStore.createFileRecord({
       userId: 'student-1',
       purpose: 'permit_attachment',
       objectPath: 'student-1/permit_attachment_doc.pdf',
       contentType: 'application/pdf',
       lifecycle: 'pending_upload',
+    })
+    objectStorage.objects.set(fileRecord.object_path, {
+      buffer: Buffer.from('%PDF-1.4 permit attachment'),
+      contentType: 'application/pdf',
     })
 
     const result = await createPermit({
@@ -140,6 +144,49 @@ describe('Permits / Leave Requests Service - Student Flows', () => {
     // File lifecycle transitioned to available
     const updatedFile = await domainStore.getFileRecord(fileRecord.id)
     expect(updatedFile?.lifecycle).toBe('available')
+  })
+
+  it('rejects attaching a pending_upload file when object is missing in storage or statObject is unavailable', async () => {
+    const { domainStore, objectStorage, providers } = setupTestEnvironment()
+
+    const fileRecord = await domainStore.createFileRecord({
+      userId: 'student-1',
+      purpose: 'permit_attachment',
+      objectPath: 'student-1/unverified.pdf',
+      contentType: 'application/pdf',
+      lifecycle: 'pending_upload',
+    })
+
+    await expect(
+      createPermit({
+        userId: 'student-1',
+        category: 'sakit',
+        description: 'Mencoba melampirkan file yang belum diunggah',
+        date: '2026-08-25',
+        fileId: fileRecord.id,
+        providers,
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect((await domainStore.getFileRecord(fileRecord.id))?.lifecycle).toBe('pending_upload')
+
+    objectStorage.objects.set(fileRecord.object_path, {
+      buffer: Buffer.from('%PDF-1.4 permit attachment'),
+      contentType: 'application/pdf',
+    })
+    // SAFETY: shadows prototype statObject with undefined to test fail-closed verification
+    Object.defineProperty(objectStorage, 'statObject', { value: undefined })
+
+    await expect(
+      createPermit({
+        userId: 'student-1',
+        category: 'sakit',
+        description: 'Storage tanpa statObject harus menolak promosi',
+        date: '2026-08-25',
+        fileId: fileRecord.id,
+        providers,
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect((await domainStore.getFileRecord(fileRecord.id))?.lifecycle).toBe('pending_upload')
   })
 
   it('rejects leave request creation for pending or unapproved students', async () => {

@@ -200,6 +200,10 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests HTTP RBAC & Flow Ver
       updated_at: new Date().toISOString(),
     }
     env.domainStore.files.set(ownFile.id, ownFile)
+    env.objectStorage.objects.set(ownFile.object_path, {
+      buffer: Buffer.alloc(1024, 0xff),
+      contentType: 'image/jpeg',
+    })
     const ownAttachment = await env.app.request('/v1/admin/leave-requests', {
       method: 'POST',
       headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
@@ -213,6 +217,32 @@ describe('Scope 1 Challenger: POST /v1/admin/leave-requests HTTP RBAC & Flow Ver
     })
     expect(ownAttachment.status).toBe(201)
     expect(env.domainStore.files.get(ownFile.id)?.lifecycle).toBe('available')
+
+    const missingObjectFile = {
+      id: '44444444-2222-3333-4444-555555555555',
+      user_id: 'admin-1',
+      purpose: 'permit_attachment' as const,
+      object_path: 'admin-1/missing-note.jpg',
+      content_type: 'image/jpeg',
+      size_bytes: 1024,
+      lifecycle: 'pending_upload' as const,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    env.domainStore.files.set(missingObjectFile.id, missingObjectFile)
+    const missingObjectRes = await env.app.request('/v1/admin/leave-requests', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: 'student-1',
+        category: 'pergi',
+        description: 'Missing storage object attachment',
+        date: '2026-08-28',
+        file_id: missingObjectFile.id,
+      }),
+    })
+    expect(missingObjectRes.status).toBe(409)
+    expect(env.domainStore.files.get(missingObjectFile.id)?.lifecycle).toBe('pending_upload')
 
     // Wrong file purpose (avatar)
     const avatarFileId = '22222222-2222-3333-4444-555555555555'

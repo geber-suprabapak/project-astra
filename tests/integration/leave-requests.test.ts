@@ -7,7 +7,7 @@ import {
 
 describe('Ticket 10 Integration: Submit and View Leave Requests', () => {
   it('Student creates upload intent, uploads attachment, and submits leave request referencing file_id', async () => {
-    const { domainStore, identityProvider, app } = createIntegrationEnvironment()
+    const { domainStore, objectStorage, identityProvider, app } = createIntegrationEnvironment()
     await setupTestUsers(domainStore, identityProvider)
 
     const studentToken = tokenFor({
@@ -35,6 +35,11 @@ describe('Ticket 10 Integration: Submit and View Leave Requests', () => {
     expect(intentBody.data.file_id).toBeDefined()
     expect(intentBody.data.upload_url).toBeDefined()
     const fileId = intentBody.data.file_id
+
+    objectStorage.objects.set(intentBody.data.object_path, {
+      buffer: Buffer.alloc(10240, 0x25),
+      contentType: 'application/pdf',
+    })
 
     // 2. Submit leave request referencing file_id via JSON
     const leaveRes = await app.request('/v1/mobile/leave-requests', {
