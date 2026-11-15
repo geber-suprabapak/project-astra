@@ -27,6 +27,8 @@ import {
   type AdminRouterDeps,
   parseJsonBody,
   parseJsonBodyOrEmpty,
+  parseOptionalLimit,
+  parseOptionalOffset,
   requireRouteParam,
   resolveAdminProviders,
 } from './shared.js'
@@ -62,8 +64,8 @@ export function registerLeaveRequestRoutes(router: Hono<AppEnv>, deps: AdminRout
       throw AppError.validationError('Invalid category query parameter.')
     }
 
-    const limit = limitQuery ? Number(limitQuery) : undefined
-    const offset = offsetQuery ? Number(offsetQuery) : undefined
+    const limit = parseOptionalLimit(limitQuery)
+    const offset = parseOptionalOffset(offsetQuery)
 
     const leaveRequests = await listAdminLeaveRequests({
       filter: {

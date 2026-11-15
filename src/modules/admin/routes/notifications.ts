@@ -1,4 +1,5 @@
 import type { Context, Hono } from 'hono'
+import { AppError } from '../../../lib/errors/app-error.js'
 import { successResponse } from '../../../lib/http/responses.js'
 import { notificationChannelSchema, notificationStatusSchema } from '../../../providers/types.js'
 import type { AppEnv } from '../../../types/context.js'
@@ -13,6 +14,8 @@ import {
 import {
   type AdminRouterDeps,
   parseJsonBodyOrEmpty,
+  parseOptionalLimit,
+  parseOptionalOffset,
   requireRouteParam,
   resolveAdminProviders,
 } from './shared.js'
@@ -32,8 +35,15 @@ export function registerNotificationRoutes(router: Hono<AppEnv>, deps: AdminRout
       : undefined
     const statusParsed = statusParam ? notificationStatusSchema.safeParse(statusParam) : undefined
 
-    const limit = limitParam ? Number.parseInt(limitParam, 10) : undefined
-    const offset = offsetParam ? Number.parseInt(offsetParam, 10) : undefined
+    if (channelParam !== undefined && (!channelParsed || !channelParsed.success)) {
+      throw AppError.validationError('Invalid channel query parameter.')
+    }
+    if (statusParam !== undefined && (!statusParsed || !statusParsed.success)) {
+      throw AppError.validationError('Invalid status query parameter.')
+    }
+
+    const limit = parseOptionalLimit(limitParam)
+    const offset = parseOptionalOffset(offsetParam)
 
     const notifications = await listAdminNotifications({
       filter: {

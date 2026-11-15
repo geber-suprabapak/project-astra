@@ -23,6 +23,8 @@ import {
   type AdminRouterDeps,
   isValidIsoDate,
   parseJsonBody,
+  parseOptionalLimit,
+  parseOptionalOffset,
   requireRouteParam,
   resolveAdminProviders,
 } from './shared.js'
@@ -138,7 +140,7 @@ export function registerAttendanceRoutes(router: Hono<AppEnv>, deps: AdminRouter
       throw AppError.validationError('Invalid action_type query parameter.')
     }
 
-    const limit = limitQuery ? Number(limitQuery) : undefined
+    const limit = parseOptionalLimit(limitQuery)
 
     const attempts = await listAttendanceAttempts({
       filter: {
@@ -247,21 +249,8 @@ export function registerAttendanceRoutes(router: Hono<AppEnv>, deps: AdminRouter
     const limitQuery = c.req.query('limit')
     const offsetQuery = c.req.query('offset')
 
-    const limit = limitQuery ? Number(limitQuery) : 50
-    const offset = offsetQuery ? Number(offsetQuery) : 0
-
-    if (
-      limitQuery !== undefined &&
-      (limitQuery.trim() === '' || !Number.isInteger(limit) || limit < 1 || limit > 100)
-    ) {
-      throw AppError.validationError('limit must be an integer between 1 and 100.')
-    }
-    if (
-      offsetQuery !== undefined &&
-      (offsetQuery.trim() === '' || !Number.isInteger(offset) || offset < 0)
-    ) {
-      throw AppError.validationError('offset must be a non-negative integer.')
-    }
+    const limit = parseOptionalLimit(limitQuery) ?? 50
+    const offset = parseOptionalOffset(offsetQuery) ?? 0
 
     assertValidAttendanceDateFilters(date, startDate, endDate)
 

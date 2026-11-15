@@ -342,4 +342,32 @@ describe('Ticket 11 — Notification Outbox & Worker Integration Tests', () => {
     const afterDelete = await domainStore.getNotificationById(notificationId)
     expect(afterDelete).toBeNull()
   })
+
+  it('rejects invalid pagination and enum query parameters with 422 VALIDATION_ERROR', async () => {
+    const { domainStore, identityProvider, app } = createIntegrationEnvironment()
+    await setupTestUsers(domainStore, identityProvider)
+
+    const adminToken = tokenFor({
+      sub: 'admin-1',
+      roles: ['school_admin'],
+      scope: 'openid profile admin:read admin:write leave:read leave:approve',
+      mfa_verified: true,
+      must_change_password: false,
+    })
+
+    for (const path of [
+      '/v1/admin/notifications?limit=abc',
+      '/v1/admin/notifications?offset=-1',
+      '/v1/admin/notifications?channel=sms',
+      '/v1/admin/notifications?status=unknown',
+      '/v1/admin/leave-requests?limit=0',
+      '/v1/admin/leave-requests?offset=abc',
+      '/v1/admin/attendance/attempts?limit=1.5',
+    ]) {
+      const res = await app.request(path, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      })
+      expect(res.status).toBe(422)
+    }
+  })
 })

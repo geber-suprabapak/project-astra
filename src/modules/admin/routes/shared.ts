@@ -45,3 +45,24 @@ export function isValidIsoDate(value: string): boolean {
   const dateObj = new Date(`${value}T00:00:00.000Z`)
   return !Number.isNaN(dateObj.getTime()) && dateObj.toISOString().slice(0, 10) === value
 }
+
+export function parseOptionalLimit(
+  limitQuery: string | undefined,
+  maxLimit = 100,
+): number | undefined {
+  if (limitQuery === undefined) return undefined
+  const limit = Number(limitQuery)
+  if (limitQuery.trim() === '' || !Number.isInteger(limit) || limit < 1 || limit > maxLimit) {
+    throw AppError.validationError(`limit must be an integer between 1 and ${maxLimit}.`)
+  }
+  return limit
+}
+
+export function parseOptionalOffset(offsetQuery: string | undefined): number | undefined {
+  if (offsetQuery === undefined) return undefined
+  const offset = Number(offsetQuery)
+  if (offsetQuery.trim() === '' || !Number.isInteger(offset) || offset < 0) {
+    throw AppError.validationError('offset must be a non-negative integer.')
+  }
+  return offset
+}
