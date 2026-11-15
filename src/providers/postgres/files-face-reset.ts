@@ -24,7 +24,11 @@ export async function createPasswordResetCode(
   params: CreatePasswordResetCodeParams,
 ): Promise<PasswordResetCode> {
   return withPgError(
-    (err) => logger.error({ err, params }, 'Failed to create password reset code'),
+    (err) =>
+      logger.error(
+        { err, userId: params.userId, createdBy: params.createdBy ?? null },
+        'Failed to create password reset code',
+      ),
     async () => {
       const rows = await sql<PasswordResetCode[]>`
         INSERT INTO password_reset_codes (user_id, code, expires_at, created_by)
@@ -45,7 +49,7 @@ export async function getActivePasswordResetCode(
   code: string,
 ): Promise<PasswordResetCode | null> {
   return withPgError(
-    (err) => logger.error({ err, userId, code }, 'Failed to query active reset code'),
+    (err) => logger.error({ err, userId }, 'Failed to query active reset code'),
     async () => {
       const rows = await sql<PasswordResetCode[]>`
         SELECT id, user_id, code, expires_at::text, used, used_at::text, created_by, created_at::text

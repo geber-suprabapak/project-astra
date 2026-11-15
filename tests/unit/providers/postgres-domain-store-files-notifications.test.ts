@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { logger } from '../../../src/lib/logging/logger.js'
 import { PostgresDomainStore } from '../../../src/providers/postgres/domain-store.js'
 import { createMockSql } from './postgres-mock-sql.js'
 
@@ -241,5 +242,31 @@ describe('PostgresDomainStore (Files, Face & Notifications)', () => {
     expect(updated.status).toBe('delivered')
 
     await expect(store.deleteNotification('notif-123')).resolves.toBeUndefined()
+  })
+
+  it('omits plaintext reset codes from password reset error logs', async () => {
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined)
+    try {
+      const failingSql = createMockSql(() => {
+        throw new Error('pg failure')
+      })
+      const store = new PostgresDomainStore({ sql: failingSql })
+
+      await expect(
+        store.createPasswordResetCode({
+          userId: 'student-1',
+          code: '774411',
+          expiresAt: '2026-11-15T12:00:00Z',
+          createdBy: 'admin-1',
+        }),
+      ).rejects.toThrow()
+
+      await expect(store.getActivePasswordResetCode('student-1', '774411')).rejects.toThrow()
+
+      const logged = JSON.stringify(errorSpy.mock.calls)
+      expect(logged).not.toContain('774411')
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 })

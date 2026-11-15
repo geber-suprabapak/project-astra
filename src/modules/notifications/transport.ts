@@ -26,6 +26,7 @@ const payloadSchema = z
     title: z.string().optional(),
     body: z.string().optional(),
     email: z.string().optional(),
+    type: z.string().optional(),
   })
   .passthrough()
 
@@ -37,6 +38,7 @@ export class LoggingNotificationTransport implements NotificationTransport {
     const parsed = payloadSchema.safeParse(notification.payload)
     const title = parsed.success && parsed.data.title ? parsed.data.title : 'Notification'
     const body = parsed.success && parsed.data.body ? parsed.data.body : ''
+    const payloadType = parsed.success ? parsed.data.type : undefined
     const recipient = recipientProfile?.full_name ?? notification.user_id
 
     logger.info(
@@ -44,8 +46,9 @@ export class LoggingNotificationTransport implements NotificationTransport {
         notificationId: notification.id,
         userId: notification.user_id,
         channel: 'push',
+        type: payloadType,
         title,
-        body,
+        bodyLength: body.length,
         recipient,
       },
       'Push notification dispatched',
@@ -68,6 +71,8 @@ export class LoggingNotificationTransport implements NotificationTransport {
     const title = parsed.success && parsed.data.title ? parsed.data.title : 'Notification'
     const body = parsed.success && parsed.data.body ? parsed.data.body : ''
 
+    const payloadType = parsed.success ? parsed.data.type : undefined
+
     if (!email) {
       return {
         success: false,
@@ -75,14 +80,15 @@ export class LoggingNotificationTransport implements NotificationTransport {
       }
     }
 
+    // Never log plaintext notification body (may carry password reset codes).
     logger.info(
       {
         notificationId: notification.id,
         userId: notification.user_id,
         channel: 'email',
-        email,
+        type: payloadType,
         title,
-        body,
+        bodyLength: body.length,
       },
       'Email notification dispatched',
     )

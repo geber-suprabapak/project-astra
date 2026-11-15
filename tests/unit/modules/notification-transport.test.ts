@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ExpoPushNotificationTransport } from '../../../src/modules/notifications/transport.js'
+import { logger } from '../../../src/lib/logging/logger.js'
+import {
+  ExpoPushNotificationTransport,
+  LoggingNotificationTransport,
+} from '../../../src/modules/notifications/transport.js'
 import type { NotificationRecord, UserProfile } from '../../../src/providers/types.js'
 
 const token = 'ExponentPushToken[test]'
@@ -105,5 +109,38 @@ describe('ExpoPushNotificationTransport', () => {
 
     expect(result).toEqual({ success: false, error: 'No Expo push token registered' })
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('omits plaintext body and email from LoggingNotificationTransport dispatch logs', async () => {
+    const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => undefined)
+    try {
+      const secretCode = '918273'
+      const resetNotification: NotificationRecord = {
+        id: 'notif-reset',
+        user_id: 'student-test',
+        channel: 'email',
+        payload: {
+          title: 'Kode Reset Kata Sandi',
+          body: `Kode verifikasi reset kata sandi Anda: ${secretCode}`,
+          code: secretCode,
+          type: 'password_reset_code',
+        },
+        status: 'processing',
+        retry_count: 0,
+      }
+
+      const result = await new LoggingNotificationTransport().sendEmail(resetNotification, {
+        ...profile,
+        email: 'siswa@school.example',
+      })
+
+      expect(result.success).toBe(true)
+      expect(infoSpy).toHaveBeenCalledOnce()
+      const loggedPayload = JSON.stringify(infoSpy.mock.calls[0])
+      expect(loggedPayload).not.toContain(secretCode)
+      expect(loggedPayload).not.toContain('siswa@school.example')
+    } finally {
+      infoSpy.mockRestore()
+    }
   })
 })

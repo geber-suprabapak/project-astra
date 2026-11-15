@@ -7,7 +7,15 @@ export const logger = pino({
     tenantKey: process.env['TENANT_KEY'] ?? 'unknown',
   },
   redact: {
-    paths: ['*.password', '*.token', '*.access_token', '*.image_base64'],
+    paths: [
+      '*.password',
+      '*.token',
+      '*.access_token',
+      '*.image_base64',
+      'params.code',
+      'payload.code',
+      'resetCode',
+    ],
     censor: '[REDACTED]',
   },
 })
