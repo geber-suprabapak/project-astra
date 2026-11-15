@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { accountView, cmsAccountCreateSchema, cmsAccountPatchSchema } from './accounts.js'
 import { createCmsAccount, resetCmsAccountPassword } from './account-service.js'
 import { Hono, type Context } from 'hono'
@@ -46,6 +47,16 @@ const CMS_UPLOAD_SIGNATURES = new Map<string, (buf: Buffer) => boolean>([
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     (b) => b.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])),
   ],
+])
+
+const CMS_UPLOAD_EXTENSIONS = new Map<string, string>([
+  ['image/jpeg', 'jpg'],
+  ['image/png', 'png'],
+  ['image/webp', 'webp'],
+  ['image/gif', 'gif'],
+  ['application/pdf', 'pdf'],
+  ['application/msword', 'doc'],
+  ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'docx'],
 ])
 
 export function createCmsRouter(deps: { providers?: AppProviders } = {}) {
@@ -202,9 +213,9 @@ export function createCmsRouter(deps: { providers?: AppProviders } = {}) {
     const rawFolder =
       folderEntry instanceof File ? 'general' : (folderEntry?.toString().trim() ?? 'general')
     const safeFolder = rawFolder.replace(/[^a-z0-9_-]/gi, '') || 'general'
-    const ext = fileEntry.name.split('.').pop()?.toLowerCase() || 'bin'
-    const safeExt = /^[a-z0-9]+$/.test(ext) ? ext : 'bin'
-    const safePath = `cms/${safeFolder}/${Date.now()}-${Math.random().toString(36).substring(2)}.${safeExt}`
+    const safeExt = CMS_UPLOAD_EXTENSIONS.get(fileEntry.type) ?? 'bin'
+    const token = randomUUID().replaceAll('-', '')
+    const safePath = `cms/${safeFolder}/${Date.now()}-${token}.${safeExt}`
 
     const buffer = Buffer.from(await fileEntry.arrayBuffer())
     if (buffer.length === 0 || !verifySignature(buffer)) {

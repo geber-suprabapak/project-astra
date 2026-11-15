@@ -461,6 +461,23 @@ describe('native CMS content API', () => {
     expect(json.data.path).toMatch(/^cms\/hero-slides\/\d+-[a-z0-9]+\.png$/)
     expect(json.data.url).toContain(encodeURIComponent(json.data.path))
 
+    // Derives extension from verified MIME type even if filename tries .html or .svg
+    const polyglotForm = new FormData()
+    polyglotForm.append('file', new File([validPng], 'evil.html', { type: 'image/png' }))
+    polyglotForm.append('folder', 'hero-slides')
+    const polyglotRes = await env.app.request('/v1/cms/uploads', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer root',
+        'X-Astra-Contract-Version': 'v1',
+      },
+      body: polyglotForm,
+    })
+    expect(polyglotRes.status).toBe(201)
+    const polyglotJson = await polyglotRes.json()
+    expect(polyglotJson.data.path).toMatch(/^cms\/hero-slides\/\d+-[a-z0-9]+\.png$/)
+    expect(polyglotJson.data.path).not.toContain('.html')
+
     // Rejects SVG uploads (XSS vector)
     const svgForm = new FormData()
     svgForm.append(
