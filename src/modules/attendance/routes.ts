@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { auth } from '../../middleware/auth.js'
 import { rateLimits } from '../../middleware/rate-limit.js'
+import { parseJsonRequest } from '../../lib/http/request.js'
 import { successResponse } from '../../lib/http/responses.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { defaultProviders } from '../../providers/index.js'
@@ -36,14 +37,12 @@ export function createAttendanceRouter(deps: AttendanceRouterDeps = {}) {
     const requestId = c.get('requestId')
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
 
-    const body = await c.req.json()
-    const parsed = PrecheckBodySchema.safeParse(body)
-    if (!parsed.success) throw AppError.validationError(parsed.error.flatten())
+    const data = await parseJsonRequest(c, PrecheckBodySchema)
 
     const result = await precheck({
       userId,
-      latitude: parsed.data.latitude,
-      longitude: parsed.data.longitude,
+      latitude: data.latitude,
+      longitude: data.longitude,
       token,
       requestId,
       providers,
@@ -58,16 +57,14 @@ export function createAttendanceRouter(deps: AttendanceRouterDeps = {}) {
     const requestId = c.get('requestId')
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
 
-    const body = await c.req.json()
-    const parsed = SubmitBodySchema.safeParse(body)
-    if (!parsed.success) throw AppError.validationError(parsed.error.flatten())
+    const data = await parseJsonRequest(c, SubmitBodySchema)
 
     const result = await submit({
       userId,
-      actionType: parsed.data.action_type,
-      imageBase64: parsed.data.image_base64,
-      latitude: parsed.data.latitude,
-      longitude: parsed.data.longitude,
+      actionType: data.action_type,
+      imageBase64: data.image_base64,
+      latitude: data.latitude,
+      longitude: data.longitude,
       token,
       requestId,
       providers,

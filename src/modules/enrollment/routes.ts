@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { auth } from '../../middleware/auth.js'
 import { rateLimits } from '../../middleware/rate-limit.js'
+import { readFormDataRequest } from '../../lib/http/request.js'
 import { successResponse } from '../../lib/http/responses.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { defaultProviders } from '../../providers/index.js'
@@ -40,7 +41,7 @@ export function createEnrollmentRouter(deps: EnrollmentRouterDeps = {}) {
     const requestId = c.get('requestId')
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
 
-    const form = await c.req.formData()
+    const form = await readFormDataRequest(c)
     const fileEntries = form.getAll('files')
 
     const files: EnrollmentFile[] = []

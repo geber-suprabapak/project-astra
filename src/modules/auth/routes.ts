@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
+import { parseJsonRequest } from '../../lib/http/request.js'
 import { successResponse } from '../../lib/http/responses.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { auth } from '../../middleware/auth.js'
@@ -34,13 +35,9 @@ export function createStudentAuthRouter(deps: StudentAuthRouterDeps = {}) {
   // POST /signup
   router.post('/signup', rateLimits.authSignup, async (c) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
-    const body = await c.req.json()
-    const parsed = studentSignupSchema.safeParse(body)
-    if (!parsed.success) {
-      throw AppError.validationError(parsed.error.flatten())
-    }
+    const data = await parseJsonRequest(c, studentSignupSchema)
 
-    const profile = await registerStudent(parsed.data, providers)
+    const profile = await registerStudent(data, providers)
     return successResponse(
       c,
       profile,
@@ -52,13 +49,9 @@ export function createStudentAuthRouter(deps: StudentAuthRouterDeps = {}) {
   // POST /reset-password
   router.post('/reset-password', rateLimits.authResetPassword, async (c) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
-    const body = await c.req.json()
-    const parsed = studentResetPasswordSchema.safeParse(body)
-    if (!parsed.success) {
-      throw AppError.validationError(parsed.error.flatten())
-    }
+    const data = await parseJsonRequest(c, studentResetPasswordSchema)
 
-    const result = await resetStudentPassword(parsed.data, providers)
+    const result = await resetStudentPassword(data, providers)
     return successResponse(c, result, result.message)
   })
 

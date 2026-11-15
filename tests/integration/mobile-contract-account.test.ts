@@ -233,6 +233,36 @@ describe('integration: /v1/mobile permits, profile, and fallback boundary', () =
     })
   })
 
+  describe('Malformed request body handling', () => {
+    it('returns 422 VALIDATION_ERROR instead of 500 for malformed JSON and multipart payloads', async () => {
+      const badJsonRes = await app.request('/v1/mobile/profile/password', {
+        method: 'PATCH',
+        headers: {
+          Authorization: authHeader,
+          'Content-Type': 'application/json',
+        },
+        body: '{bad json',
+      })
+      expect(badJsonRes.status).toBe(422)
+      // SAFETY: test assertion checks standard error code envelope
+      const badJsonBody = (await badJsonRes.json()) as { error: { code: string } }
+      expect(badJsonBody.error.code).toBe('VALIDATION_ERROR')
+
+      const badMultipartRes = await app.request('/v1/mobile/face/enrollment', {
+        method: 'POST',
+        headers: {
+          Authorization: authHeader,
+          'Content-Type': 'text/plain',
+        },
+        body: 'not-multipart',
+      })
+      expect(badMultipartRes.status).toBe(422)
+      // SAFETY: test assertion checks standard error code envelope
+      const badMultipartBody = (await badMultipartRes.json()) as { error: { code: string } }
+      expect(badMultipartBody.error.code).toBe('VALIDATION_ERROR')
+    })
+  })
+
   describe('Route 404 fallback', () => {
     it('returns standard 404 error envelope for undefined routes', async () => {
       const res = await app.request('/v1/mobile/non-existent')

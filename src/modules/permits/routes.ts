@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { auth } from '../../middleware/auth.js'
 import { rateLimits } from '../../middleware/rate-limit.js'
+import { readFormDataRequest } from '../../lib/http/request.js'
 import { successResponse } from '../../lib/http/responses.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { defaultProviders } from '../../providers/index.js'
@@ -64,7 +65,7 @@ export function createPermitsRouter(deps: PermitsRouterDeps = {}) {
         date = json.date
         fileId = json.file_id ?? json.fileId ?? null
       } else {
-        const form = await c.req.formData()
+        const form = await readFormDataRequest(c)
         category = form.get('category')
         description = form.get('description')
         date = form.get('date')

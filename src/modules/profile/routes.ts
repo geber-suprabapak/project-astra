@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { auth } from '../../middleware/auth.js'
 import { rateLimits } from '../../middleware/rate-limit.js'
+import { parseJsonRequest, readFormDataRequest } from '../../lib/http/request.js'
 import { successResponse } from '../../lib/http/responses.js'
 import { AppError } from '../../lib/errors/app-error.js'
 import { defaultProviders } from '../../providers/index.js'
@@ -44,7 +45,7 @@ export function createProfileRouter(deps: ProfileRouterDeps = {}) {
     const contentType = c.req.header('Content-Type') ?? ''
 
     if (contentType.includes('multipart/form-data')) {
-      const form = await c.req.formData()
+      const form = await readFormDataRequest(c)
       const fileEntry = form.get('file')
       const clear = form.get('clear')
 
@@ -66,9 +67,8 @@ export function createProfileRouter(deps: ProfileRouterDeps = {}) {
     }
 
     if (contentType.includes('application/json')) {
-      const body = await c.req.json()
-      const parsedClear = ClearAvatarSchema.safeParse(body)
-      if (parsedClear.success && parsedClear.data.clear === true) {
+      const parsedClear = await parseJsonRequest(c, ClearAvatarSchema).catch(() => null)
+      if (parsedClear?.clear === true) {
         await updateAvatar(userId, null, true, providers)
         return successResponse(c, { avatar_url: null }, 'Avatar cleared.')
       }
@@ -82,20 +82,10 @@ export function createProfileRouter(deps: ProfileRouterDeps = {}) {
   router.patch('/password', rateLimits.profilePassword, async (c) => {
     const userId = c.get('userId')
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
-    const body = await c.req.json()
-    const parsed = UpdatePasswordSchema.safeParse(body)
-    if (!parsed.success) {
-      throw AppError.validationError(parsed.error.flatten())
-    }
+    const data = await parseJsonRequest(c, UpdatePasswordSchema)
 
     const profile = await providers.domainStore.getUserProfile(userId)
-    await changePassword(
-      userId,
-      profile.email,
-      parsed.data.current_password,
-      parsed.data.new_password,
-      providers,
-    )
+    await changePassword(userId, profile.email, data.current_password, data.new_password, providers)
 
     return successResponse(c, null, 'Password updated successfully.')
   })

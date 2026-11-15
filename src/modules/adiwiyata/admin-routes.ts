@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { AppError } from '../../lib/errors/app-error.js'
+import { parseJsonRequest } from '../../lib/http/request.js'
 import { successResponse } from '../../lib/http/responses.js'
 import { defaultProviders } from '../../providers/index.js'
 import type { AppProviders } from '../../providers/types.js'
@@ -138,11 +139,10 @@ export function createAdiwiyataAdminRouter(deps: AdiwiyataAdminRouterDeps = {}) 
   })
 
   router.post('/eligibility', async (c) => {
-    const parsed = eligibilityGrantSchema.safeParse(await c.req.json())
-    if (!parsed.success) throw AppError.validationError(parsed.error.flatten())
+    const data = await parseJsonRequest(c, eligibilityGrantSchema)
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const eligibility = await grantAdiwiyataEligibility({
-      userId: parsed.data.user_id,
+      userId: data.user_id,
       actorId: c.get('userId'),
       actorRole: c.get('profileRole'),
       providers,
@@ -174,13 +174,12 @@ export function createAdiwiyataAdminRouter(deps: AdiwiyataAdminRouterDeps = {}) 
 
   router.post('/sites', async (c) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
-    const parsed = createSiteSchema.safeParse(await c.req.json())
-    if (!parsed.success) throw AppError.validationError(parsed.error.flatten())
+    const data = await parseJsonRequest(c, createSiteSchema)
     const site = await createAdiwiyataAdminSite({
-      name: parsed.data.name,
-      category: parsed.data.category,
-      classId: parsed.data.class_id,
-      sortOrder: parsed.data.sort_order,
+      name: data.name,
+      category: data.category,
+      classId: data.class_id,
+      sortOrder: data.sort_order,
       actorId: c.get('userId'),
       actorRole: c.get('profileRole'),
       providers,
@@ -193,14 +192,13 @@ export function createAdiwiyataAdminRouter(deps: AdiwiyataAdminRouterDeps = {}) 
     if (!id.success)
       throw AppError.validationError({ fieldErrors: { id: ['ID Site tidak valid.'] } })
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
-    const parsed = updateSiteSchema.safeParse(await c.req.json())
-    if (!parsed.success) throw AppError.validationError(parsed.error.flatten())
+    const data = await parseJsonRequest(c, updateSiteSchema)
     const site = await updateAdiwiyataAdminSite({
       id: id.data,
-      name: parsed.data.name,
-      category: parsed.data.category,
-      classId: parsed.data.class_id,
-      sortOrder: parsed.data.sort_order,
+      name: data.name,
+      category: data.category,
+      classId: data.class_id,
+      sortOrder: data.sort_order,
       actorRole: c.get('profileRole'),
       providers,
     })

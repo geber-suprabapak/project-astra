@@ -1,6 +1,7 @@
 import type { Context } from 'hono'
 import type { z } from 'zod'
 import { AppError } from '../../../lib/errors/app-error.js'
+import { parseJsonRequest } from '../../../lib/http/request.js'
 import { defaultProviders } from '../../../providers/index.js'
 import type { AppProviders } from '../../../providers/types.js'
 import type { AppEnv } from '../../../types/context.js'
@@ -21,13 +22,8 @@ export function requireRouteParam(c: Context<AppEnv>, name: string): string {
   return value
 }
 
-export async function parseJsonBody<T>(c: Context<AppEnv>, schema: z.ZodType<T>): Promise<T> {
-  const body = await c.req.json()
-  const parsed = schema.safeParse(body)
-  if (!parsed.success) {
-    throw AppError.validationError(parsed.error.flatten())
-  }
-  return parsed.data
+export function parseJsonBody<T>(c: Context<AppEnv>, schema: z.ZodType<T>): Promise<T> {
+  return parseJsonRequest(c, schema)
 }
 
 export async function parseJsonBodyOrEmpty<T>(
