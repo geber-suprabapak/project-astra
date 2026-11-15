@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { AppError } from '../../lib/errors/app-error.js'
 import { logger } from '../../lib/logging/logger.js'
 import type { CreateStudentIdentityParams, IdentityRole } from '../types.js'
-import type { LogtoManagementClient } from './logto-client.js'
+import { logtoFetch, type LogtoManagementClient } from './logto-client.js'
 
 type LogtoCreateUserPayload = {
   username?: string
@@ -25,11 +25,9 @@ export async function createCmsIdentity(
   const token = await client.getManagementToken()
   const roleIds = await client.getRoleIds([roleName], token)
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
-  const response = await fetch(`${baseUrl}/api/users`, {
+  const response = await logtoFetch(`${baseUrl}/api/users`, {
     method: 'POST',
     headers,
-    signal: AbortSignal.timeout(10000),
-    redirect: 'error',
     body: JSON.stringify({
       primaryEmail: params.email,
       name: params.fullName,
@@ -44,11 +42,9 @@ export async function createCmsIdentity(
   }
   if (!response.ok) throw AppError.dependencyUnavailable('CMS identity provisioning')
   const { id } = z.object({ id: z.string().min(1) }).parse(await response.json())
-  const assigned = await fetch(`${baseUrl}/api/users/${encodeURIComponent(id)}/roles`, {
+  const assigned = await logtoFetch(`${baseUrl}/api/users/${encodeURIComponent(id)}/roles`, {
     method: 'POST',
     headers,
-    signal: AbortSignal.timeout(10000),
-    redirect: 'error',
     body: JSON.stringify({ roleIds }),
   })
   if (!assigned.ok) {
@@ -75,7 +71,7 @@ export async function createStaffIdentity(
   try {
     const baseUrl = client.requireBaseUrl()
     const token = await client.getManagementToken()
-    const response = await fetch(`${baseUrl}/api/users`, {
+    const response = await logtoFetch(`${baseUrl}/api/users`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -114,7 +110,7 @@ export async function assignRoles(
   try {
     const token = await client.getManagementToken()
     const roleIds = await client.getRoleIds(roles, token)
-    const response = await fetch(`${baseUrl}/api/users/${encodeURIComponent(userId)}/roles`, {
+    const response = await logtoFetch(`${baseUrl}/api/users/${encodeURIComponent(userId)}/roles`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -149,7 +145,7 @@ export async function createStudentIdentity(
     }
 
     let userId: string | null = null
-    const response = await fetch(`${baseUrl}/api/users`, {
+    const response = await logtoFetch(`${baseUrl}/api/users`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -163,7 +159,7 @@ export async function createStudentIdentity(
       const data = (await response.json()) as { id: string }
       userId = data.id
     } else if (response.status === 409 || response.status === 422) {
-      const searchRes = await fetch(
+      const searchRes = await logtoFetch(
         `${baseUrl}/api/users?search.primaryEmail=${encodeURIComponent(params.email)}`,
         {
           headers: { Authorization: `Bearer ${token}` },
@@ -210,7 +206,7 @@ export async function assignUserRole(
   try {
     const token = await client.getManagementToken()
     const roleIds = await client.getRoleIds([role], token)
-    const response = await fetch(`${baseUrl}/api/users/${encodeURIComponent(userId)}/roles`, {
+    const response = await logtoFetch(`${baseUrl}/api/users/${encodeURIComponent(userId)}/roles`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -237,7 +233,7 @@ export async function revokeUserRole(
   try {
     const token = await client.getManagementToken()
     const [roleId] = await client.getRoleIds([role], token)
-    const response = await fetch(
+    const response = await logtoFetch(
       `${baseUrl}/api/users/${encodeURIComponent(userId)}/roles/${encodeURIComponent(roleId)}`,
       {
         method: 'DELETE',

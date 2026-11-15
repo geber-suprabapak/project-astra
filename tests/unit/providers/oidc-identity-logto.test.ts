@@ -260,4 +260,25 @@ describe('OidcIdentityProvider — configured Logto operations', () => {
       configuredProvider.updateUserMetadata('user-1', { role: 'admin' }),
     ).rejects.toThrow('Failed to update user metadata in identity provider.')
   })
+
+  it('applies AbortSignal timeout and redirect: error to Logto fetch calls', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string | URL) => {
+      if (String(url).endsWith('/oidc/token')) {
+        return Response.json({ access_token: 'm2m-test-token', expires_in: 3600 })
+      }
+      return new Response(null, { status: 204 })
+    })
+    globalThis.fetch = fetchMock
+
+    await configuredProvider.setUserSuspended('user-1', true)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3001/api/users/user-1/is-suspended',
+      expect.objectContaining({
+        method: 'PATCH',
+        redirect: 'error',
+        signal: expect.any(AbortSignal),
+      }),
+    )
+  })
 })

@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { AppError } from '../../lib/errors/app-error.js'
 import { logger } from '../../lib/logging/logger.js'
 import type { UserMetadata } from '../types.js'
-import type { LogtoManagementClient } from './logto-client.js'
+import { logtoFetch, type LogtoManagementClient } from './logto-client.js'
 
 export async function verifyPassword(
   client: LogtoManagementClient,
@@ -11,7 +11,7 @@ export async function verifyPassword(
 ): Promise<void> {
   const baseUrl = client.requireBaseUrl()
   try {
-    const response = await fetch(`${baseUrl}/api/interaction/verification`, {
+    const response = await logtoFetch(`${baseUrl}/api/interaction/verification`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
@@ -34,16 +34,17 @@ export async function updatePassword(
   const baseUrl = client.requireBaseUrl()
   try {
     const token = await client.getManagementToken()
-    const response = await fetch(`${baseUrl}/api/users/${encodeURIComponent(userId)}/password`, {
-      method: 'PATCH',
-      signal: AbortSignal.timeout(10000),
-      redirect: 'error',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+    const response = await logtoFetch(
+      `${baseUrl}/api/users/${encodeURIComponent(userId)}/password`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ password: newPassword }),
       },
-      body: JSON.stringify({ password: newPassword }),
-    })
+    )
     if (!response.ok) {
       logger.error(
         { userId, status: response.status },
@@ -66,14 +67,17 @@ export async function updateUserMetadata(
   const baseUrl = client.requireBaseUrl()
   try {
     const token = await client.getManagementToken()
-    const response = await fetch(`${baseUrl}/api/users/${encodeURIComponent(userId)}/custom-data`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+    const response = await logtoFetch(
+      `${baseUrl}/api/users/${encodeURIComponent(userId)}/custom-data`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ customData: metadata }),
       },
-      body: JSON.stringify({ customData: metadata }),
-    })
+    )
     if (!response.ok) {
       logger.error(
         { userId, status: response.status },
@@ -98,7 +102,7 @@ export async function requestPasswordResetEmail(
 
   try {
     const baseUrl = client.requireBaseUrl()
-    const response = await fetch(`${baseUrl}/api/interaction/verification/password-reset`, {
+    const response = await logtoFetch(`${baseUrl}/api/interaction/verification/password-reset`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
@@ -120,7 +124,7 @@ export async function revokeUserSessions(
     const token = await client.getManagementToken()
     const url = `${baseUrl}/api/users/${encodeURIComponent(userId)}/sessions`
     const headers = { Authorization: `Bearer ${token}` }
-    const response = await fetch(url, { headers })
+    const response = await logtoFetch(url, { headers })
     if (!response.ok) throw AppError.internal('Failed to list identity provider sessions.')
     const { sessions } = z
       .object({
@@ -128,7 +132,7 @@ export async function revokeUserSessions(
       })
       .parse(await response.json())
     for (const session of sessions) {
-      const revoked = await fetch(
+      const revoked = await logtoFetch(
         `${url}/${encodeURIComponent(session.payload.uid)}?revokeGrantsTarget=all`,
         { method: 'DELETE', headers },
       )
@@ -150,7 +154,7 @@ export async function setUserSuspended(
   const baseUrl = client.requireBaseUrl()
   try {
     const token = await client.getManagementToken()
-    const response = await fetch(
+    const response = await logtoFetch(
       `${baseUrl}/api/users/${encodeURIComponent(userId)}/is-suspended`,
       {
         method: 'PATCH',
@@ -179,7 +183,7 @@ export async function updateUserEmail(
   const baseUrl = client.requireBaseUrl()
   try {
     const token = await client.getManagementToken()
-    const response = await fetch(`${baseUrl}/api/users/${encodeURIComponent(userId)}`, {
+    const response = await logtoFetch(`${baseUrl}/api/users/${encodeURIComponent(userId)}`, {
       method: 'PATCH',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -201,7 +205,7 @@ export async function deleteUser(client: LogtoManagementClient, userId: string):
   const baseUrl = client.requireBaseUrl()
   try {
     const token = await client.getManagementToken()
-    const response = await fetch(`${baseUrl}/api/users/${encodeURIComponent(userId)}`, {
+    const response = await logtoFetch(`${baseUrl}/api/users/${encodeURIComponent(userId)}`, {
       method: 'DELETE',
       headers: {
         Authorization: `Bearer ${token}`,

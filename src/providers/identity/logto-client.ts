@@ -2,6 +2,17 @@ import { z } from 'zod'
 import { AppError } from '../../lib/errors/app-error.js'
 import { logger } from '../../lib/logging/logger.js'
 
+const LOGTO_REQUEST_TIMEOUT_MS = 10_000
+
+/** Shared Logto fetch wrapper enforcing an abort timeout and rejecting HTTP redirects. */
+export function logtoFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(url, {
+    ...init,
+    signal: init.signal ?? AbortSignal.timeout(LOGTO_REQUEST_TIMEOUT_MS),
+    redirect: 'error',
+  })
+}
+
 export interface LogtoManagementConfig {
   logtoEndpoint?: string
   logtoAppId?: string
@@ -44,16 +55,17 @@ export class LogtoManagementClient {
     const credentials = Buffer.from(
       `${this.config.logtoAppId}:${this.config.logtoAppSecret}`,
     ).toString('base64')
-    const response = await fetch(`${this.config.logtoEndpoint.replace(/\/$/, '')}/oidc/token`, {
-      method: 'POST',
-      signal: AbortSignal.timeout(10000),
-      redirect: 'error',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: `Basic ${credentials}`,
+    const response = await logtoFetch(
+      `${this.config.logtoEndpoint.replace(/\/$/, '')}/oidc/token`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Authorization: `Basic ${credentials}`,
+        },
+        body: 'grant_type=client_credentials&resource=https://default.logto.app/api&scope=all',
       },
-      body: 'grant_type=client_credentials&resource=https://default.logto.app/api&scope=all',
-    })
+    )
 
     if (!response.ok) {
       logger.error({ status: response.status }, 'Failed to fetch Logto management token')
@@ -71,11 +83,12 @@ export class LogtoManagementClient {
     const baseUrl = this.config.logtoEndpoint?.replace(/\/$/, '')
     const ids = new Map<string, string>()
     for (let page = 1; names.some((name) => !ids.has(name)); page++) {
-      const response = await fetch(`${baseUrl}/api/roles?type=User&page_size=100&page=${page}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(10000),
-        redirect: 'error',
-      })
+      const response = await logtoFetch(
+        `${baseUrl}/api/roles?type=User&page_size=100&page=${page}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      )
       if (!response.ok) throw AppError.internal('Failed to retrieve identity provider roles.')
       const roles = z
         .array(z.object({ id: z.string(), name: z.string() }))
