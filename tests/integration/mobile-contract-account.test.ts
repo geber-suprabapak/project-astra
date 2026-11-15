@@ -181,6 +181,14 @@ describe('integration: /v1/mobile permits, profile, and fallback boundary', () =
 
       expect(res.status).toBe(200)
       expect(body.success).toBe(true)
+      expect(domainStore.auditLogs).toContainEqual(
+        expect.objectContaining({
+          actor_id: userId,
+          action: 'password_change',
+          entity_type: 'profile',
+          entity_id: userId,
+        }),
+      )
     })
 
     it('PATCH /v1/mobile/profile/password rejects invalid current password with 401', async () => {

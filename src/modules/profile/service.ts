@@ -110,6 +110,14 @@ export async function changePassword(
   }
   await providers.identityProvider.verifyPassword(email, currentPassword)
   await providers.identityProvider.updatePassword(userId, newPassword)
+  await providers.identityProvider.updateUserMetadata(userId, { must_change_password: false })
   await providers.domainStore.revokeUserSessions(userId)
   await providers.identityProvider.revokeUserSessions?.(userId)
+  await providers.domainStore.insertAuditLog({
+    actor_id: userId,
+    action: 'password_change',
+    entity_type: 'profile',
+    entity_id: userId,
+    details: {},
+  })
 }
