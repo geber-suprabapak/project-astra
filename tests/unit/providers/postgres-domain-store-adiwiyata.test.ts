@@ -77,6 +77,7 @@ describe('PostgresDomainStore (Adiwiyata)', () => {
       expect(query).toContain('s.school_id = ?::uuid')
       expect(query).toContain('c.school_id = s.school_id')
       expect(query).toContain("f.purpose = 'adiwiyata_report'")
+      expect(query).toContain('f.size_bytes::double precision AS file_size_bytes')
       expect(query).toContain('LEFT JOIN profiles')
       expect(query).not.toMatch(/is_active|academic_period|class_enrollments/)
       expect(calls[0]!.values).toEqual([

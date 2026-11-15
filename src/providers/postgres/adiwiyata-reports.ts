@@ -89,7 +89,7 @@ export async function listAdiwiyataAdminReports(
                r.created_at::text, r.verified_at::text, r.verified_by,
                s.name AS site_name, s.category, c.name AS class_name, p.full_name AS uploader_name,
                f.user_id AS file_user_id, f.purpose AS file_purpose, f.object_path AS file_object_path,
-               f.content_type AS file_content_type, f.size_bytes AS file_size_bytes,
+               f.content_type AS file_content_type, f.size_bytes::double precision AS file_size_bytes,
                f.lifecycle AS file_lifecycle, f.created_at::text AS file_created_at,
                f.updated_at::text AS file_updated_at
         FROM adiwiyata_reports r
