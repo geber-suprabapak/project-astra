@@ -360,4 +360,33 @@ describe('Permits / Leave Requests Service - Student Flows', () => {
       code: 'CONFLICT',
     })
   })
+
+  it('rolls back uploaded S3 attachment and file record if insertPermit fails', async () => {
+    const { domainStore, objectStorage, providers } = setupTestEnvironment()
+
+    domainStore.insertPermit = async () => {
+      throw new Error('DB insert failed or conflict')
+    }
+
+    await expect(
+      createPermit({
+        userId: 'student-1',
+        category: 'sakit',
+        description: 'Sakit flu berat butuh istirahat di rumah',
+        date: '2026-08-22',
+        attachment: {
+          buffer: Buffer.from('fake-image-data'),
+          contentType: 'image/jpeg',
+        },
+        providers,
+      }),
+    ).rejects.toThrow('DB insert failed or conflict')
+
+    expect(objectStorage.objects.size).toBe(0)
+    const files = await domainStore.listFiles({
+      userId: 'student-1',
+      purpose: 'permit_attachment',
+    })
+    expect(files.filter((f) => f.lifecycle !== 'deleted')).toHaveLength(0)
+  })
 })

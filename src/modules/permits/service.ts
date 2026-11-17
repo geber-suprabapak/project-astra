@@ -116,6 +116,8 @@ export async function createPermit(params: {
   await assertApprovedStudent(params.userId, providers)
 
   let storagePath: string | null = null
+  let uploadedStoragePath: string | null = null
+  let createdFileRecordId: string | null = null
 
   if (params.fileId) {
     const fileRecord = await providers.domainStore.getFileRecord(params.fileId)
@@ -140,29 +142,45 @@ export async function createPermit(params: {
     }
     storagePath = fileRecord.object_path
   } else if (params.attachment) {
-    storagePath = await providers.objectStorage.uploadPermitAttachment(
+    uploadedStoragePath = await providers.objectStorage.uploadPermitAttachment(
       params.userId,
       params.attachment.buffer,
       params.attachment.contentType,
     )
-    await providers.domainStore.createFileRecord({
-      userId: params.userId,
-      purpose: 'permit_attachment',
-      objectPath: storagePath,
-      contentType: params.attachment.contentType,
-      sizeBytes: params.attachment.buffer.length,
-      lifecycle: 'available',
-    })
+    storagePath = uploadedStoragePath
   }
 
-  const permit = await providers.domainStore.insertPermit({
-    user_id: params.userId,
-    kategori_izin: params.category,
-    deskripsi: params.description,
-    status: false,
-    link_foto: storagePath,
-    tanggal: `${params.date}T00:00:00+07:00`,
-  })
+  let permit: Permit
+  try {
+    if (params.attachment && uploadedStoragePath) {
+      const createdFile = await providers.domainStore.createFileRecord({
+        userId: params.userId,
+        purpose: 'permit_attachment',
+        objectPath: uploadedStoragePath,
+        contentType: params.attachment.contentType,
+        sizeBytes: params.attachment.buffer.length,
+        lifecycle: 'available',
+      })
+      createdFileRecordId = createdFile.id
+    }
+
+    permit = await providers.domainStore.insertPermit({
+      user_id: params.userId,
+      kategori_izin: params.category,
+      deskripsi: params.description,
+      status: false,
+      link_foto: storagePath,
+      tanggal: `${params.date}T00:00:00+07:00`,
+    })
+  } catch (err) {
+    if (createdFileRecordId) {
+      await providers.domainStore.deleteFileRecord(createdFileRecordId).catch(() => {})
+    }
+    if (uploadedStoragePath && providers.objectStorage.deletePermitAttachment) {
+      await providers.objectStorage.deletePermitAttachment(uploadedStoragePath).catch(() => {})
+    }
+    throw err
+  }
 
   const attachmentUrl = storagePath
     ? await providers.objectStorage.getSignedPermitUrl(storagePath)
