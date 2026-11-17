@@ -107,6 +107,18 @@ describe('enrollment service', () => {
       })
     })
 
+    it('rejects empty 0-byte enrollment files', async () => {
+      const { providers } = createMockEnrollmentProviders()
+      const files = createValidEnrollmentFiles(10)
+      files[2].buffer = Buffer.alloc(0)
+      files[2].size = 0
+      files[2].filename = 'empty.jpg'
+
+      await expect(enrollFace(files, 'token-123', 'req-456', providers)).rejects.toMatchObject({
+        code: ErrorCode.VALIDATION_ERROR,
+      })
+    })
+
     it('stores file records, object storage, and saves face enrollment with audit log for approved student', async () => {
       const { providers, domainStore, mockEnroll } = createMockEnrollmentProviders()
       domainStore.profiles.set('student-approved', {

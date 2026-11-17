@@ -80,6 +80,9 @@ export async function enrollFace(
     if (file.contentType !== ALLOWED_ENROLLMENT_CONTENT_TYPE) {
       throw AppError.validationError(`All files must be JPEG. Got: ${file.contentType}.`)
     }
+    if (file.size <= 0 || file.buffer.length === 0) {
+      throw AppError.validationError(`Each file must be non-empty. "${file.filename}" is empty.`)
+    }
     if (file.size > MAX_ENROLLMENT_FILE_SIZE_BYTES) {
       throw AppError.validationError(
         `Each file must be under 2MB. "${file.filename}" is too large.`,

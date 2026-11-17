@@ -86,6 +86,10 @@ export async function updateAvatar(
     )
   }
 
+  if (file.buffer.length === 0) {
+    throw AppError.validationError('Avatar file cannot be empty.')
+  }
+
   if (file.buffer.length > MAX_AVATAR_SIZE_BYTES) {
     throw AppError.validationError('Avatar file size must be under 5MB.')
   }

@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 import { auth } from '../../middleware/auth.js'
 import { rateLimits } from '../../middleware/rate-limit.js'
 import { readFormDataRequest } from '../../lib/http/request.js'
@@ -35,34 +36,49 @@ export function createEnrollmentRouter(deps: EnrollmentRouterDeps = {}) {
   })
 
   // POST /v1/mobile/face/enrollment
-  router.post('/', rateLimits.enrollment, async (c) => {
-    const userId = c.get('userId')
-    const token = c.get('rawToken')
-    const requestId = c.get('requestId')
-    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+  router.post(
+    '/',
+    bodyLimit({
+      maxSize: 22 * 1024 * 1024,
+      onError: () => {
+        throw new AppError(
+          'VALIDATION_ERROR',
+          413,
+          'Face enrollment payload exceeds the 22MB limit.',
+        )
+      },
+    }),
+    rateLimits.enrollment,
+    async (c) => {
+      const userId = c.get('userId')
+      const token = c.get('rawToken')
+      const requestId = c.get('requestId')
+      const providers = deps.providers ?? c.get('providers') ?? defaultProviders
 
-    const form = await readFormDataRequest(c)
-    const fileEntries = form.getAll('files')
+      const form = await readFormDataRequest(c)
+      const fileEntries = form.getAll('files')
 
-    const files: EnrollmentFile[] = []
-    for (const entry of fileEntries) {
-      if (!(entry instanceof Blob)) {
-        throw AppError.validationError('files must be file uploads, not strings.')
+      const files: EnrollmentFile[] = []
+      for (const entry of fileEntries) {
+        if (!(entry instanceof Blob)) {
+          throw AppError.validationError('files must be file uploads, not strings.')
+        }
+        const arrayBuffer = await entry.arrayBuffer()
+        const buffer = Buffer.from(arrayBuffer)
+        const filename = entry instanceof File ? entry.name : 'image.jpg'
+        const contentType = (entry.type || 'application/octet-stream').split(';')[0]!.trim()
+        files.push({
+          buffer,
+          contentType,
+          filename: filename || 'image.jpg',
+          size: buffer.length,
+        })
       }
-      const arrayBuffer = await entry.arrayBuffer()
-      const buffer = Buffer.from(arrayBuffer)
-      const filename = entry instanceof File ? entry.name : 'image.jpg'
-      files.push({
-        buffer,
-        contentType: entry.type || 'application/octet-stream',
-        filename: filename || 'image.jpg',
-        size: buffer.length,
-      })
-    }
 
-    const result = await enrollFace(files, token, requestId, providers, userId)
-    return successResponse(c, result, 'Face enrollment completed.', 201)
-  })
+      const result = await enrollFace(files, token, requestId, providers, userId)
+      return successResponse(c, result, 'Face enrollment completed.', 201)
+    },
+  )
 
   // DELETE /v1/mobile/face/enrollment
   router.delete('/', rateLimits.standard, async (c) => {

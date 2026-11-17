@@ -59,11 +59,15 @@ export function createPermitsRouter(deps: PermitsRouterDeps = {}) {
       let attachment: { buffer: Buffer; contentType: string } | null = null
 
       if (contentType.includes('application/json')) {
-        const json = await c.req.json().catch(() => ({}))
-        category = json.category
-        description = json.description
-        date = json.date
-        fileId = json.file_id ?? json.fileId ?? null
+        const rawJson = await c.req.json().catch(() => ({}))
+        const parsedJson = CreatePermitSchema.safeParse(rawJson)
+        if (!parsedJson.success) {
+          throw AppError.validationError(parsedJson.error.flatten())
+        }
+        category = parsedJson.data.category
+        description = parsedJson.data.description
+        date = parsedJson.data.date
+        fileId = parsedJson.data.file_id ?? parsedJson.data.fileId ?? null
       } else {
         const form = await readFormDataRequest(c)
         category = form.get('category')
@@ -78,6 +82,10 @@ export function createPermitsRouter(deps: PermitsRouterDeps = {}) {
         if (attachmentEntry instanceof Blob) {
           const arrayBuffer = await attachmentEntry.arrayBuffer()
           const buffer = Buffer.from(arrayBuffer)
+
+          if (buffer.length === 0) {
+            throw AppError.validationError('Attachment file cannot be empty.')
+          }
 
           if (buffer.length > MAX_PERMIT_ATTACHMENT_SIZE_BYTES) {
             throw AppError.validationError('Attachment must be under 10MB.')
