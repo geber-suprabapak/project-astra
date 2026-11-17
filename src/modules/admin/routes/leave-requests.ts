@@ -1,4 +1,5 @@
 import type { Context, Hono } from 'hono'
+import { z } from 'zod'
 import { successResponse } from '../../../lib/http/responses.js'
 import { AppError } from '../../../lib/errors/app-error.js'
 import {
@@ -143,13 +144,28 @@ export function registerLeaveRequestRoutes(router: Hono<AppEnv>, deps: AdminRout
   })
 
   // PATCH /v1/admin/leave-requests/:id & /v1/admin/permits/:id
+  const patchLeaveRequestBodySchema = z
+    .object({
+      approval_status: z.string().nullish(),
+      approvalStatus: z.string().nullish(),
+      reason: z.string().nullish(),
+      rejection_reason: z.string().nullish(),
+      rejectionReason: z.string().nullish(),
+    })
+    .passthrough()
+
   const handlePatchLeaveRequest = async (c: Context<AppEnv>) => {
     const providers = resolveAdminProviders(c, deps)
     const id = requireRouteParam(c, 'id')
-    const body = await c.req.json().catch(() => ({}))
+    const rawBody = await c.req.json().catch(() => ({}))
+    const bodyResult = patchLeaveRequestBodySchema.safeParse(rawBody)
+    if (!bodyResult.success) {
+      throw AppError.validationError(bodyResult.error.flatten())
+    }
+    const body = bodyResult.data
     const status = body.approval_status ?? body.approvalStatus
     if (status === 'approved') {
-      const parsed = approveLeaveRequestSchema.safeParse(body)
+      const parsed = approveLeaveRequestSchema.safeParse(rawBody)
       if (!parsed.success) {
         throw AppError.validationError(parsed.error.flatten())
       }
@@ -164,7 +180,7 @@ export function registerLeaveRequestRoutes(router: Hono<AppEnv>, deps: AdminRout
     } else if (status === 'rejected') {
       const rejected = await rejectLeaveRequest({
         id,
-        reason: body.reason ?? body.rejection_reason ?? body.rejectionReason,
+        reason: body.reason ?? body.rejection_reason ?? body.rejectionReason ?? undefined,
         actorRole: c.get('profileRole'),
         actorId: c.get('userId'),
         providers,

@@ -1,4 +1,5 @@
 import type { Context, Hono } from 'hono'
+import { z } from 'zod'
 import { AppError } from '../../../lib/errors/app-error.js'
 import { successResponse } from '../../../lib/http/responses.js'
 import { notificationChannelSchema, notificationStatusSchema } from '../../../providers/types.js'
@@ -104,10 +105,17 @@ export function registerNotificationRoutes(router: Hono<AppEnv>, deps: AdminRout
   router.post('/notifications/enqueue', handleEnqueueNotification)
 
   // POST|PATCH /v1/admin/notifications/:id/retry
+  const retryNotificationBodySchema = z
+    .object({
+      reset_count: z.boolean().optional(),
+      resetCount: z.boolean().optional(),
+    })
+    .passthrough()
+
   const handleRetryNotification = async (c: Context<AppEnv>) => {
     const providers = resolveAdminProviders(c, deps)
     const id = requireRouteParam(c, 'id')
-    const body = await c.req.json().catch(() => ({}))
+    const body = await parseJsonBodyOrEmpty(c, retryNotificationBodySchema)
 
     const retried = await retryAdminNotification({
       id,
