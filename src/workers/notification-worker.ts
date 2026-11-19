@@ -1,6 +1,11 @@
 import { AppError } from '../lib/errors/app-error.js'
 import { logger } from '../lib/logging/logger.js'
 import {
+  observeNotificationBatchDuration,
+  recordNotificationOutcome,
+} from '../lib/observability/metrics.js'
+import { SpanKind, withSpan } from '../lib/observability/tracing.js'
+import {
   type NotificationTransport,
   LoggingNotificationTransport,
 } from '../modules/notifications/transport.js'
@@ -51,88 +56,114 @@ export class NotificationWorker {
   }
 
   async processBatch(): Promise<WorkerBatchResult> {
-    const claimedRecords = await this.domainStore.claimPendingNotifications({
-      limit: this.batchSize,
-      maxRetries: this.maxRetries,
-      leaseMs: this.leaseMs,
-    })
+    const startHr = performance.now()
+    return withSpan(
+      'notifications.process_batch',
+      SpanKind.CONSUMER,
+      { 'messaging.system': 'postgres_outbox', 'messaging.batch.max_size': this.batchSize },
+      async (span) => {
+        try {
+          const claimedRecords = await this.domainStore.claimPendingNotifications({
+            limit: this.batchSize,
+            maxRetries: this.maxRetries,
+            leaseMs: this.leaseMs,
+          })
 
-    const result: WorkerBatchResult = {
-      claimed: claimedRecords.length,
-      delivered: 0,
-      retried: 0,
-      failed: 0,
-    }
+          const result: WorkerBatchResult = {
+            claimed: claimedRecords.length,
+            delivered: 0,
+            retried: 0,
+            failed: 0,
+          }
 
-    if (claimedRecords.length === 0) {
-      return result
-    }
+          span.setAttribute('messaging.batch.message_count', claimedRecords.length)
 
-    for (const notification of claimedRecords) {
-      await this.processSingleNotification(notification, result)
-    }
+          if (claimedRecords.length === 0) {
+            return result
+          }
 
-    return result
+          for (const notification of claimedRecords) {
+            await this.processSingleNotification(notification, result)
+          }
+
+          return result
+        } finally {
+          observeNotificationBatchDuration((performance.now() - startHr) / 1000)
+        }
+      },
+    )
   }
 
   private async processSingleNotification(
     notification: NotificationRecord,
     batchResult: WorkerBatchResult,
   ): Promise<void> {
-    try {
-      const recipientProfile = await this.domainStore
-        .getUserProfile(notification.user_id)
-        .catch(() => null)
-
-      const deliveryResult =
-        notification.channel === 'push'
-          ? await this.transport.sendPush(notification, recipientProfile)
-          : await this.transport.sendEmail(notification, recipientProfile)
-
-      if (deliveryResult.success) {
+    return withSpan(
+      'notifications.deliver',
+      SpanKind.CONSUMER,
+      {
+        'messaging.system': 'postgres_outbox',
+        'notification.channel': notification.channel,
+        'notification.retry_count': notification.retry_count,
+      },
+      async () => {
         try {
-          await this.domainStore.updateNotificationStatus({
-            id: notification.id,
-            status: 'delivered',
-            errorMessage: null,
-            nextRetryAt: null,
-            expectedCurrentStatus: 'processing',
-            expectedUpdatedAt: notification.updated_at,
-          })
-          batchResult.delivered++
-          logger.info(
-            {
-              notificationId: notification.id,
-              userId: notification.user_id,
-              channel: notification.channel,
-              messageId: deliveryResult.messageId,
-            },
-            'Notification delivered successfully',
-          )
-        } catch (updateErr: unknown) {
-          if (updateErr instanceof AppError && updateErr.httpStatus === 409) {
-            logger.warn(
-              { notificationId: notification.id },
-              'Ignoring stale worker delivery status update after lease expiry',
+          const recipientProfile = await this.domainStore
+            .getUserProfile(notification.user_id)
+            .catch(() => null)
+
+          const deliveryResult =
+            notification.channel === 'push'
+              ? await this.transport.sendPush(notification, recipientProfile)
+              : await this.transport.sendEmail(notification, recipientProfile)
+
+          if (deliveryResult.success) {
+            try {
+              await this.domainStore.updateNotificationStatus({
+                id: notification.id,
+                status: 'delivered',
+                errorMessage: null,
+                nextRetryAt: null,
+                expectedCurrentStatus: 'processing',
+                expectedUpdatedAt: notification.updated_at,
+              })
+              batchResult.delivered++
+              recordNotificationOutcome(notification.channel, 'delivered')
+              logger.info(
+                {
+                  notificationId: notification.id,
+                  userId: notification.user_id,
+                  channel: notification.channel,
+                  messageId: deliveryResult.messageId,
+                },
+                'Notification delivered successfully',
+              )
+            } catch (updateErr: unknown) {
+              if (updateErr instanceof AppError && updateErr.httpStatus === 409) {
+                logger.warn(
+                  { notificationId: notification.id },
+                  'Ignoring stale worker delivery status update after lease expiry',
+                )
+                return
+              }
+              throw updateErr
+            }
+          } else {
+            await this.handleDeliveryFailure(
+              notification,
+              deliveryResult.error ?? 'Delivery reported failure',
+              batchResult,
             )
+          }
+        } catch (err: unknown) {
+          if (err instanceof AppError && err.httpStatus === 409) {
             return
           }
-          throw updateErr
+          const errorMsg = err instanceof Error ? err.message : 'Unexpected dispatch error'
+          await this.handleDeliveryFailure(notification, errorMsg, batchResult)
         }
-      } else {
-        await this.handleDeliveryFailure(
-          notification,
-          deliveryResult.error ?? 'Delivery reported failure',
-          batchResult,
-        )
-      }
-    } catch (err: unknown) {
-      if (err instanceof AppError && err.httpStatus === 409) {
-        return
-      }
-      const errorMsg = err instanceof Error ? err.message : 'Unexpected dispatch error'
-      await this.handleDeliveryFailure(notification, errorMsg, batchResult)
-    }
+      },
+    )
   }
 
   private async handleDeliveryFailure(
@@ -154,6 +185,7 @@ export class NotificationWorker {
           expectedUpdatedAt: notification.updated_at,
         })
         batchResult.failed++
+        recordNotificationOutcome(notification.channel, 'failed')
         logger.error(
           {
             notificationId: notification.id,
@@ -179,6 +211,7 @@ export class NotificationWorker {
           expectedUpdatedAt: notification.updated_at,
         })
         batchResult.retried++
+        recordNotificationOutcome(notification.channel, 'retried')
         logger.warn(
           {
             notificationId: notification.id,

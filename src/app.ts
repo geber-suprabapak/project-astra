@@ -4,6 +4,7 @@ import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { cors } from 'hono/cors'
 import { requestId } from './middleware/request-id.js'
+import { observabilityMiddleware } from './middleware/observability.js'
 import { requestTimeout } from './middleware/timeout.js'
 import { errorHandler } from './middleware/error-handler.js'
 import {
@@ -26,7 +27,6 @@ import type { AppProviders } from './providers/types.js'
 import { AppError } from './lib/errors/app-error.js'
 import { errorResponse } from './lib/http/responses.js'
 import { env } from './config/env.js'
-import { logger } from './lib/logging/logger.js'
 import type { AppEnv } from './types/context.js'
 const API_CONTRACT_VERSION = 'v1'
 
@@ -53,6 +53,7 @@ export function createApp(deps: AppDeps = {}) {
 
   // Global middleware
   app.use('*', requestId)
+  app.use('*', observabilityMiddleware)
   app.use(
     '*',
     bodyLimit({
@@ -79,7 +80,14 @@ export function createApp(deps: AppDeps = {}) {
     cors({
       origin: env.corsAllowedOrigins.length > 0 ? env.corsAllowedOrigins : '*',
       allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'X-Astra-Contract-Version'],
+      allowHeaders: [
+        'Content-Type',
+        'Authorization',
+        'X-Request-ID',
+        'X-Astra-Contract-Version',
+        'traceparent',
+        'tracestate',
+      ],
       exposeHeaders: ['X-Request-ID', 'X-Astra-Contract-Version'],
       maxAge: 3600,
     }),
@@ -111,23 +119,6 @@ export function createApp(deps: AppDeps = {}) {
       )
     }
     await next()
-  })
-
-  // Request logging
-  app.use('*', async (c, next) => {
-    const start = Date.now()
-    await next()
-    const ms = Date.now() - start
-    logger.info(
-      {
-        method: c.req.method,
-        path: c.req.path,
-        status: c.res.status,
-        durationMs: ms,
-        requestId: c.get('requestId'),
-      },
-      'request',
-    )
   })
 
   const rootHealth =

@@ -1,6 +1,8 @@
 import type { Sql, TransactionSql } from 'postgres'
 import { z } from 'zod'
 import { AppError } from '../../lib/errors/app-error.js'
+import { recordDependencyCall } from '../../lib/observability/metrics.js'
+import { SpanKind, withSpan } from '../../lib/observability/tracing.js'
 import type { AuditLog, AuditLogEntry, School } from '../types.js'
 
 export type PgQuery = Sql | TransactionSql
@@ -46,21 +48,46 @@ export async function withPgError<T>(
   logFailure: (cause: unknown) => void,
   fn: () => Promise<T>,
 ): Promise<T> {
-  try {
-    return await fn()
-  } catch (err) {
-    if (err instanceof AppError) throw err
-    logFailure(err)
-    throw AppError.internal('An unexpected database error occurred.')
-  }
+  const startHr = performance.now()
+  return withSpan('postgres.query', SpanKind.CLIENT, { 'db.system': 'postgresql' }, async () => {
+    try {
+      const result = await fn()
+      recordDependencyCall('postgres', 'query', 'ok', (performance.now() - startHr) / 1000)
+      return result
+    } catch (err) {
+      recordDependencyCall('postgres', 'query', 'error', (performance.now() - startHr) / 1000)
+      if (err instanceof AppError) throw err
+      logFailure(err)
+      throw AppError.internal('An unexpected database error occurred.')
+    }
+  })
 }
 
 export function runInTransaction<T>(sql: Sql, cb: (tx: PgQuery) => Promise<T>): Promise<T> {
-  if (sql.begin) {
-    // SAFETY: postgres.js types sql.begin return as UnwrapPromiseArray<T>, while T here is a domain record or transition object.
-    return sql.begin((tx) => cb(tx)) as Promise<T>
-  }
-  return cb(sql)
+  const startHr = performance.now()
+  return withSpan(
+    'postgres.transaction',
+    SpanKind.CLIENT,
+    { 'db.system': 'postgresql', 'db.operation': 'transaction' },
+    async () => {
+      try {
+        const result = sql.begin
+          ? // SAFETY: postgres.js types sql.begin return as UnwrapPromiseArray<T>, while T here is a domain record or transition object.
+            await (sql.begin((tx) => cb(tx)) as Promise<T>)
+          : await cb(sql)
+        recordDependencyCall('postgres', 'transaction', 'ok', (performance.now() - startHr) / 1000)
+        return result
+      } catch (err) {
+        recordDependencyCall(
+          'postgres',
+          'transaction',
+          'error',
+          (performance.now() - startHr) / 1000,
+        )
+        throw err
+      }
+    },
+  )
 }
 
 export async function querySchool(sql: PgQuery): Promise<School | null> {

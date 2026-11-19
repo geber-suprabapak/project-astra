@@ -1,6 +1,8 @@
 import { createClient } from 'redis'
 import { env } from '../config/env.js'
 import { logger } from '../lib/logging/logger.js'
+import { recordDependencyCall } from '../lib/observability/metrics.js'
+import { SpanKind, withSpan } from '../lib/observability/tracing.js'
 
 export type RedisRuntimeClient = ReturnType<typeof createClient>
 
@@ -28,19 +30,34 @@ export function isRedisConfigured() {
 export async function ensureRedisReady() {
   const client = getRedisClient()
   if (!client) return
-  if (client.isOpen) {
-    await client.ping()
-    return
-  }
-  if (!redisConnectPromise) {
-    redisConnectPromise = (async () => {
-      await client.connect()
-      await client.ping()
-    })().finally(() => {
-      redisConnectPromise = null
-    })
-  }
-  await redisConnectPromise
+  const startHr = performance.now()
+  return withSpan(
+    'redis.ping',
+    SpanKind.CLIENT,
+    { 'db.system': 'redis', 'db.operation': 'PING' },
+    async () => {
+      try {
+        if (client.isOpen) {
+          await client.ping()
+          recordDependencyCall('redis', 'ping', 'ok', (performance.now() - startHr) / 1000)
+          return
+        }
+        if (!redisConnectPromise) {
+          redisConnectPromise = (async () => {
+            await client.connect()
+            await client.ping()
+          })().finally(() => {
+            redisConnectPromise = null
+          })
+        }
+        await redisConnectPromise
+        recordDependencyCall('redis', 'ping', 'ok', (performance.now() - startHr) / 1000)
+      } catch (err) {
+        recordDependencyCall('redis', 'ping', 'error', (performance.now() - startHr) / 1000)
+        throw err
+      }
+    },
+  )
 }
 
 export async function checkRedisReady() {

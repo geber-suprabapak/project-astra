@@ -1,5 +1,6 @@
 import { checkRedisReady, isRedisConfigured } from '../../clients/redis.js'
 import { env } from '../../config/env.js'
+import { setDependencyUp } from '../../lib/observability/metrics.js'
 import { defaultProviders } from '../../providers/index.js'
 import type { AppProviders } from '../../providers/types.js'
 
@@ -86,6 +87,12 @@ export async function getReadiness(
   if (isRedisConfigured() || env.nodeEnv === 'production') {
     redis = redisOutcome.settled && redisOutcome.value === true ? 'ok' : 'fail'
   }
+
+  setDependencyUp('postgres', database === 'ok')
+  setDependencyUp('s3', objectStorage === 'ok')
+  setDependencyUp('logto', identity === 'ok')
+  setDependencyUp('robin', mlService === 'ok')
+  setDependencyUp('redis', redis === 'ok')
 
   const healthy =
     database === 'ok' &&

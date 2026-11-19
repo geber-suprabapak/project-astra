@@ -1,6 +1,12 @@
+import { env } from '../config/env.js'
+import { initTracing, shutdownTracing } from '../lib/observability/tracing.js'
+
+initTracing('astra-notifications')
+
 import { defaultProviders } from '../providers/index.js'
 import { NotificationWorker } from './notification-worker.js'
 import { logger } from '../lib/logging/logger.js'
+import { startMetricsServer } from '../lib/observability/metrics.js'
 import { ExpoPushNotificationTransport } from '../modules/notifications/transport.js'
 
 const worker = new NotificationWorker({
@@ -12,6 +18,7 @@ const worker = new NotificationWorker({
   backoffBaseMs: 5000,
 })
 
+const metricsServer = startMetricsServer(env.metricsPort)
 worker.start()
 
 let isShuttingDown = false
@@ -29,9 +36,13 @@ async function shutdown(signal: 'SIGINT' | 'SIGTERM') {
 
   try {
     await worker.stop()
+    if (metricsServer) {
+      await new Promise<void>((resolve) => metricsServer.close(() => resolve()))
+    }
     if (defaultProviders.domainStore.close) {
       await defaultProviders.domainStore.close()
     }
+    await shutdownTracing()
     clearTimeout(forceExitTimer)
     logger.info({ signal }, 'Notification worker exited gracefully')
     process.exit(0)

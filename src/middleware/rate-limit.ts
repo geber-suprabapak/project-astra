@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { getRedisClient, type RedisRuntimeClient } from '../clients/redis.js'
 import { env } from '../config/env.js'
 import { AppError } from '../lib/errors/app-error.js'
+import { recordDependencyCall } from '../lib/observability/metrics.js'
+import { SpanKind, withSpan } from '../lib/observability/tracing.js'
 import type { AppEnv } from '../types/context.js'
 
 const RATE_LIMIT_SCRIPT = `
@@ -60,17 +62,31 @@ export class RedisRateLimitStore implements RateLimitStore {
   ) {}
 
   async increment(key: string, windowMs: number): Promise<number> {
-    const result = await this.client.eval(RATE_LIMIT_SCRIPT, {
-      keys: [this.prefixedKey(key)],
-      arguments: [String(this.now()), String(windowMs)],
-    })
+    const startHr = performance.now()
+    return withSpan(
+      'redis.rate_limit_increment',
+      SpanKind.CLIENT,
+      { 'db.system': 'redis', 'db.operation': 'EVAL' },
+      async () => {
+        try {
+          const result = await this.client.eval(RATE_LIMIT_SCRIPT, {
+            keys: [this.prefixedKey(key)],
+            arguments: [String(this.now()), String(windowMs)],
+          })
 
-    const parsed = z.number().safeParse(result)
-    if (!parsed.success) {
-      throw new Error('Unexpected Redis rate limit response.')
-    }
+          const parsed = z.number().safeParse(result)
+          if (!parsed.success) {
+            throw new Error('Unexpected Redis rate limit response.')
+          }
 
-    return parsed.data
+          recordDependencyCall('redis', 'rate_limit', 'ok', (performance.now() - startHr) / 1000)
+          return parsed.data
+        } catch (err) {
+          recordDependencyCall('redis', 'rate_limit', 'error', (performance.now() - startHr) / 1000)
+          throw err
+        }
+      },
+    )
   }
 
   async reset(key: string): Promise<void> {

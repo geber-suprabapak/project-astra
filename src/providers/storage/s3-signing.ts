@@ -1,5 +1,7 @@
 import { createHash, createHmac } from 'node:crypto'
 import { env } from '../../config/env.js'
+import { recordDependencyCall } from '../../lib/observability/metrics.js'
+import { SpanKind, withSpan } from '../../lib/observability/tracing.js'
 
 export type RedisCacheClient = {
   isOpen: boolean
@@ -193,9 +195,34 @@ export async function executeS3Request(
     init.body = new Uint8Array(body)
   }
 
-  try {
-    return await fetch(url.toString(), init)
-  } finally {
-    clearTimeout(timer)
-  }
+  const startHr = performance.now()
+  const operation = method.toLowerCase()
+  return withSpan(
+    `s3.${method}`,
+    SpanKind.CLIENT,
+    {
+      'peer.service': 'garage-s3',
+      'rpc.system': 's3',
+      'http.request.method': method,
+      's3.bucket': bucket,
+    },
+    async (span) => {
+      try {
+        const res = await fetch(url.toString(), init)
+        span.setAttribute('http.response.status_code', res.status)
+        recordDependencyCall(
+          's3',
+          operation,
+          res.ok || res.status === 404 ? 'ok' : 'error',
+          (performance.now() - startHr) / 1000,
+        )
+        return res
+      } catch (err) {
+        recordDependencyCall('s3', operation, 'error', (performance.now() - startHr) / 1000)
+        throw err
+      } finally {
+        clearTimeout(timer)
+      }
+    },
+  )
 }

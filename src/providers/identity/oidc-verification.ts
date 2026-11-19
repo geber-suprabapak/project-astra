@@ -2,6 +2,8 @@ import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyOptions }
 import { z } from 'zod'
 import { AppError } from '../../lib/errors/app-error.js'
 import { logger } from '../../lib/logging/logger.js'
+import { recordDependencyCall } from '../../lib/observability/metrics.js'
+import { SpanKind, withSpan } from '../../lib/observability/tracing.js'
 import { identityRoleSchema, type IdentityUser } from '../types.js'
 import { isMfaVerified } from './claims.js'
 
@@ -88,8 +90,32 @@ export class OidcTokenVerifier {
         if (!jwks) {
           throw AppError.authInvalid('JWKS configuration missing.')
         }
-        const { payload: p } = await jwtVerify(token, jwks, verifyOptions)
-        payload = p
+        const jwksStartHr = performance.now()
+        payload = await withSpan(
+          'logto.jwks_verify',
+          SpanKind.CLIENT,
+          { 'peer.service': 'logto', 'auth.method': 'jwks' },
+          async () => {
+            try {
+              const { payload: p } = await jwtVerify(token, jwks, verifyOptions)
+              recordDependencyCall(
+                'logto',
+                'jwks_verify',
+                'ok',
+                (performance.now() - jwksStartHr) / 1000,
+              )
+              return p
+            } catch (verifyErr) {
+              recordDependencyCall(
+                'logto',
+                'jwks_verify',
+                'error',
+                (performance.now() - jwksStartHr) / 1000,
+              )
+              throw verifyErr
+            }
+          },
+        )
       }
 
       const parsedSub = z.string().min(1).safeParse(payload.sub)
@@ -193,21 +219,42 @@ export class OidcTokenVerifier {
 
   async checkHealth(): Promise<boolean> {
     if (this.config.jwksUrl) {
-      try {
-        const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), 3000)
-        try {
-          const res = await fetch(this.config.jwksUrl, {
-            method: 'GET',
-            signal: controller.signal,
-          })
-          return res.ok
-        } finally {
-          clearTimeout(timer)
-        }
-      } catch {
-        return false
-      }
+      const startHr = performance.now()
+      return withSpan(
+        'logto.jwks_health',
+        SpanKind.CLIENT,
+        { 'peer.service': 'logto', 'http.request.method': 'GET', 'http.route': '/oidc/jwks' },
+        async (span) => {
+          try {
+            const controller = new AbortController()
+            const timer = setTimeout(() => controller.abort(), 3000)
+            try {
+              const res = await fetch(this.config.jwksUrl ?? '', {
+                method: 'GET',
+                signal: controller.signal,
+              })
+              span.setAttribute('http.response.status_code', res.status)
+              recordDependencyCall(
+                'logto',
+                'jwks_health',
+                res.ok ? 'ok' : 'error',
+                (performance.now() - startHr) / 1000,
+              )
+              return res.ok
+            } finally {
+              clearTimeout(timer)
+            }
+          } catch {
+            recordDependencyCall(
+              'logto',
+              'jwks_health',
+              'error',
+              (performance.now() - startHr) / 1000,
+            )
+            return false
+          }
+        },
+      )
     }
 
     if (this.config.jwtSecret) {

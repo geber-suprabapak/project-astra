@@ -1,8 +1,13 @@
 import { serve } from '@hono/node-server'
+import { env } from './config/env.js'
+import { initTracing, shutdownTracing } from './lib/observability/tracing.js'
+
+initTracing(env.serviceName)
+
 import { app } from './app.js'
 import { closeRedisClient, ensureRedisReady, isRedisConfigured } from './clients/redis.js'
-import { env } from './config/env.js'
 import { logger } from './lib/logging/logger.js'
+import { startMetricsServer } from './lib/observability/metrics.js'
 
 const rateLimitBackend = isRedisConfigured() ? 'redis' : 'memory'
 
@@ -23,6 +28,8 @@ const server = serve(
   },
 )
 
+const metricsServer = startMetricsServer(env.metricsPort)
+
 function shutdown(signal: 'SIGINT' | 'SIGTERM') {
   logger.info({ signal }, 'Shutdown signal received')
 
@@ -32,20 +39,25 @@ function shutdown(signal: 'SIGINT' | 'SIGTERM') {
   }, 10_000)
   forceCloseTimer.unref()
 
+  const closeMetrics = () =>
+    new Promise<void>((resolve) => {
+      if (!metricsServer) {
+        resolve()
+        return
+      }
+      metricsServer.close(() => resolve())
+    })
+
   server.close((err) => {
     clearTimeout(forceCloseTimer)
     if (err) {
       logger.error({ err, signal }, 'Error during server shutdown')
       process.exit(1)
     }
-    closeRedisClient()
-      .catch((closeErr) => {
-        logger.warn({ err: closeErr, signal }, 'Redis shutdown encountered an error')
-      })
-      .finally(() => {
-        logger.info({ signal }, 'Server shutdown complete')
-        process.exit(0)
-      })
+    Promise.allSettled([closeMetrics(), closeRedisClient(), shutdownTracing()]).finally(() => {
+      logger.info({ signal }, 'Server shutdown complete')
+      process.exit(0)
+    })
   })
 }
 

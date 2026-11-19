@@ -13,6 +13,7 @@ export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
     PORT: positiveInt.default(3000),
+    METRICS_PORT: z.coerce.number().int().min(0).max(65535).default(9090),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
     SERVICE_NAME: z.string().min(1).default('skanida-bff'),
 
@@ -153,6 +154,7 @@ const raw = parsed.data
 export const env = {
   nodeEnv: raw.NODE_ENV,
   port: raw.PORT,
+  metricsPort: raw.METRICS_PORT,
   logLevel: raw.LOG_LEVEL,
   serviceName: raw.SERVICE_NAME,
   tenantKey: raw.TENANT_KEY,
