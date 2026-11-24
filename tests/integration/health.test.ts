@@ -198,6 +198,64 @@ describe('integration: runtime health & readiness probes', () => {
     expect(body.checks.mlService).toBe('fail')
   })
 
+  it('returns 200 on /ready/core even when ML service (Robin) check fails', async () => {
+    const domainStore = new MemoryDomainStore()
+    const objectStorage = new MemoryObjectStorage()
+    const identityProvider = new MemoryIdentityProvider()
+    const robinClient = createMockRobinClient(false)
+
+    const app = createApp({
+      providers: { domainStore, objectStorage, identityProvider, robinClient },
+    })
+
+    const res = await app.request('/ready/core')
+    const body = (await res.json()) as {
+      healthy: boolean
+      checks: {
+        database: string
+        objectStorage: string
+        identity: string
+        redis: string
+      }
+    }
+
+    expect(res.status).toBe(200)
+    expect(body.healthy).toBe(true)
+    expect(body.checks).toEqual({
+      database: 'ok',
+      objectStorage: 'ok',
+      identity: 'ok',
+      redis: 'ok',
+    })
+  })
+
+  it('returns 503 on /ready/core when database check fails', async () => {
+    const domainStore = new MemoryDomainStore()
+    domainStore.isHealthy = false
+    const objectStorage = new MemoryObjectStorage()
+    const identityProvider = new MemoryIdentityProvider()
+    const robinClient = createMockRobinClient(true)
+
+    const app = createApp({
+      providers: { domainStore, objectStorage, identityProvider, robinClient },
+    })
+
+    const res = await app.request('/ready/core')
+    const body = (await res.json()) as {
+      healthy: boolean
+      checks: {
+        database: string
+        objectStorage: string
+        identity: string
+        redis: string
+      }
+    }
+
+    expect(res.status).toBe(503)
+    expect(body.healthy).toBe(false)
+    expect(body.checks.database).toBe('fail')
+  })
+
   it('returns mobile-safe health shape on /v1/mobile/health without leaking provider internals', async () => {
     const domainStore = new MemoryDomainStore()
     domainStore.isHealthy = false

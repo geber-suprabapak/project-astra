@@ -12,6 +12,20 @@ export const HealthChecksSchema = z.object({
 })
 export type HealthChecks = z.infer<typeof HealthChecksSchema>
 
+export const CoreHealthChecksSchema = z.object({
+  database: CheckStatusSchema,
+  objectStorage: CheckStatusSchema,
+  identity: CheckStatusSchema,
+  redis: CheckStatusSchema,
+})
+export type CoreHealthChecks = z.infer<typeof CoreHealthChecksSchema>
+
+export const CoreReadinessResponseSchema = z.object({
+  healthy: z.boolean(),
+  checks: CoreHealthChecksSchema,
+})
+export type CoreReadinessResult = z.infer<typeof CoreReadinessResponseSchema>
+
 export const ReadinessResponseSchema = z.object({
   healthy: z.boolean(),
   checks: HealthChecksSchema,

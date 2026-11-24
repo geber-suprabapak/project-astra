@@ -4,9 +4,15 @@ import { setDependencyUp } from '../../lib/observability/metrics.js'
 import { defaultProviders } from '../../providers/index.js'
 import type { AppProviders } from '../../providers/types.js'
 
-import type { CheckStatus, ReadinessResult } from './schema.js'
+import type { CheckStatus, CoreReadinessResult, ReadinessResult } from './schema.js'
 
-export type { CheckStatus, HealthChecks, ReadinessResult } from './schema.js'
+export type {
+  CheckStatus,
+  CoreHealthChecks,
+  CoreReadinessResult,
+  HealthChecks,
+  ReadinessResult,
+} from './schema.js'
 
 export interface ReadinessOptions {
   /**
@@ -57,6 +63,86 @@ const READINESS_CACHE_TTL_MS = 3_000
 
 let cachedReadiness: { result: ReadinessResult; expiresAt: number } | null = null
 let inFlightReadiness: Promise<ReadinessResult> | null = null
+let cachedCoreReadiness: { result: CoreReadinessResult; expiresAt: number } | null = null
+let inFlightCoreReadiness: Promise<CoreReadinessResult> | null = null
+
+async function computeCoreReadiness(
+  providers: AppProviders,
+  options: ReadinessOptions,
+): Promise<CoreReadinessResult> {
+  const deadlineMs = options.deadlineMs ?? env.readinessDeadlineMs
+  const redisCheck = options.redisCheck ?? checkRedisReady
+
+  const [dbOutcome, storageOutcome, identityOutcome, redisOutcome] = await Promise.all([
+    boundedCheck(providers.domainStore.checkHealth(), deadlineMs).catch(() => overdue<boolean>()),
+    boundedCheck(providers.objectStorage.checkHealth(), deadlineMs).catch(() => overdue<boolean>()),
+    boundedCheck(providers.identityProvider.checkHealth(), deadlineMs).catch(() =>
+      overdue<boolean>(),
+    ),
+    boundedCheck(redisCheck(), deadlineMs).catch(() => overdue<boolean>()),
+  ])
+
+  const database: CheckStatus = dbOutcome.settled && dbOutcome.value === true ? 'ok' : 'fail'
+  const objectStorage: CheckStatus =
+    storageOutcome.settled && storageOutcome.value === true ? 'ok' : 'fail'
+  const identity: CheckStatus =
+    identityOutcome.settled && identityOutcome.value === true ? 'ok' : 'fail'
+
+  let redis: CheckStatus = 'ok'
+  if (isRedisConfigured() || env.nodeEnv === 'production') {
+    redis = redisOutcome.settled && redisOutcome.value === true ? 'ok' : 'fail'
+  }
+
+  setDependencyUp('postgres', database === 'ok')
+  setDependencyUp('s3', objectStorage === 'ok')
+  setDependencyUp('logto', identity === 'ok')
+  setDependencyUp('redis', redis === 'ok')
+
+  const healthy =
+    database === 'ok' && objectStorage === 'ok' && identity === 'ok' && redis === 'ok'
+
+  return {
+    healthy,
+    checks: {
+      database,
+      objectStorage,
+      identity,
+      redis,
+    },
+  }
+}
+
+export async function getCoreReadiness(
+  providers: AppProviders = defaultProviders,
+  options: ReadinessOptions = {},
+): Promise<CoreReadinessResult> {
+  const useCache =
+    providers === defaultProviders &&
+    options.redisCheck === undefined &&
+    options.deadlineMs === undefined
+
+  if (!useCache) {
+    return computeCoreReadiness(providers, options)
+  }
+
+  const now = Date.now()
+  if (cachedCoreReadiness && now < cachedCoreReadiness.expiresAt) {
+    return cachedCoreReadiness.result
+  }
+
+  if (!inFlightCoreReadiness) {
+    inFlightCoreReadiness = computeCoreReadiness(providers, options)
+      .then((result) => {
+        cachedCoreReadiness = { result, expiresAt: Date.now() + READINESS_CACHE_TTL_MS }
+        return result
+      })
+      .finally(() => {
+        inFlightCoreReadiness = null
+      })
+  }
+
+  return inFlightCoreReadiness
+}
 
 async function computeReadiness(
   providers: AppProviders,

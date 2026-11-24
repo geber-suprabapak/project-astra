@@ -1,5 +1,10 @@
 import { Hono } from 'hono'
-import { getReadiness, type ReadinessResult } from './service.js'
+import {
+  getCoreReadiness,
+  getReadiness,
+  type CoreReadinessResult,
+  type ReadinessResult,
+} from './service.js'
 import { successResponse } from '../../lib/http/responses.js'
 import { defaultProviders } from '../../providers/index.js'
 import type { AppProviders } from '../../providers/types.js'
@@ -8,6 +13,7 @@ import type { AppEnv } from '../../types/context.js'
 export interface HealthRouterDeps {
   providers?: AppProviders
   getReadiness?: () => Promise<ReadinessResult>
+  getCoreReadiness?: () => Promise<CoreReadinessResult>
 }
 
 export function createHealthRouter(deps: HealthRouterDeps = {}) {
@@ -18,10 +24,19 @@ export function createHealthRouter(deps: HealthRouterDeps = {}) {
     return c.json({ status: 'ok' })
   })
 
-  // GET /ready — checks portable runtime dependencies
+  // GET /ready — checks all runtime dependencies including ML service
   router.get('/ready', async (c) => {
     const providers = deps.providers ?? c.get('providers') ?? defaultProviders
     const result = deps.getReadiness ? await deps.getReadiness() : await getReadiness(providers)
+    return c.json(result, result.healthy ? 200 : 503)
+  })
+
+  // GET /ready/core — checks core dependencies excluding optional ML service
+  router.get('/ready/core', async (c) => {
+    const providers = deps.providers ?? c.get('providers') ?? defaultProviders
+    const result = deps.getCoreReadiness
+      ? await deps.getCoreReadiness()
+      : await getCoreReadiness(providers)
     return c.json(result, result.healthy ? 200 : 503)
   })
 
