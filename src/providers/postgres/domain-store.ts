@@ -65,6 +65,8 @@ export class PostgresDomainStore implements DomainStore {
         max,
         idle_timeout,
         connect_timeout,
+        // Disable server-side prepared statements for PgBouncer transaction pooling compatibility.
+        prepare: false,
         transform: {
           undefined: null,
         },

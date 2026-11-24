@@ -53,9 +53,14 @@ async function boundedCheck<T>(check: Promise<T>, deadlineMs: number): Promise<C
   }
 }
 
-export async function getReadiness(
-  providers: AppProviders = defaultProviders,
-  options: ReadinessOptions = {},
+const READINESS_CACHE_TTL_MS = 3_000
+
+let cachedReadiness: { result: ReadinessResult; expiresAt: number } | null = null
+let inFlightReadiness: Promise<ReadinessResult> | null = null
+
+async function computeReadiness(
+  providers: AppProviders,
+  options: ReadinessOptions,
 ): Promise<ReadinessResult> {
   const deadlineMs = options.deadlineMs ?? env.readinessDeadlineMs
   const redisCheck = options.redisCheck ?? checkRedisReady
@@ -111,6 +116,38 @@ export async function getReadiness(
       redis,
     },
   }
+}
+
+export async function getReadiness(
+  providers: AppProviders = defaultProviders,
+  options: ReadinessOptions = {},
+): Promise<ReadinessResult> {
+  const useCache =
+    providers === defaultProviders &&
+    options.redisCheck === undefined &&
+    options.deadlineMs === undefined
+
+  if (!useCache) {
+    return computeReadiness(providers, options)
+  }
+
+  const now = Date.now()
+  if (cachedReadiness && now < cachedReadiness.expiresAt) {
+    return cachedReadiness.result
+  }
+
+  if (!inFlightReadiness) {
+    inFlightReadiness = computeReadiness(providers, options)
+      .then((result) => {
+        cachedReadiness = { result, expiresAt: Date.now() + READINESS_CACHE_TTL_MS }
+        return result
+      })
+      .finally(() => {
+        inFlightReadiness = null
+      })
+  }
+
+  return inFlightReadiness
 }
 
 export function getLiveness() {
