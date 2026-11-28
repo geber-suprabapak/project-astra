@@ -21,9 +21,19 @@ import type {
   CmsContentRow,
 } from '../../modules/cms/content.js'
 import type { CmsProfile } from '../../modules/cms/schema.js'
-import type { AuditLog, AuditLogEntry, ProfileLifecycleStatus } from './common.js'
+import type {
+  AuditLog,
+  AuditLogEntry,
+  AuditLogQueryFilter,
+  AuditLogQueryResult,
+  ProfileLifecycleStatus,
+} from './common.js'
 import type {
   AcademicPeriod,
+  BatchTransitionCommitParams,
+  BatchTransitionCommitResult,
+  BatchTransitionPreview,
+  BatchTransitionPreviewParams,
   BootstrapStatus,
   ClassEnrollment,
   ClassEnrollmentStatus,
@@ -34,11 +44,13 @@ import type {
   CreateStudentParams,
   EnrollStudentParams,
   ExitStudentEnrollmentParams,
+  LockAcademicPeriodParams,
   PromoteStudentEnrollmentParams,
   RosterReport,
   School,
   StageRosterParams,
   TransferStudentEnrollmentParams,
+  UnlockAcademicPeriodParams,
   UpdateAcademicPeriodParams,
   UpdateClassParams,
 } from './academic.js'
@@ -62,6 +74,8 @@ import type {
   AttendanceRecord,
   CalendarException,
   CreateCalendarExceptionParams,
+  CreateCalendarExceptionRangeParams,
+  CreateCalendarExceptionRangeResult,
   CreateLocationParams,
   CreateManualAttendanceParams,
   CreateScheduleParams,
@@ -226,15 +240,19 @@ export interface DomainStore {
   createAcademicPeriod(params: CreateAcademicPeriodParams): Promise<AcademicPeriod>
   updateAcademicPeriod(id: string, params: UpdateAcademicPeriodParams): Promise<AcademicPeriod>
   setActiveAcademicPeriod(id: string): Promise<AcademicPeriod>
+  lockAcademicPeriod(params: LockAcademicPeriodParams): Promise<AcademicPeriod>
+  unlockAcademicPeriod(params: UnlockAcademicPeriodParams): Promise<AcademicPeriod>
 
   // Classes domain methods
   getClasses(schoolId?: string, academicPeriodId?: string): Promise<ClassRoom[]>
   getClassById(id: string): Promise<ClassRoom | null>
   createClass(params: CreateClassParams): Promise<ClassRoom>
   updateClass(id: string, params: UpdateClassParams): Promise<ClassRoom>
+  deleteClass(id: string, options?: { overrideLocked?: boolean; reason?: string }): Promise<void>
 
   // Class Enrollment domain methods
   listClassEnrollments(filter?: {
+    studentId?: string
     userId?: string
     classId?: string
     academicPeriodId?: string
@@ -253,6 +271,12 @@ export interface DomainStore {
   ): Promise<{ previous: ClassEnrollment; current: ClassEnrollment }>
   exitStudentEnrollment(params: ExitStudentEnrollmentParams): Promise<ClassEnrollment>
   getStudentEnrollmentHistory(userId: string): Promise<ClassEnrollment[]>
+  previewBatchEnrollmentTransition(
+    params: BatchTransitionPreviewParams,
+  ): Promise<BatchTransitionPreview>
+  commitBatchEnrollmentTransition(
+    params: BatchTransitionCommitParams,
+  ): Promise<BatchTransitionCommitResult>
 
   // Schedules domain methods
   listSchedules(filter?: {
@@ -282,11 +306,17 @@ export interface DomainStore {
     academicPeriodId?: string,
   ): Promise<CalendarException | null>
   createCalendarException(params: CreateCalendarExceptionParams): Promise<CalendarException>
+  createCalendarExceptionRange(
+    params: CreateCalendarExceptionRangeParams,
+  ): Promise<CreateCalendarExceptionRangeResult>
   updateCalendarException(
     id: string,
     params: UpdateCalendarExceptionParams,
   ): Promise<CalendarException>
   deleteCalendarException(id: string): Promise<void>
+  deleteCalendarExceptionGroup(
+    groupId: string,
+  ): Promise<{ group_id: string; deleted_count: number }>
 
   // Location / Geofence domain methods
   listLocations(filter?: { isActive?: boolean }): Promise<Location[]>
@@ -319,6 +349,7 @@ export interface DomainStore {
    * Returns audit logs matching the given entity criteria, ordered newest-first (descending by created_at).
    */
   getAuditLogs(entityType?: string, entityId?: string): Promise<AuditLog[]>
+  queryAuditLogs(filter: AuditLogQueryFilter): Promise<AuditLogQueryResult>
 
   // Roles & Permissions RBAC domain methods
   getRoles(activeOnly?: boolean): Promise<Role[]>

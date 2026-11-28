@@ -1,11 +1,13 @@
 import { AppError } from '../../lib/errors/app-error.js'
-import type {
-  BootstrapStatus,
-  CreateSchoolParams,
-  RosterReport,
-  School,
-  StageRosterParams,
-  UserProfile,
+import { clampDateToPeriod } from '../shared/academic-batch.js'
+import {
+  toWibDate,
+  type BootstrapStatus,
+  type CreateSchoolParams,
+  type RosterReport,
+  type School,
+  type StageRosterParams,
+  type UserProfile,
 } from '../types.js'
 import type { MemoryDomainState } from './domain-state.js'
 
@@ -195,6 +197,8 @@ export async function acceptMemoryRosterReport(
         academic_period_id: period.id,
         absence_number: absenceText,
         status: 'active',
+        effective_start_date: clampDateToPeriod(toWibDate(now), period.start_date, period.end_date),
+        effective_end_date: null,
         created_at: now,
         updated_at: now,
       })

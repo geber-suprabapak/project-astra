@@ -63,6 +63,12 @@ export const DashboardServerTimeSchema = z.object({
   source: z.literal('bff'),
 })
 
+export const DashboardUpcomingHolidaySchema = z.object({
+  date: z.string(),
+  reason: z.string(),
+  group_id: z.string().nullable(),
+})
+
 export const DashboardResponseSchema = z.object({
   profile: DashboardProfileSchema,
   attendance: DashboardAttendanceSchema,
@@ -70,5 +76,6 @@ export const DashboardResponseSchema = z.object({
   face: DashboardFaceSchema,
   permit: DashboardPermitSchema,
   primary_action: DashboardPrimaryActionSchema,
+  upcoming_holidays: z.array(DashboardUpcomingHolidaySchema),
   server_time: DashboardServerTimeSchema,
 })

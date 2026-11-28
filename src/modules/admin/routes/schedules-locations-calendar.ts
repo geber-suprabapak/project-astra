@@ -2,6 +2,7 @@ import type { Context, Hono } from 'hono'
 import { successResponse } from '../../../lib/http/responses.js'
 import type { AppEnv } from '../../../types/context.js'
 import {
+  createCalendarExceptionRangeSchema,
   createCalendarExceptionSchema,
   createLocationSchema,
   createScheduleSchema,
@@ -11,9 +12,11 @@ import {
 } from '../schema.js'
 import {
   createCalendarException,
+  createCalendarExceptionRange,
   createLocation,
   createSchedule,
   deleteCalendarException,
+  deleteCalendarExceptionGroup,
   deleteLocation,
   deleteSchedule,
   getCalendarException,
@@ -242,11 +245,40 @@ export function registerScheduleLocationCalendarRoutes(
       isHoliday: data.is_holiday ?? data.isHoliday,
       academicPeriodId: data.academic_period_id ?? data.academicPeriodId,
       schoolId: data.school_id ?? data.schoolId,
+      overrideConflicts: data.override_conflicts ?? data.overrideConflicts,
+      overrideReason: data.override_reason ?? data.overrideReason,
       actorId: c.get('userId'),
       actorRole: c.get('profileRole'),
+      requestId: c.get('requestId'),
       providers,
     })
     return successResponse(c, exc, 'Calendar exception created successfully.', 201)
+  })
+
+  // POST /v1/admin/calendar-exceptions/range
+  router.post('/calendar-exceptions/range', async (c) => {
+    const providers = resolveAdminProviders(c, deps)
+    const data = await parseJsonBody(c, createCalendarExceptionRangeSchema)
+    const result = await createCalendarExceptionRange({
+      schoolId: data.school_id ?? data.schoolId,
+      academicPeriodId: data.academic_period_id ?? data.academicPeriodId,
+      startDate: (data.start_date ?? data.startDate)!,
+      endDate: (data.end_date ?? data.endDate)!,
+      reason: data.reason,
+      isHoliday: data.is_holiday ?? data.isHoliday,
+      overrideConflicts: data.override_conflicts ?? data.overrideConflicts,
+      overrideReason: data.override_reason ?? data.overrideReason,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      requestId: c.get('requestId'),
+      providers,
+    })
+    return successResponse(
+      c,
+      { group_id: result.group_id, items: result.items },
+      'Calendar exception range created successfully.',
+      201,
+    )
   })
 
   // PUT /v1/admin/calendar-exceptions/:id
@@ -262,9 +294,24 @@ export function registerScheduleLocationCalendarRoutes(
       isHoliday: data.is_holiday ?? data.isHoliday,
       actorId: c.get('userId'),
       actorRole: c.get('profileRole'),
+      requestId: c.get('requestId'),
       providers,
     })
     return successResponse(c, exc, 'Calendar exception updated successfully.')
+  })
+
+  // DELETE /v1/admin/calendar-exceptions/group/:groupId
+  router.delete('/calendar-exceptions/group/:groupId', async (c) => {
+    const providers = resolveAdminProviders(c, deps)
+    const groupId = requireRouteParam(c, 'groupId')
+    const result = await deleteCalendarExceptionGroup({
+      groupId,
+      actorId: c.get('userId'),
+      actorRole: c.get('profileRole'),
+      requestId: c.get('requestId'),
+      providers,
+    })
+    return successResponse(c, result, 'Calendar exception group deleted successfully.')
   })
 
   // DELETE /v1/admin/calendar-exceptions/:id
@@ -275,6 +322,7 @@ export function registerScheduleLocationCalendarRoutes(
       id,
       actorId: c.get('userId'),
       actorRole: c.get('profileRole'),
+      requestId: c.get('requestId'),
       providers,
     })
     return successResponse(c, { id }, 'Calendar exception deleted successfully.')

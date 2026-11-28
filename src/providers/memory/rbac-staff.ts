@@ -2,6 +2,8 @@ import { AppError } from '../../lib/errors/app-error.js'
 import type {
   AuditLog,
   AuditLogEntry,
+  AuditLogQueryFilter,
+  AuditLogQueryResult,
   CreatePermissionParams,
   CreateRoleParams,
   CreateStaffParams,
@@ -37,6 +39,49 @@ export function getMemoryAuditLogs(
     if (entityId && log.entity_id !== entityId) return false
     return true
   })
+}
+
+export function queryMemoryAuditLogs(
+  store: MemoryDomainState,
+  filter: AuditLogQueryFilter,
+): AuditLogQueryResult {
+  const startIso = filter.startDate
+    ? new Date(`${filter.startDate}T00:00:00+07:00`).toISOString()
+    : null
+  const endIso = filter.endDate
+    ? new Date(`${filter.endDate}T23:59:59.999+07:00`).toISOString()
+    : null
+
+  const filtered = [...store.auditLogs]
+    .sort((a, b) => {
+      const timeDiff = b.created_at.localeCompare(a.created_at)
+      if (timeDiff !== 0) return timeDiff
+      return b.id.localeCompare(a.id)
+    })
+    .filter((log) => {
+      if (filter.entityType && log.entity_type !== filter.entityType) return false
+      if (filter.action && log.action !== filter.action) return false
+      if (filter.actorId && log.actor_id !== filter.actorId) return false
+      if (startIso && log.created_at < startIso) return false
+      if (endIso && log.created_at > endIso) return false
+      if (filter.allowedEntityTypes && !filter.allowedEntityTypes.includes(log.entity_type)) {
+        return false
+      }
+      if (filter.excludedActions && filter.excludedActions.includes(log.action)) {
+        return false
+      }
+      return true
+    })
+    .map((log) => ({
+      ...log,
+      actor_name: log.actor_id ? (store.profiles.get(log.actor_id)?.full_name ?? null) : null,
+    }))
+
+  const slice = filtered.slice(filter.offset, filter.offset + filter.limit)
+  return {
+    items: slice,
+    hasMore: filtered.length > filter.offset + filter.limit,
+  }
 }
 
 export function getMemoryRoles(store: MemoryDomainState, activeOnly = false): Role[] {

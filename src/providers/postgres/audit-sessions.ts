@@ -1,7 +1,7 @@
 import type { Sql } from 'postgres'
 import { logger } from '../../lib/logging/logger.js'
 import type { CmsProfile } from '../../modules/cms/schema.js'
-import type { AuditLog, AuditLogEntry } from '../types.js'
+import type { AuditLog, AuditLogEntry, AuditLogQueryFilter, AuditLogQueryResult } from '../types.js'
 import { insertAuditLogRow, withPgError } from './shared.js'
 
 export async function getCmsProfileBySubject(
@@ -70,6 +70,51 @@ export async function getAuditLogs(
         ORDER BY created_at DESC
       `
       return rows ?? []
+    },
+  )
+}
+
+export async function queryAuditLogs(
+  sql: Sql,
+  filter: AuditLogQueryFilter,
+): Promise<AuditLogQueryResult> {
+  return withPgError(
+    (err) => logger.error({ err, filter }, 'Failed to query paginated audit logs'),
+    async () => {
+      const startIso = filter.startDate ? `${filter.startDate}T00:00:00+07:00` : null
+      const endIso = filter.endDate ? `${filter.endDate}T23:59:59.999+07:00` : null
+      const allowedEntities = filter.allowedEntityTypes ? [...filter.allowedEntityTypes] : null
+      const excludedActions = filter.excludedActions ? [...filter.excludedActions] : null
+      const fetchLimit = filter.limit + 1
+
+      const rows = await sql<AuditLog[]>`
+        SELECT al.id,
+               al.actor_id,
+               p.full_name AS actor_name,
+               al.action,
+               al.entity_type,
+               al.entity_id,
+               CASE WHEN jsonb_typeof(al.details) = 'string' THEN (al.details #>> '{}')::jsonb ELSE al.details END AS details,
+               al.created_at::text
+        FROM audit_logs al
+        LEFT JOIN profiles p ON p.user_id = al.actor_id
+        WHERE (${filter.entityType ?? null}::text IS NULL OR al.entity_type = ${filter.entityType ?? null})
+          AND (${filter.action ?? null}::text IS NULL OR al.action = ${filter.action ?? null})
+          AND (${filter.actorId ?? null}::text IS NULL OR al.actor_id = ${filter.actorId ?? null})
+          AND (${startIso}::timestamptz IS NULL OR al.created_at >= ${startIso}::timestamptz)
+          AND (${endIso}::timestamptz IS NULL OR al.created_at <= ${endIso}::timestamptz)
+          AND (${allowedEntities}::text[] IS NULL OR al.entity_type = ANY(${allowedEntities}::text[]))
+          AND (${excludedActions}::text[] IS NULL OR NOT (al.action = ANY(${excludedActions}::text[])))
+        ORDER BY al.created_at DESC, al.id DESC
+        LIMIT ${fetchLimit}
+        OFFSET ${filter.offset}
+      `
+      const list = rows ?? []
+      const hasMore = list.length > filter.limit
+      return {
+        items: hasMore ? list.slice(0, filter.limit) : list,
+        hasMore,
+      }
     },
   )
 }

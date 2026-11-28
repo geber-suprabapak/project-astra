@@ -91,6 +91,7 @@ export interface CalendarException {
   date: string
   reason: string
   is_holiday: boolean
+  group_id?: string | null
   created_at?: string
   updated_at?: string
 }
@@ -101,6 +102,28 @@ export interface CreateCalendarExceptionParams {
   isHoliday?: boolean
   academicPeriodId?: string | null
   schoolId?: string | null
+  groupId?: string | null
+  overrideConflicts?: boolean
+  overrideReason?: string
+}
+
+export interface CreateCalendarExceptionRangeParams {
+  schoolId?: string | null
+  academicPeriodId?: string | null
+  startDate: string
+  endDate: string
+  reason: string
+  isHoliday?: boolean
+  overrideConflicts?: boolean
+  overrideReason?: string
+}
+
+export interface CreateCalendarExceptionRangeResult {
+  group_id: string
+  items: CalendarException[]
+  override_conflicts: boolean
+  attendance_count: number
+  approved_leave_count: number
 }
 
 export interface UpdateCalendarExceptionParams {

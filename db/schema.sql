@@ -32,10 +32,24 @@ CREATE TABLE IF NOT EXISTS academic_periods (
     name TEXT NOT NULL,
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT true,
+    is_active BOOLEAN NOT NULL DEFAULT false,
+    is_locked BOOLEAN NOT NULL DEFAULT false,
+    locked_at TIMESTAMPTZ,
+    locked_by TEXT,
+    lock_reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE academic_periods ADD COLUMN IF NOT EXISTS is_locked BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE academic_periods ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ;
+ALTER TABLE academic_periods ADD COLUMN IF NOT EXISTS locked_by TEXT;
+ALTER TABLE academic_periods ADD COLUMN IF NOT EXISTS lock_reason TEXT;
+ALTER TABLE academic_periods ALTER COLUMN is_active SET DEFAULT false;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_academic_periods_active_per_school
+    ON academic_periods ((COALESCE(school_id, '00000000-0000-0000-0000-000000000000'::uuid)))
+    WHERE is_active = true;
 
 -- ----------------------------------------------------------------------------
 -- Table: classes
@@ -140,18 +154,24 @@ CREATE TABLE IF NOT EXISTS class_enrollments (
     academic_period_id UUID REFERENCES academic_periods(id) ON DELETE CASCADE,
     absence_number TEXT,
     status TEXT NOT NULL DEFAULT 'active',
+    effective_start_date DATE,
+    effective_end_date DATE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT class_enrollments_status_check CHECK (status IN ('active', 'transferred', 'promoted', 'graduated', 'archived')),
     CONSTRAINT class_enrollments_owner_check CHECK (student_id IS NOT NULL OR user_id IS NOT NULL),
     CONSTRAINT class_enrollments_absence_number_check
-        CHECK (absence_number IS NULL OR absence_number ~ '^[1-9][0-9]*$')
+        CHECK (absence_number IS NULL OR absence_number ~ '^[1-9][0-9]*$'),
+    CONSTRAINT class_enrollments_effective_dates_check
+        CHECK (effective_end_date IS NULL OR effective_start_date IS NULL OR effective_end_date >= effective_start_date)
 );
 
 -- Additive compatibility for databases created before canonical Students.
 -- These columns must exist before the indexes below are created.
 ALTER TABLE class_enrollments ADD COLUMN IF NOT EXISTS student_id UUID REFERENCES students(id) ON DELETE CASCADE;
 ALTER TABLE class_enrollments ADD COLUMN IF NOT EXISTS absence_number TEXT;
+ALTER TABLE class_enrollments ADD COLUMN IF NOT EXISTS effective_start_date DATE;
+ALTER TABLE class_enrollments ADD COLUMN IF NOT EXISTS effective_end_date DATE;
 ALTER TABLE class_enrollments ALTER COLUMN user_id DROP NOT NULL;
 DO $$
 BEGIN
@@ -168,7 +188,72 @@ BEGIN
             CHECK (absence_number IS NULL OR absence_number ~ '^[1-9][0-9]*$')
             NOT VALID;
     END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'class_enrollments'::regclass
+          AND conname = 'class_enrollments_effective_dates_check'
+    ) THEN
+        ALTER TABLE class_enrollments
+            ADD CONSTRAINT class_enrollments_effective_dates_check
+            CHECK (effective_end_date IS NULL OR effective_start_date IS NULL OR effective_end_date >= effective_start_date)
+            NOT VALID;
+    END IF;
 END $$;
+
+UPDATE class_enrollments ce
+SET effective_start_date = GREATEST(
+    ap.start_date,
+    LEAST(COALESCE((ce.created_at AT TIME ZONE 'Asia/Jakarta')::date, ap.start_date), ap.end_date)
+)
+FROM academic_periods ap
+WHERE ce.academic_period_id = ap.id
+  AND ce.effective_start_date IS NULL;
+
+WITH next_enrollment AS (
+    SELECT
+        ce.id,
+        MIN(nxt.effective_start_date) AS next_start_date
+    FROM class_enrollments ce
+    JOIN class_enrollments nxt
+      ON nxt.academic_period_id = ce.academic_period_id
+     AND nxt.id <> ce.id
+     AND (
+         (ce.student_id IS NOT NULL AND nxt.student_id = ce.student_id)
+         OR (ce.user_id IS NOT NULL AND nxt.user_id = ce.user_id)
+     )
+     AND (
+         nxt.effective_start_date > ce.effective_start_date
+         OR (nxt.effective_start_date = ce.effective_start_date AND nxt.created_at > ce.created_at)
+     )
+    WHERE ce.status IN ('transferred', 'promoted', 'graduated', 'archived')
+      AND ce.effective_end_date IS NULL
+    GROUP BY ce.id
+),
+resolved_end AS (
+    SELECT
+        ce.id,
+        GREATEST(
+            ce.effective_start_date,
+            LEAST(
+                COALESCE(
+                    (ne.next_start_date - INTERVAL '1 day')::date,
+                    (ce.updated_at AT TIME ZONE 'Asia/Jakarta')::date,
+                    ap.end_date
+                ),
+                ap.end_date
+            )
+        ) AS effective_end_date
+    FROM class_enrollments ce
+    JOIN academic_periods ap ON ap.id = ce.academic_period_id
+    LEFT JOIN next_enrollment ne ON ne.id = ce.id
+    WHERE ce.status IN ('transferred', 'promoted', 'graduated', 'archived')
+      AND ce.effective_end_date IS NULL
+)
+UPDATE class_enrollments ce
+SET effective_end_date = re.effective_end_date
+FROM resolved_end re
+WHERE ce.id = re.id;
 
 CREATE INDEX IF NOT EXISTS idx_class_enrollments_user_period ON class_enrollments(user_id, academic_period_id);
 CREATE INDEX IF NOT EXISTS idx_class_enrollments_student_period ON class_enrollments(student_id, academic_period_id);
@@ -274,12 +359,22 @@ CREATE TABLE IF NOT EXISTS calendar_exceptions (
     date DATE NOT NULL,
     reason TEXT NOT NULL,
     is_holiday BOOLEAN NOT NULL DEFAULT true,
+    group_id UUID,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE calendar_exceptions ADD COLUMN IF NOT EXISTS group_id UUID;
+
 CREATE INDEX IF NOT EXISTS idx_calendar_exceptions_date ON calendar_exceptions(date);
 CREATE INDEX IF NOT EXISTS idx_calendar_exceptions_period ON calendar_exceptions(academic_period_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_exceptions_group ON calendar_exceptions(group_id) WHERE group_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_calendar_exceptions_scope_date
+    ON calendar_exceptions (
+        (COALESCE(school_id, '00000000-0000-0000-0000-000000000000'::uuid)),
+        (COALESCE(academic_period_id, '00000000-0000-0000-0000-000000000000'::uuid)),
+        date
+    );
 
 -- ----------------------------------------------------------------------------
 -- Table: attendances
@@ -454,6 +549,10 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity_created_at ON audit_logs(entity_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action_created_at ON audit_logs(action, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_created_at ON audit_logs(actor_id, created_at DESC);
 -- ----------------------------------------------------------------------------
 -- Table: password_reset_codes
 -- Description: Offline one-time password reset codes for student account recovery

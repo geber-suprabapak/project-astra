@@ -46,26 +46,37 @@ export async function setupStudentAttendance(
   domainStore: MemoryDomainStore,
   studentId = 'student-1',
 ) {
-  // 1. School
-  await domainStore.createSchool({
-    name: 'SMK Negeri 2 Banjarmasin',
-    slug: 'smkn2-bjm',
-  })
+  // 1. School (reuse if already bootstrapped for a second student in the same store)
+  if (domainStore.schools.length === 0) {
+    await domainStore.createSchool({
+      name: 'SMK Negeri 2 Banjarmasin',
+      slug: 'smkn2-bjm',
+    })
+  }
 
-  // 2. Academic Period (covers current year/month)
-  const period = await domainStore.createAcademicPeriod({
-    name: '2026/2027 Ganjil',
-    startDate: '2026-01-01',
-    endDate: '2026-12-31',
-    isActive: true,
-  })
+  // 2. Academic Period (covers current year/month; reuse existing active period if already configured)
+  const existingPeriod = await domainStore.getActiveAcademicPeriod()
+  const period =
+    existingPeriod &&
+    existingPeriod.start_date <= '2026-01-01' &&
+    existingPeriod.end_date >= '2026-12-31'
+      ? existingPeriod
+      : await domainStore.createAcademicPeriod({
+          name: '2026/2027 Ganjil',
+          startDate: '2026-01-01',
+          endDate: '2026-12-31',
+          isActive: true,
+        })
 
   // 3. Class
-  const classRoom = await domainStore.createClass({
-    name: 'XII RPL 1',
-    academicPeriodId: period.id,
-    grade: 12,
-  })
+  const existingClasses = await domainStore.getClasses(undefined, period.id)
+  const classRoom =
+    existingClasses.find((c) => c.name === 'XII RPL 1') ??
+    (await domainStore.createClass({
+      name: 'XII RPL 1',
+      academicPeriodId: period.id,
+      grade: 12,
+    }))
 
   // 4. Student profile
   domainStore.profiles.set(studentId, {

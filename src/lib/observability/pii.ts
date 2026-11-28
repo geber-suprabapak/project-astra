@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { AuditLogDetails } from '../../providers/types.js'
 
 const SENSITIVE_KEY_PATTERN =
   /^(authorization|cookie|set-cookie|x-service-token|x-api-key|password|new_?password|old_?password|current_?password|token|access_?token|refresh_?token|id_?token|jwt|secret|reset_?code|otp|code|email|phone|phone_?number|nik|nisn|address|alamat|full_?name|student_?name|image|image_?base64|images|embedding|embeddings|vector)$/i
@@ -115,4 +116,113 @@ export function filterSafeSpanAttributes(attributes: SafeSpanAttributes): SafeSp
     safe[key] = parsedString.success ? sanitizeLogString(parsedString.data) : value
   }
   return safe
+}
+
+const AUDIT_STRIP_PATTERN =
+  /^(authorization|cookie|set_?cookie|x_?service_?token|x_?api_?key|password|new_?password|old_?password|current_?password|token|access_?token|refresh_?token|id_?token|jwt|secret|reset_?code|otp|code|latitude|longitude|image|image_?base64|images|embedding|embeddings|vector)$/i
+const AUDIT_EMAIL_PATTERN = /^(email|previous_?email|new_?email)$/i
+const AUDIT_LAST4_PATTERN = /^(phone|phone_?number|nik|nisn)$/i
+const AUDIT_ADDRESS_PATTERN = /^(address|alamat)$/i
+
+export type SanitizedAuditValue =
+  | string
+  | number
+  | boolean
+  | null
+  | SanitizedAuditValue[]
+  | { [key: string]: SanitizedAuditValue }
+
+export type SanitizedAuditDetails = Record<string, SanitizedAuditValue>
+
+const rawAuditValueSchema: z.ZodType<SanitizedAuditValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(rawAuditValueSchema),
+    z.record(z.string(), rawAuditValueSchema),
+  ]),
+)
+const rawAuditObjectSchema = z.record(z.string(), rawAuditValueSchema)
+
+function maskEmailValue(value: string): string {
+  const trimmed = value.trim()
+  const atIndex = trimmed.indexOf('@')
+  if (atIndex <= 0) return '[MASKED_EMAIL]'
+  const local = trimmed.slice(0, atIndex)
+  const domain = trimmed.slice(atIndex + 1)
+  return `${local.slice(0, 1)}***@${domain}`
+}
+
+function maskLast4Value(value: string): string {
+  const trimmed = value.trim()
+  if (trimmed.length <= 4) return '***'
+  return `***${trimmed.slice(-4)}`
+}
+
+function parseAuditDetailsObject(
+  raw: SanitizedAuditValue | undefined,
+): SanitizedAuditDetails | null {
+  if (raw == null) return null
+  let current: SanitizedAuditValue = raw
+  for (let pass = 0; pass < 2; pass++) {
+    const strParsed = z.string().safeParse(current)
+    if (!strParsed.success) break
+    const trimmed = strParsed.data.trim()
+    if (!trimmed) return null
+    try {
+      const jsonParsed = rawAuditValueSchema.safeParse(JSON.parse(trimmed))
+      if (!jsonParsed.success) return { raw: sanitizeLogString(trimmed) }
+      current = jsonParsed.data
+    } catch {
+      return { raw: sanitizeLogString(trimmed) }
+    }
+  }
+  const objParsed = rawAuditObjectSchema.safeParse(current)
+  if (objParsed.success) {
+    return objParsed.data
+  }
+  const finalStr = z.string().safeParse(current)
+  return { value: finalStr.success ? sanitizeLogString(finalStr.data) : current }
+}
+
+function sanitizeAuditValue(key: string, value: SanitizedAuditValue): SanitizedAuditValue {
+  const normalizedKey = key.replace(/-/g, '_')
+  if (AUDIT_STRIP_PATTERN.test(normalizedKey)) {
+    return '[REDACTED]'
+  }
+  if (value === null) return null
+  const strParsed = z.string().safeParse(value)
+  if (strParsed.success) {
+    if (AUDIT_EMAIL_PATTERN.test(normalizedKey)) return maskEmailValue(strParsed.data)
+    if (AUDIT_LAST4_PATTERN.test(normalizedKey)) return maskLast4Value(strParsed.data)
+    if (AUDIT_ADDRESS_PATTERN.test(normalizedKey)) return '[MASKED_ADDRESS]'
+    return sanitizeLogString(strParsed.data)
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeAuditValue(key, item))
+  }
+  const objParsed = rawAuditObjectSchema.safeParse(value)
+  if (objParsed.success) {
+    const nested: SanitizedAuditDetails = {}
+    for (const [childKey, childVal] of Object.entries(objParsed.data)) {
+      nested[childKey] = sanitizeAuditValue(childKey, childVal)
+    }
+    return nested
+  }
+  return value
+}
+
+export function sanitizeAuditLogDetails(
+  details: AuditLogDetails | SanitizedAuditValue | undefined,
+): SanitizedAuditDetails | null {
+  const normalizedInput = rawAuditValueSchema.safeParse(details)
+  const parsed = normalizedInput.success ? parseAuditDetailsObject(normalizedInput.data) : null
+  if (!parsed) return null
+  const sanitized: SanitizedAuditDetails = {}
+  for (const [key, value] of Object.entries(parsed)) {
+    sanitized[key] = sanitizeAuditValue(key, value)
+  }
+  return sanitized
 }

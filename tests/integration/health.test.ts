@@ -209,6 +209,7 @@ describe('integration: runtime health & readiness probes', () => {
     })
 
     const res = await app.request('/ready/core')
+    // SAFETY: /ready/core returns the health check JSON envelope.
     const body = (await res.json()) as {
       healthy: boolean
       checks: {
@@ -241,6 +242,7 @@ describe('integration: runtime health & readiness probes', () => {
     })
 
     const res = await app.request('/ready/core')
+    // SAFETY: /ready/core returns the health check JSON envelope.
     const body = (await res.json()) as {
       healthy: boolean
       checks: {

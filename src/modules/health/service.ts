@@ -98,8 +98,7 @@ async function computeCoreReadiness(
   setDependencyUp('logto', identity === 'ok')
   setDependencyUp('redis', redis === 'ok')
 
-  const healthy =
-    database === 'ok' && objectStorage === 'ok' && identity === 'ok' && redis === 'ok'
+  const healthy = database === 'ok' && objectStorage === 'ok' && identity === 'ok' && redis === 'ok'
 
   return {
     healthy,

@@ -83,4 +83,22 @@ describe('computePrimaryAction', () => {
       expect(result.reason_code).toBe('ATTENDANCE_BLOCKED')
     }
   })
+
+  it('returns CALENDAR_HOLIDAY when calendarHolidayReason is present', () => {
+    const result = computePrimaryAction({
+      robinHealthy: true,
+      enrollmentStatus: 'enrolled',
+      hasActivePermit: false,
+      schedule: baseSchedule,
+      attendanceStatus: pendingStatus,
+      baseDateWIB: '2026-04-21',
+      calendarHolidayReason: 'Hari Kartini',
+    })
+    expect(result.allowed).toBe(false)
+    if (!result.allowed) {
+      expect(result.reason_code).toBe('CALENDAR_HOLIDAY')
+      expect(result.label).toBe('Hari Libur')
+      expect(result.reason_message).toBe('Hari Kartini')
+    }
+  })
 })

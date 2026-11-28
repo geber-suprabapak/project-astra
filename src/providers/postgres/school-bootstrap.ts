@@ -185,8 +185,8 @@ export async function acceptRosterReport(
         `
         if (!studentRows[0]) throw AppError.internal('Failed to create canonical student.')
         await tx`
-          INSERT INTO class_enrollments (student_id, user_id, class_id, academic_period_id, absence_number, status)
-          VALUES (${studentRows[0].id}::uuid, NULL, ${classRows[0].id}::uuid, ${period.id}::uuid, ${String(row.absence_number ?? '').trim()}, 'active')
+          INSERT INTO class_enrollments (student_id, user_id, class_id, academic_period_id, absence_number, status, effective_start_date)
+          VALUES (${studentRows[0].id}::uuid, NULL, ${classRows[0].id}::uuid, ${period.id}::uuid, ${String(row.absence_number ?? '').trim()}, 'active', GREATEST(${period.start_date}::date, LEAST((NOW() AT TIME ZONE 'Asia/Jakarta')::date, ${period.end_date}::date)))
         `
       }
 

@@ -73,8 +73,11 @@ export class AppError extends Error {
     return new AppError(ErrorCode.RESOURCE_NOT_FOUND, 404, `${resource} not found.`)
   }
 
-  static conflict(message = 'Conflict with existing resource.'): AppError {
-    return new AppError(ErrorCode.CONFLICT, 409, message)
+  static conflict(
+    message = 'Conflict with existing resource.',
+    details?: AppErrorDetails,
+  ): AppError {
+    return new AppError(ErrorCode.CONFLICT, 409, message, details)
   }
 
   static leaveRequestPending(details?: AppErrorDetails): AppError {

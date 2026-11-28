@@ -1,9 +1,13 @@
+import { randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
 import { AppError } from '../../lib/errors/app-error.js'
 import { logger } from '../../lib/logging/logger.js'
+import { expandDateRange } from '../shared/academic-batch.js'
 import type {
   CalendarException,
   CreateCalendarExceptionParams,
+  CreateCalendarExceptionRangeParams,
+  CreateCalendarExceptionRangeResult,
   CreateLocationParams,
   CreateScheduleParams,
   Location,
@@ -12,7 +16,13 @@ import type {
   UpdateLocationParams,
   UpdateScheduleParams,
 } from '../types.js'
-import { resolveSchoolId, withPgError, type PgQuery } from './shared.js'
+import {
+  isPgUniqueViolation,
+  resolveSchoolId,
+  runInTransaction,
+  withPgError,
+  type PgQuery,
+} from './shared.js'
 
 export interface ActiveScheduleScope {
   classId?: string
@@ -295,16 +305,16 @@ export async function deleteLocation(sql: Sql, id: string): Promise<void> {
 }
 
 export async function listCalendarExceptions(
-  sql: Sql,
+  sql: PgQuery,
   filter?: CalendarExceptionFilter,
 ): Promise<CalendarException[]> {
   return withPgError(
     (err) => logger.error({ err, filter }, 'Failed to list calendar exceptions'),
     async () => {
       const rows = await sql<CalendarException[]>`
-        SELECT id, school_id, academic_period_id, date::text, reason, is_holiday, created_at::text, updated_at::text
+        SELECT id, school_id, academic_period_id, date::text, reason, is_holiday, group_id, created_at::text, updated_at::text
         FROM calendar_exceptions
-        WHERE (${filter?.academicPeriodId ?? null}::uuid IS NULL OR academic_period_id = ${filter?.academicPeriodId ?? null}::uuid)
+        WHERE (${filter?.academicPeriodId ?? null}::uuid IS NULL OR academic_period_id IS NULL OR academic_period_id = ${filter?.academicPeriodId ?? null}::uuid)
           AND (${filter?.startDate ?? null}::date IS NULL OR date >= ${filter?.startDate ?? null}::date)
           AND (${filter?.endDate ?? null}::date IS NULL OR date <= ${filter?.endDate ?? null}::date)
         ORDER BY date ASC
@@ -322,7 +332,7 @@ export async function getCalendarExceptionById(
     (err) => logger.error({ err, id }, 'Failed to get calendar exception by id'),
     async () => {
       const rows = await sql<CalendarException[]>`
-        SELECT id, school_id, academic_period_id, date::text, reason, is_holiday, created_at::text, updated_at::text
+        SELECT id, school_id, academic_period_id, date::text, reason, is_holiday, group_id, created_at::text, updated_at::text
         FROM calendar_exceptions
         WHERE id = ${id}
         LIMIT 1
@@ -333,7 +343,7 @@ export async function getCalendarExceptionById(
 }
 
 export async function getCalendarExceptionByDate(
-  sql: Sql,
+  sql: PgQuery,
   date: string,
   academicPeriodId?: string,
 ): Promise<CalendarException | null> {
@@ -343,15 +353,65 @@ export async function getCalendarExceptionByDate(
     async () => {
       const formattedDate = date.slice(0, 10)
       const rows = await sql<CalendarException[]>`
-        SELECT id, school_id, academic_period_id, date::text, reason, is_holiday, created_at::text, updated_at::text
+        SELECT id, school_id, academic_period_id, date::text, reason, is_holiday, group_id, created_at::text, updated_at::text
         FROM calendar_exceptions
         WHERE date = ${formattedDate}::date
           AND (${academicPeriodId ?? null}::uuid IS NULL OR academic_period_id IS NULL OR academic_period_id = ${academicPeriodId ?? null}::uuid)
+        ORDER BY (academic_period_id IS NULL) ASC, updated_at DESC
         LIMIT 1
       `
       return rows[0] ?? null
     },
   )
+}
+
+async function scanCalendarDateConflictsInTx(
+  tx: PgQuery,
+  startDate: string,
+  endDate: string,
+): Promise<{
+  conflictingDates: string[]
+  attendanceCount: number
+  approvedLeaveCount: number
+}> {
+  const attendanceRows = await tx<{ date: string; count: string }[]>`
+    SELECT date, COUNT(*) AS count
+    FROM attendances
+    WHERE date >= ${startDate} AND date <= ${endDate}
+    GROUP BY date
+    ORDER BY date ASC
+  `
+  const leaveRows = await tx<{ start_date: string; end_date: string }[]>`
+    SELECT
+      (date AT TIME ZONE 'Asia/Jakarta')::date::text AS start_date,
+      COALESCE(effective_end_date, original_end_date, (date AT TIME ZONE 'Asia/Jakarta')::date)::text AS end_date
+    FROM leave_requests
+    WHERE approval_status = 'approved'
+      AND (date AT TIME ZONE 'Asia/Jakarta')::date <= ${endDate}::date
+      AND COALESCE(effective_end_date, original_end_date, (date AT TIME ZONE 'Asia/Jakarta')::date) >= ${startDate}::date
+  `
+
+  const dateSet = new Set<string>()
+  let attendanceCount = 0
+  for (const row of attendanceRows) {
+    attendanceCount += Number(row.count)
+    dateSet.add(row.date.slice(0, 10))
+  }
+  const approvedLeaveCount = leaveRows.length
+  const rangeDates = expandDateRange(startDate, endDate, 90)
+  for (const leave of leaveRows) {
+    for (const d of rangeDates) {
+      if (d >= leave.start_date && d <= leave.end_date) {
+        dateSet.add(d)
+      }
+    }
+  }
+
+  return {
+    conflictingDates: Array.from(dateSet).sort(),
+    attendanceCount,
+    approvedLeaveCount,
+  }
 }
 
 export async function createCalendarException(
@@ -363,15 +423,121 @@ export async function createCalendarException(
     async () => {
       const schoolId = await resolveSchoolId(sql, params.schoolId)
       const formattedDate = params.date.slice(0, 10)
-      const rows = await sql<CalendarException[]>`
-        INSERT INTO calendar_exceptions (school_id, academic_period_id, date, reason, is_holiday)
-        VALUES (${schoolId}, ${params.academicPeriodId ?? null}, ${formattedDate}::date, ${params.reason}, ${params.isHoliday ?? true})
-        RETURNING id, school_id, academic_period_id, date::text, reason, is_holiday, created_at::text, updated_at::text
-      `
-      if (!rows || rows.length === 0) {
-        throw AppError.internal('Failed to create calendar exception.')
-      }
-      return rows[0]
+      const isHoliday = params.isHoliday ?? true
+
+      return await runInTransaction(sql, async (tx) => {
+        if (isHoliday) {
+          const conflicts = await scanCalendarDateConflictsInTx(tx, formattedDate, formattedDate)
+          if (conflicts.attendanceCount > 0 || conflicts.approvedLeaveCount > 0) {
+            const overrideReason = params.overrideReason?.trim() ?? ''
+            if (!params.overrideConflicts || overrideReason.length < 3) {
+              throw AppError.conflict(
+                'Date conflicts with existing attendance or approved leave records.',
+                {
+                  reason_code: 'CALENDAR_CONFLICT',
+                  conflicting_dates: conflicts.conflictingDates,
+                  attendance_count: conflicts.attendanceCount,
+                  approved_leave_count: conflicts.approvedLeaveCount,
+                },
+              )
+            }
+          }
+        }
+
+        try {
+          const rows = await tx<CalendarException[]>`
+            INSERT INTO calendar_exceptions (school_id, academic_period_id, date, reason, is_holiday, group_id)
+            VALUES (${schoolId}, ${params.academicPeriodId ?? null}, ${formattedDate}::date, ${params.reason}, ${isHoliday}, ${params.groupId ?? null})
+            RETURNING id, school_id, academic_period_id, date::text, reason, is_holiday, group_id, created_at::text, updated_at::text
+          `
+          if (!rows || rows.length === 0) {
+            throw AppError.internal('Failed to create calendar exception.')
+          }
+          return rows[0]
+        } catch (err) {
+          if (isPgUniqueViolation(err)) {
+            throw AppError.conflict('Calendar exception already exists for this date and scope.', {
+              reason_code: 'CALENDAR_DUPLICATE_DATE',
+              date: formattedDate,
+            })
+          }
+          throw err
+        }
+      })
+    },
+  )
+}
+
+export async function createCalendarExceptionRange(
+  sql: Sql,
+  params: CreateCalendarExceptionRangeParams,
+): Promise<CreateCalendarExceptionRangeResult> {
+  const dates = expandDateRange(params.startDate.slice(0, 10), params.endDate.slice(0, 10), 90)
+  const isHoliday = params.isHoliday ?? true
+
+  return withPgError(
+    (err) => logger.error({ err, params }, 'Failed to create calendar exception range'),
+    async () => {
+      const schoolId = await resolveSchoolId(sql, params.schoolId)
+      const groupId = randomUUID()
+
+      return await runInTransaction(sql, async (tx) => {
+        let attendanceCount = 0
+        let approvedLeaveCount = 0
+        if (isHoliday) {
+          const conflicts = await scanCalendarDateConflictsInTx(
+            tx,
+            dates[0]!,
+            dates[dates.length - 1]!,
+          )
+          attendanceCount = conflicts.attendanceCount
+          approvedLeaveCount = conflicts.approvedLeaveCount
+          if (attendanceCount > 0 || approvedLeaveCount > 0) {
+            const overrideReason = params.overrideReason?.trim() ?? ''
+            if (!params.overrideConflicts || overrideReason.length < 3) {
+              throw AppError.conflict(
+                'Date range conflicts with existing attendance or approved leave records.',
+                {
+                  reason_code: 'CALENDAR_CONFLICT',
+                  conflicting_dates: conflicts.conflictingDates,
+                  attendance_count: attendanceCount,
+                  approved_leave_count: approvedLeaveCount,
+                },
+              )
+            }
+          }
+        }
+
+        const items: CalendarException[] = []
+        try {
+          for (const date of dates) {
+            const rows = await tx<CalendarException[]>`
+              INSERT INTO calendar_exceptions (school_id, academic_period_id, date, reason, is_holiday, group_id)
+              VALUES (${schoolId}, ${params.academicPeriodId ?? null}, ${date}::date, ${params.reason}, ${isHoliday}, ${groupId}::uuid)
+              RETURNING id, school_id, academic_period_id, date::text, reason, is_holiday, group_id, created_at::text, updated_at::text
+            `
+            if (!rows[0]) throw AppError.internal('Failed to create calendar exception.')
+            items.push(rows[0])
+          }
+        } catch (err) {
+          if (isPgUniqueViolation(err)) {
+            throw AppError.conflict('Calendar exception already exists for a date in this range.', {
+              reason_code: 'CALENDAR_DUPLICATE_DATE',
+            })
+          }
+          throw err
+        }
+
+        return {
+          group_id: groupId,
+          items,
+          override_conflicts: Boolean(
+            params.overrideConflicts && (attendanceCount > 0 || approvedLeaveCount > 0),
+          ),
+          attendance_count: attendanceCount,
+          approved_leave_count: approvedLeaveCount,
+        }
+      })
     },
   )
 }
@@ -388,18 +554,27 @@ export async function updateCalendarException(
       if (!existing) throw AppError.notFound('Calendar exception')
 
       const formattedDate = params.date ? params.date.slice(0, 10) : null
-      const rows = await sql<CalendarException[]>`
-        UPDATE calendar_exceptions
-        SET
-          date = COALESCE(${formattedDate ? `${formattedDate}::date` : null}, date),
-          reason = COALESCE(${params.reason ?? null}, reason),
-          is_holiday = COALESCE(${params.isHoliday ?? null}, is_holiday),
-          academic_period_id = COALESCE(${params.academicPeriodId ?? null}, academic_period_id),
-          updated_at = NOW()
-        WHERE id = ${id}
-        RETURNING id, school_id, academic_period_id, date::text, reason, is_holiday, created_at::text, updated_at::text
-      `
-      return rows[0]
+      try {
+        const rows = await sql<CalendarException[]>`
+          UPDATE calendar_exceptions
+          SET
+            date = COALESCE(${formattedDate}::date, date),
+            reason = COALESCE(${params.reason ?? null}, reason),
+            is_holiday = COALESCE(${params.isHoliday ?? null}, is_holiday),
+            academic_period_id = COALESCE(${params.academicPeriodId ?? null}, academic_period_id),
+            updated_at = NOW()
+          WHERE id = ${id}
+          RETURNING id, school_id, academic_period_id, date::text, reason, is_holiday, group_id, created_at::text, updated_at::text
+        `
+        return rows[0]
+      } catch (err) {
+        if (isPgUniqueViolation(err)) {
+          throw AppError.conflict('Calendar exception already exists for this date and scope.', {
+            reason_code: 'CALENDAR_DUPLICATE_DATE',
+          })
+        }
+        throw err
+      }
     },
   )
 }
@@ -410,6 +585,20 @@ export async function deleteCalendarException(sql: Sql, id: string): Promise<voi
     async () => {
       const result = await sql`DELETE FROM calendar_exceptions WHERE id = ${id}`
       if (result.count === 0) throw AppError.notFound('Calendar exception')
+    },
+  )
+}
+
+export async function deleteCalendarExceptionGroup(
+  sql: Sql,
+  groupId: string,
+): Promise<{ group_id: string; deleted_count: number }> {
+  return withPgError(
+    (err) => logger.error({ err, groupId }, 'Failed to delete calendar exception group'),
+    async () => {
+      const result = await sql`DELETE FROM calendar_exceptions WHERE group_id = ${groupId}::uuid`
+      if (result.count === 0) throw AppError.notFound('Calendar exception group')
+      return { group_id: groupId, deleted_count: result.count }
     },
   )
 }

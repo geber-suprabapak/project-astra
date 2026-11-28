@@ -27,6 +27,7 @@ export interface GateResult {
   actionType: 'check_in' | 'check_out' | null
   reason: string | null
   reasonCode: string | null
+  holidayReason?: string | null
   locationName: string | null
   schedule: Schedule | null
   isLate: boolean
@@ -184,8 +185,9 @@ export async function runGateChecks(
     return {
       allowed: false,
       actionType: null,
-      reason: `Today is a scheduled calendar exception/holiday: ${calendarException.reason}`,
-      reasonCode: 'ATTENDANCE_BLOCKED',
+      reason: `Hari ini libur: ${calendarException.reason}`,
+      reasonCode: 'CALENDAR_HOLIDAY',
+      holidayReason: calendarException.reason,
       locationName: null,
       schedule: null,
       isLate: false,

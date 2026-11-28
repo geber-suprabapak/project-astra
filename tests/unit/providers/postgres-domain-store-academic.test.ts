@@ -91,6 +91,19 @@ describe('PostgresDomainStore (Academic, Enrollment & Calendar)', () => {
     let currentClassId = 'class-1'
     const mockSql = createMockSql((strings: TemplateStringsArray) => {
       const query = strings.join('?')
+      if (query.includes('FROM academic_periods') && query.includes('WHERE id =')) {
+        return [
+          {
+            id: 'period-1',
+            school_id: 'school-1',
+            name: '2026/2027 Ganjil',
+            start_date: '2026-07-01',
+            end_date: '2026-12-31',
+            is_active: true,
+            is_locked: false,
+          },
+        ]
+      }
       if (query.includes('FROM class_enrollments') && query.includes("status = 'active'")) {
         return [
           {
@@ -247,5 +260,108 @@ describe('PostgresDomainStore (Academic, Enrollment & Calendar)', () => {
     const exception = await store.getCalendarExceptionByDate('2026-08-17', 'period-1')
     expect(exception?.reason).toBe('HUT RI')
     expect(exception?.is_holiday).toBe(true)
+  })
+
+  it('casts date params outside bound values on updateAcademicPeriod/updateCalendarException and includes global holidays on listCalendarExceptions', async () => {
+    const captured: Array<{ query: string; values: readonly unknown[] }> = []
+    const mockSql = createMockSql(
+      (strings: TemplateStringsArray, ...values: readonly unknown[]) => {
+        const query = strings.join('?')
+        captured.push({ query, values })
+        if (query.includes('FROM academic_periods') && query.includes('WHERE id =')) {
+          return [
+            {
+              id: 'period-1',
+              school_id: 'school-1',
+              start_date: '2026-07-01',
+              end_date: '2026-12-31',
+              is_active: false,
+              is_locked: false,
+            },
+          ]
+        }
+        if (query.includes('INSERT INTO academic_periods')) {
+          return [
+            {
+              id: 'period-draft',
+              school_id: 'school-1',
+              name: 'Draft',
+              start_date: '2027-07-01',
+              end_date: '2027-12-31',
+              is_active: false,
+            },
+          ]
+        }
+        if (query.includes('UPDATE academic_periods')) {
+          return [
+            {
+              id: 'period-1',
+              school_id: 'school-1',
+              name: 'Updated',
+              start_date: '2026-07-02',
+              end_date: '2026-12-30',
+              is_active: false,
+            },
+          ]
+        }
+        if (query.includes('FROM calendar_exceptions') && query.includes('WHERE id =')) {
+          return [
+            {
+              id: 'exc-1',
+              school_id: 'school-1',
+              academic_period_id: null,
+              date: '2026-08-17',
+              reason: 'HUT RI',
+              is_holiday: true,
+            },
+          ]
+        }
+        if (query.includes('UPDATE calendar_exceptions')) {
+          return [
+            {
+              id: 'exc-1',
+              school_id: 'school-1',
+              academic_period_id: null,
+              date: '2026-08-18',
+              reason: 'HUT RI',
+              is_holiday: true,
+            },
+          ]
+        }
+        return []
+      },
+    )
+
+    const store = new PostgresDomainStore({ sql: mockSql })
+    const draft = await store.createAcademicPeriod({
+      name: 'Draft',
+      startDate: '2027-07-01',
+      endDate: '2027-12-31',
+    })
+    expect(draft.is_active).toBe(false)
+    const insertCall = captured.find((c) => c.query.includes('INSERT INTO academic_periods'))
+    expect(insertCall?.values.at(-1)).toBe(false)
+
+    await store.updateAcademicPeriod('period-1', {
+      startDate: '2026-07-02',
+      endDate: '2026-12-30',
+    })
+    const periodUpdate = captured.find((c) => c.query.includes('UPDATE academic_periods'))
+    expect(periodUpdate?.query).toContain('?::date')
+    expect(periodUpdate?.values).toContain('2026-07-02')
+    expect(periodUpdate?.values).toContain('2026-12-30')
+    expect(periodUpdate?.values.some((v) => String(v).includes('::date'))).toBe(false)
+
+    await store.updateCalendarException('exc-1', { date: '2026-08-18' })
+    const excUpdate = captured.find((c) => c.query.includes('UPDATE calendar_exceptions'))
+    expect(excUpdate?.query).toContain('?::date')
+    expect(excUpdate?.values).toContain('2026-08-18')
+    expect(excUpdate?.values.some((v) => String(v).includes('::date'))).toBe(false)
+
+    await store.listCalendarExceptions({ academicPeriodId: 'period-1' })
+    const listExc = captured.find(
+      (c) => c.query.includes('FROM calendar_exceptions') && c.query.includes('ORDER BY date ASC'),
+    )
+    expect(listExc?.query).toContain('academic_period_id IS NULL OR academic_period_id =')
   })
 })

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { AppError } from '../../../src/lib/errors/app-error.js'
+import { classEnrollmentResponseSchema } from '../../../src/modules/admin/schema.js'
 import {
+  createAcademicPeriod,
   createCalendarException,
   createLocation,
   createSchedule,
@@ -125,6 +128,82 @@ describe('Admin Academic Policy Service — Schedules, Locations & Calendar Exce
         providers,
       })
       expect(afterList.some((e) => e.id === exc.id)).toBe(false)
+    })
+
+    it('includes school-wide holidays on period filter, allows teacher/staff reads, defaults period is_active to false, and parses nullable enrollment user_id', async () => {
+      const { providers } = await setupAdminPolicyTest()
+
+      const draftPeriod = await createAcademicPeriod({
+        name: '2027/2028 Ganjil',
+        startDate: '2027-07-01',
+        endDate: '2027-12-31',
+        actorId: 'admin-1',
+        actorRole: 'school_admin',
+        providers,
+      })
+      expect(draftPeriod.is_active).toBe(false)
+
+      const globalHoliday = await createCalendarException({
+        date: '2027-08-17',
+        reason: 'HUT RI',
+        isHoliday: true,
+        academicPeriodId: null,
+        actorId: 'admin-1',
+        actorRole: 'school_admin',
+        providers,
+      })
+      const periodHoliday = await createCalendarException({
+        date: '2027-09-01',
+        reason: 'Libur Semester',
+        isHoliday: true,
+        academicPeriodId: draftPeriod.id,
+        actorId: 'admin-1',
+        actorRole: 'school_admin',
+        providers,
+      })
+
+      for (const role of ['teacher', 'staff'] as const) {
+        const listed = await listCalendarExceptions({
+          filter: { academicPeriodId: draftPeriod.id },
+          actorRole: role,
+          providers,
+        })
+        expect(listed.map((e) => e.id)).toEqual(
+          expect.arrayContaining([globalHoliday.id, periodHoliday.id]),
+        )
+
+        const fetched = await getCalendarException({
+          id: globalHoliday.id,
+          actorRole: role,
+          providers,
+        })
+        expect(fetched.id).toBe(globalHoliday.id)
+
+        const schedules = await listSchedules({
+          actorRole: role,
+          providers,
+        })
+        expect(Array.isArray(schedules)).toBe(true)
+
+        await expect(
+          createCalendarException({
+            date: '2027-10-01',
+            reason: 'Unauthorized',
+            actorId: 'staff-1',
+            actorRole: role,
+            providers,
+          }),
+        ).rejects.toThrow(AppError)
+      }
+
+      const parsedUnbound = classEnrollmentResponseSchema.parse({
+        id: 'enroll-unbound-1',
+        user_id: null,
+        class_id: 'class-1',
+        academic_period_id: draftPeriod.id,
+        status: 'active',
+      })
+      expect(parsedUnbound.user_id).toBeNull()
     })
   })
 })

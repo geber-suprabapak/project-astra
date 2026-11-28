@@ -16,6 +16,8 @@ export interface PrecheckResult {
   schedule_window: ScheduleWindow | null
   checks: CheckResult
   blocking_reason: string | null
+  reason_code: string | null
+  holiday_reason: string | null
 }
 
 export async function precheck(
@@ -38,6 +40,8 @@ export async function precheck(
     schedule_window: gate.window,
     checks: gate.checks,
     blocking_reason: gate.reason,
+    reason_code: gate.reasonCode,
+    holiday_reason: gate.holidayReason ?? null,
   }
 }
 
@@ -82,7 +86,14 @@ export async function submit(
     if (gate.reasonCode === 'ENROLLMENT_REQUIRED') {
       throw AppError.enrollmentRequired()
     }
-    throw AppError.attendanceBlocked(gate.reason ?? 'Attendance not allowed.')
+    let details: { reason_code: string; holiday_reason?: string } | undefined
+    if (gate.reasonCode) {
+      details = { reason_code: gate.reasonCode }
+      if (gate.holidayReason) {
+        details.holiday_reason = gate.holidayReason
+      }
+    }
+    throw AppError.attendanceBlocked(gate.reason ?? 'Attendance not allowed.', details)
   }
 
   if (gate.actionType !== params.actionType) {

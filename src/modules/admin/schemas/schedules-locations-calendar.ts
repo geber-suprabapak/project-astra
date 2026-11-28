@@ -191,12 +191,57 @@ export const createCalendarExceptionSchema = z.object({
   academic_period_id: z.string().min(1).nullable().optional(),
   academicPeriodId: z.string().min(1).nullable().optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
-  reason: z.string().min(1, 'Reason is required.'),
+  reason: z.string().trim().min(1, 'Reason is required.').max(255),
   is_holiday: z.boolean().default(true).optional(),
   isHoliday: z.boolean().default(true).optional(),
+  override_conflicts: z.boolean().optional(),
+  overrideConflicts: z.boolean().optional(),
+  override_reason: z.string().trim().max(500).optional(),
+  overrideReason: z.string().trim().max(500).optional(),
 })
 
 export type CreateCalendarExceptionInput = z.infer<typeof createCalendarExceptionSchema>
+
+export const createCalendarExceptionRangeSchema = z
+  .object({
+    school_id: z.string().min(1).nullable().optional(),
+    schoolId: z.string().min(1).nullable().optional(),
+    academic_period_id: z.string().min(1).nullable().optional(),
+    academicPeriodId: z.string().min(1).nullable().optional(),
+    start_date: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Start date must be YYYY-MM-DD')
+      .optional(),
+    startDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Start date must be YYYY-MM-DD')
+      .optional(),
+    end_date: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'End date must be YYYY-MM-DD')
+      .optional(),
+    endDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'End date must be YYYY-MM-DD')
+      .optional(),
+    reason: z.string().trim().min(1, 'Reason is required.').max(255),
+    is_holiday: z.boolean().default(true).optional(),
+    isHoliday: z.boolean().default(true).optional(),
+    override_conflicts: z.boolean().optional(),
+    overrideConflicts: z.boolean().optional(),
+    override_reason: z.string().trim().max(500).optional(),
+    overrideReason: z.string().trim().max(500).optional(),
+  })
+  .refine((data) => Boolean(data.start_date || data.startDate), {
+    message: 'Start date is required.',
+    path: ['start_date'],
+  })
+  .refine((data) => Boolean(data.end_date || data.endDate), {
+    message: 'End date is required.',
+    path: ['end_date'],
+  })
+
+export type CreateCalendarExceptionRangeInput = z.infer<typeof createCalendarExceptionRangeSchema>
 
 export const updateCalendarExceptionSchema = z.object({
   academic_period_id: z.string().min(1).nullable().optional(),
@@ -219,6 +264,7 @@ export const calendarExceptionResponseSchema = z.object({
   date: z.string(),
   reason: z.string(),
   is_holiday: z.boolean(),
+  group_id: z.string().nullable().optional(),
   created_at: z.string().optional(),
   updated_at: z.string().optional(),
 })

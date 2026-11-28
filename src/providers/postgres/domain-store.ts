@@ -180,9 +180,13 @@ export class PostgresDomainStore implements DomainStore {
     schedulesCalendar.getCalendarExceptionByDate(this.sql, d, pid)
   createCalendarException: DomainStore['createCalendarException'] = (p) =>
     schedulesCalendar.createCalendarException(this.sql, p)
+  createCalendarExceptionRange: DomainStore['createCalendarExceptionRange'] = (p) =>
+    schedulesCalendar.createCalendarExceptionRange(this.sql, p)
   updateCalendarException: DomainStore['updateCalendarException'] = (id, p) =>
     schedulesCalendar.updateCalendarException(this.sql, id, p)
   deleteCalendarException = (id: string) => schedulesCalendar.deleteCalendarException(this.sql, id)
+  deleteCalendarExceptionGroup = (groupId: string) =>
+    schedulesCalendar.deleteCalendarExceptionGroup(this.sql, groupId)
 
   getActivePermitsToday = (id: string, s: string, e: string) =>
     leaveRequests.getActivePermitsToday(this.sql, id, s, e)
@@ -222,11 +226,17 @@ export class PostgresDomainStore implements DomainStore {
   updateAcademicPeriod: DomainStore['updateAcademicPeriod'] = (id, p) =>
     academic.updateAcademicPeriod(this.sql, id, p)
   setActiveAcademicPeriod = (id: string) => academic.setActiveAcademicPeriod(this.sql, id)
+  lockAcademicPeriod: DomainStore['lockAcademicPeriod'] = (p) =>
+    academic.lockAcademicPeriod(this.sql, p)
+  unlockAcademicPeriod: DomainStore['unlockAcademicPeriod'] = (p) =>
+    academic.unlockAcademicPeriod(this.sql, p)
   getClasses = (sid?: string, pid?: string) => classesEnrollment.getClasses(this.sql, sid, pid)
   getClassById = (id: string) => classesEnrollment.getClassById(this.sql, id)
   createClass: DomainStore['createClass'] = (p) => classesEnrollment.createClass(this.sql, p)
   updateClass: DomainStore['updateClass'] = (id, p) =>
     classesEnrollment.updateClass(this.sql, id, p)
+  deleteClass: DomainStore['deleteClass'] = (id, options) =>
+    classesEnrollment.deleteClass(this.sql, id, options)
   listClassEnrollments: DomainStore['listClassEnrollments'] = (f) =>
     classesEnrollment.listClassEnrollments(this.sql, f)
   getActiveClassEnrollment = (id: string, pid?: string) =>
@@ -241,9 +251,14 @@ export class PostgresDomainStore implements DomainStore {
     classesEnrollment.exitStudentEnrollment(this.sql, p)
   getStudentEnrollmentHistory = (id: string) =>
     classesEnrollment.listClassEnrollments(this.sql, { userId: id })
+  previewBatchEnrollmentTransition: DomainStore['previewBatchEnrollmentTransition'] = (p) =>
+    classesEnrollment.previewBatchEnrollmentTransition(this.sql, p)
+  commitBatchEnrollmentTransition: DomainStore['commitBatchEnrollmentTransition'] = (p) =>
+    classesEnrollment.commitBatchEnrollmentTransition(this.sql, p)
 
   insertAuditLog: DomainStore['insertAuditLog'] = (e) => auditSessions.insertAuditLog(this.sql, e)
   getAuditLogs = (t?: string, id?: string) => auditSessions.getAuditLogs(this.sql, t, id)
+  queryAuditLogs: DomainStore['queryAuditLogs'] = (f) => auditSessions.queryAuditLogs(this.sql, f)
   revokeUserSessions = (id: string) => auditSessions.revokeUserSessions(this.sql, id)
   isSessionRevoked = (id: string, iat?: number) => auditSessions.isSessionRevoked(this.sql, id, iat)
 

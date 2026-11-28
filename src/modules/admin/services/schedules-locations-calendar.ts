@@ -1,12 +1,14 @@
 import { AppError } from '../../../lib/errors/app-error.js'
 import type {
   AppProviders,
+  AuditLogDetails,
   CalendarException,
+  CreateCalendarExceptionRangeResult,
   IdentityRole,
   Location,
   Schedule,
 } from '../../../providers/types.js'
-import { assertAdminAccess } from './shared.js'
+import { assertAdminAccess, assertChronosStaffAccess, withAuditCorrelation } from './shared.js'
 
 // --- Schedules ---
 
@@ -20,7 +22,7 @@ export async function listSchedules(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<Schedule[]> {
-  assertAdminAccess(params.actorRole)
+  assertChronosStaffAccess(params.actorRole)
   return params.providers.domainStore.listSchedules(params.filter)
 }
 
@@ -274,7 +276,7 @@ export async function listCalendarExceptions(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<CalendarException[]> {
-  assertAdminAccess(params.actorRole)
+  assertChronosStaffAccess(params.actorRole)
   return params.providers.domainStore.listCalendarExceptions(params.filter)
 }
 
@@ -283,7 +285,7 @@ export async function getCalendarException(params: {
   actorRole: IdentityRole | null
   providers: AppProviders
 }): Promise<CalendarException> {
-  assertAdminAccess(params.actorRole)
+  assertChronosStaffAccess(params.actorRole)
   const exc = await params.providers.domainStore.getCalendarExceptionById(params.id)
   if (!exc) throw AppError.notFound('Calendar exception')
   return exc
@@ -295,8 +297,11 @@ export async function createCalendarException(params: {
   date: string
   reason: string
   isHoliday?: boolean
+  overrideConflicts?: boolean
+  overrideReason?: string
   actorId: string
   actorRole: IdentityRole | null
+  requestId?: string
   providers: AppProviders
 }): Promise<CalendarException> {
   assertAdminAccess(params.actorRole)
@@ -306,22 +311,79 @@ export async function createCalendarException(params: {
     date: params.date,
     reason: params.reason,
     isHoliday: params.isHoliday,
+    overrideConflicts: params.overrideConflicts,
+    overrideReason: params.overrideReason,
   })
+
+  const singleDetails: AuditLogDetails = {
+    date: exc.date,
+    reason: exc.reason,
+    is_holiday: exc.is_holiday,
+    academic_period_id: exc.academic_period_id,
+    override_conflicts: params.overrideConflicts === true,
+  }
+  if (params.overrideReason) singleDetails.override_reason = params.overrideReason
 
   await params.providers.domainStore.insertAuditLog({
     actor_id: params.actorId,
     action: 'create_calendar_exception',
     entity_type: 'calendar_exception',
     entity_id: exc.id,
-    details: {
-      date: exc.date,
-      reason: exc.reason,
-      is_holiday: exc.is_holiday,
-      academic_period_id: exc.academic_period_id,
-    },
+    details: withAuditCorrelation(singleDetails, params.requestId),
   })
 
   return exc
+}
+
+export async function createCalendarExceptionRange(params: {
+  schoolId?: string | null
+  academicPeriodId?: string | null
+  startDate: string
+  endDate: string
+  reason: string
+  isHoliday?: boolean
+  overrideConflicts?: boolean
+  overrideReason?: string
+  actorId: string
+  actorRole: IdentityRole | null
+  requestId?: string
+  providers: AppProviders
+}): Promise<CreateCalendarExceptionRangeResult> {
+  assertAdminAccess(params.actorRole)
+  const result = await params.providers.domainStore.createCalendarExceptionRange({
+    schoolId: params.schoolId,
+    academicPeriodId: params.academicPeriodId,
+    startDate: params.startDate,
+    endDate: params.endDate,
+    reason: params.reason,
+    isHoliday: params.isHoliday,
+    overrideConflicts: params.overrideConflicts,
+    overrideReason: params.overrideReason,
+  })
+
+  const rangeDetails: AuditLogDetails = {
+    group_id: result.group_id,
+    start_date: params.startDate,
+    end_date: params.endDate,
+    days_count: result.items.length,
+    reason: params.reason,
+    is_holiday: params.isHoliday ?? true,
+    academic_period_id: params.academicPeriodId ?? null,
+    override_conflicts: result.override_conflicts,
+    attendance_count: result.attendance_count,
+    approved_leave_count: result.approved_leave_count,
+  }
+  if (params.overrideReason) rangeDetails.override_reason = params.overrideReason
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'create_calendar_exception_range',
+    entity_type: 'calendar_exception',
+    entity_id: result.group_id,
+    details: withAuditCorrelation(rangeDetails, params.requestId),
+  })
+
+  return result
 }
 
 export async function updateCalendarException(params: {
@@ -332,6 +394,7 @@ export async function updateCalendarException(params: {
   isHoliday?: boolean
   actorId: string
   actorRole: IdentityRole | null
+  requestId?: string
   providers: AppProviders
 }): Promise<CalendarException> {
   assertAdminAccess(params.actorRole)
@@ -347,12 +410,15 @@ export async function updateCalendarException(params: {
     action: 'update_calendar_exception',
     entity_type: 'calendar_exception',
     entity_id: exc.id,
-    details: {
-      date: exc.date,
-      reason: exc.reason,
-      is_holiday: exc.is_holiday,
-      academic_period_id: exc.academic_period_id,
-    },
+    details: withAuditCorrelation(
+      {
+        date: exc.date,
+        reason: exc.reason,
+        is_holiday: exc.is_holiday,
+        academic_period_id: exc.academic_period_id,
+      },
+      params.requestId,
+    ),
   })
 
   return exc
@@ -362,6 +428,7 @@ export async function deleteCalendarException(params: {
   id: string
   actorId: string
   actorRole: IdentityRole | null
+  requestId?: string
   providers: AppProviders
 }): Promise<void> {
   assertAdminAccess(params.actorRole)
@@ -372,6 +439,33 @@ export async function deleteCalendarException(params: {
     action: 'delete_calendar_exception',
     entity_type: 'calendar_exception',
     entity_id: params.id,
-    details: { id: params.id },
+    details: withAuditCorrelation({ id: params.id }, params.requestId),
   })
+}
+
+export async function deleteCalendarExceptionGroup(params: {
+  groupId: string
+  actorId: string
+  actorRole: IdentityRole | null
+  requestId?: string
+  providers: AppProviders
+}): Promise<{ group_id: string; deleted_count: number }> {
+  assertAdminAccess(params.actorRole)
+  const result = await params.providers.domainStore.deleteCalendarExceptionGroup(params.groupId)
+
+  await params.providers.domainStore.insertAuditLog({
+    actor_id: params.actorId,
+    action: 'delete_calendar_exception_group',
+    entity_type: 'calendar_exception',
+    entity_id: params.groupId,
+    details: withAuditCorrelation(
+      {
+        group_id: result.group_id,
+        deleted_count: result.deleted_count,
+      },
+      params.requestId,
+    ),
+  })
+
+  return result
 }

@@ -42,9 +42,27 @@ export interface AuditLogEntry {
 export interface AuditLog {
   id: string
   actor_id: string | null
+  actor_name?: string | null
   action: string
   entity_type: string
   entity_id: string | null
   details: AuditLogDetails | null
   created_at: string
+}
+
+export interface AuditLogQueryFilter {
+  limit: number
+  offset: number
+  entityType?: string
+  action?: string
+  actorId?: string
+  startDate?: string
+  endDate?: string
+  allowedEntityTypes?: readonly string[]
+  excludedActions?: readonly string[]
+}
+
+export interface AuditLogQueryResult {
+  items: AuditLog[]
+  hasMore: boolean
 }

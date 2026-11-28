@@ -190,6 +190,7 @@
     "POST /v1/mobile/attendance/precheck",
     "POST /v1/mobile/attendance/submit",
     "GET /v1/mobile/attendance",
+    "GET /v1/mobile/attendance/calendar",
     "GET /v1/mobile/face/enrollment/status",
     "POST /v1/mobile/face/enrollment",
     "DELETE /v1/mobile/face/enrollment",
@@ -331,6 +332,11 @@
     "GET /v1/admin/bootstrap/roster/{id}",
     "POST /v1/admin/bootstrap/roster/{id}/accept",
     "GET /v1/admin/academic-periods",
+    "POST /v1/admin/academic-periods",
+    "PUT /v1/admin/academic-periods/{id}",
+    "POST /v1/admin/academic-periods/{id}/set-active",
+    "POST /v1/admin/academic-periods/{id}/lock",
+    "POST /v1/admin/academic-periods/{id}/unlock",
     "GET /v1/admin/students",
     "GET /v1/admin/students/{user_id}",
     "POST /v1/admin/students/{userId}/approve",
@@ -342,6 +348,9 @@
     "GET /v1/admin/staff",
     "GET /v1/admin/staff/{user_id}",
     "GET /v1/admin/classes",
+    "POST /v1/admin/classes",
+    "PUT /v1/admin/classes/{id}",
+    "DELETE /v1/admin/classes/{id}",
     "GET /v1/admin/adiwiyata/sites",
     "GET /v1/admin/adiwiyata/reports",
     "POST /v1/admin/adiwiyata/reports/{id}/verify",
@@ -353,6 +362,12 @@
     "PATCH /v1/admin/adiwiyata/sites/{id}",
     "DELETE /v1/admin/adiwiyata/sites/{id}",
     "GET /v1/admin/enrollments",
+    "POST /v1/admin/enrollments",
+    "POST /v1/admin/enrollments/transfer",
+    "POST /v1/admin/enrollments/promote",
+    "POST /v1/admin/enrollments/exit",
+    "POST /v1/admin/enrollments/batch-transition/preview",
+    "POST /v1/admin/enrollments/batch-transition/commit",
     "GET /v1/admin/locations",
     "POST /v1/admin/locations",
     "PUT /v1/admin/locations/{id}",
@@ -364,6 +379,12 @@
     "PATCH /v1/admin/schedules/{id}",
     "DELETE /v1/admin/schedules/{id}",
     "GET /v1/admin/calendar-exceptions",
+    "GET /v1/admin/calendar-exceptions/{id}",
+    "POST /v1/admin/calendar-exceptions",
+    "POST /v1/admin/calendar-exceptions/range",
+    "PUT /v1/admin/calendar-exceptions/{id}",
+    "DELETE /v1/admin/calendar-exceptions/group/{groupId}",
+    "DELETE /v1/admin/calendar-exceptions/{id}",
     "GET /v1/admin/leave-requests",
     "POST /v1/admin/leave-requests",
     "GET /v1/admin/leave-requests/{id}",
@@ -385,8 +406,26 @@
     "DELETE /v1/admin/attendance/{id}",
     "GET /v1/admin/attendance/attempts",
     "POST /v1/admin/backups",
-    "GET /v1/admin/backups/status"
+    "GET /v1/admin/backups/status",
+    "GET /v1/admin/audit-logs"
   ],
+  "academic_operations": {
+    "period_lifecycle": "Periods default to is_active=false on creation. Exactly one active period per school is enforced. Non-bootstrap activation requires active_enrollments > 0 and active_schedules > 0 and an unlocked target period; failures return 409 CONFLICT with details.reason_code (PERIOD_NOT_READY_FOR_ACTIVATION, PERIOD_LOCKED, CANNOT_DEACTIVATE_ACTIVE_PERIOD).",
+    "period_locking": "Locked periods (is_locked=true) reject core period/class/enrollment writes with 409 CONFLICT (PERIOD_LOCKED) unless override_locked=true and reason (>= 3 chars) are supplied and audited.",
+    "enrollments": "Single and batch enrollment mutations key on student_id (with optional user_id fallback), support unbound students (user_id=null), track effective_start_date/effective_end_date, enforce active class absence_number uniqueness (409 ABSENCE_NUMBER_CONFLICT), and sync profiles.class_name only for bound users in active periods (clearing on graduation/exit).",
+    "batch_transition": "POST /v1/admin/enrollments/batch-transition/preview returns deterministic source_hash, class_mappings, unmapped_classes, items, and conflicts; POST /commit verifies source_hash (409 STALE_PREVIEW) and executes atomically."
+  },
+  "calendar_exceptions": {
+    "read_access": "GET /v1/admin/calendar-exceptions, GET /v1/admin/calendar-exceptions/{id}, and GET /v1/admin/schedules allow platform_admin, school_admin, teacher, and staff. Filtering by academic_period_id includes school-wide (academic_period_id IS NULL) rows; period-specific rows take precedence over global rows for the same date.",
+    "range_and_conflicts": "POST /v1/admin/calendar-exceptions/range expands [start_date, end_date] (<= 90 days) into daily rows sharing group_id. Holiday creation scans attendances and approved leave_requests and returns 409 CONFLICT (CALENDAR_CONFLICT) unless override_conflicts=true and override_reason (>= 3 chars) are supplied. Duplicate date+scope returns 409 CONFLICT (CALENDAR_DUPLICATE_DATE).",
+    "attendance_holiday_gate": "Mobile precheck, submit, saveAttendanceRecord transaction, and dashboard primary_action return reason_code=CALENDAR_HOLIDAY on holidays. GET /v1/mobile/dashboard includes additive upcoming_holidays (next 14 WIB days)."
+  },
+  "admin_audit_logs": {
+    "route": "GET /v1/admin/audit-logs",
+    "authorization": "Bearer Logto access token with admin:read; approved Astra profile role platform_admin (unrestricted) or school_admin (scoped to school-operational entities, excluding platform RBAC, bootstrap, CMS, and PKL).",
+    "pagination": "limit 1..100 (default 50), offset >= 0 (default 0), meta.pagination={limit,offset,has_more}.",
+    "sanitization": "Strips secrets/tokens/passwords/reset_codes/OTPs/coordinates/images/embeddings and masks email/phone/nik/nisn/address while preserving nis, full_name, student_name, class_name, reason, lock_reason, override_reason, request_id, and trace_id."
+  },
   "roster_import": {
     "routes": [
       "POST /v1/admin/bootstrap/roster",

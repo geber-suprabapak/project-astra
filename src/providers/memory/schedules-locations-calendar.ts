@@ -1,14 +1,19 @@
+import { randomUUID } from 'node:crypto'
 import { AppError } from '../../lib/errors/app-error.js'
-import type {
-  CalendarException,
-  CreateCalendarExceptionParams,
-  CreateLocationParams,
-  CreateScheduleParams,
-  Location,
-  Schedule,
-  UpdateCalendarExceptionParams,
-  UpdateLocationParams,
-  UpdateScheduleParams,
+import { expandDateRange, resolveCalendarExceptionForDate } from '../shared/academic-batch.js'
+import {
+  toWibDate,
+  type CalendarException,
+  type CreateCalendarExceptionParams,
+  type CreateCalendarExceptionRangeParams,
+  type CreateCalendarExceptionRangeResult,
+  type CreateLocationParams,
+  type CreateScheduleParams,
+  type Location,
+  type Schedule,
+  type UpdateCalendarExceptionParams,
+  type UpdateLocationParams,
+  type UpdateScheduleParams,
 } from '../types.js'
 import type { MemoryDomainState } from './domain-state.js'
 
@@ -216,7 +221,9 @@ export function listMemoryCalendarExceptions(
 ): CalendarException[] {
   let list = Array.from(store.calendarExceptions.values())
   if (filter?.academicPeriodId) {
-    list = list.filter((e) => e.academic_period_id === filter.academicPeriodId)
+    list = list.filter(
+      (e) => !e.academic_period_id || e.academic_period_id === filter.academicPeriodId,
+    )
   }
   if (filter?.startDate) {
     list = list.filter((e) => e.date >= filter.startDate!)
@@ -240,35 +247,200 @@ export function getMemoryCalendarExceptionByDate(
   date: string,
   academicPeriodId?: string,
 ): CalendarException | null {
-  const formattedDate = date.slice(0, 10)
-  for (const e of store.calendarExceptions.values()) {
-    if (e.date === formattedDate) {
-      if (!academicPeriodId || !e.academic_period_id || e.academic_period_id === academicPeriodId) {
-        return { ...e }
+  const match = resolveCalendarExceptionForDate(
+    Array.from(store.calendarExceptions.values()),
+    academicPeriodId,
+    date,
+  )
+  return match ? { ...match } : null
+}
+
+interface MemoryCalendarConflictScan {
+  conflictingDates: string[]
+  attendanceCount: number
+  approvedLeaveCount: number
+}
+
+function scanMemoryCalendarConflicts(
+  store: MemoryDomainState,
+  startDate: string,
+  endDate: string,
+): MemoryCalendarConflictScan {
+  const dates = expandDateRange(startDate, endDate, 90)
+  const conflictingDateSet = new Set<string>()
+  let attendanceCount = 0
+
+  for (const att of store.attendancesList) {
+    const d = att.date.slice(0, 10)
+    if (d >= startDate && d <= endDate) {
+      attendanceCount++
+      conflictingDateSet.add(d)
+    }
+  }
+  if (attendanceCount === 0) {
+    for (const abs of store.absences) {
+      const d = (abs.date ?? abs.created_at).slice(0, 10)
+      if (d >= startDate && d <= endDate) {
+        attendanceCount++
+        conflictingDateSet.add(d)
       }
     }
   }
-  return null
+
+  let approvedLeaveCount = 0
+  for (const permit of store.permits) {
+    if (permit.approval_status !== 'approved') continue
+    const leaveStart = toWibDate(permit.tanggal)
+    const leaveEnd = toWibDate(permit.effective_end_date ?? permit.original_end_date ?? leaveStart)
+    if (leaveStart <= endDate && leaveEnd >= startDate) {
+      approvedLeaveCount++
+      for (const d of dates) {
+        if (d >= leaveStart && d <= leaveEnd) {
+          conflictingDateSet.add(d)
+        }
+      }
+    }
+  }
+
+  return {
+    conflictingDates: Array.from(conflictingDateSet).sort(),
+    attendanceCount,
+    approvedLeaveCount,
+  }
+}
+
+function assertMemoryCalendarUniqueDate(
+  store: MemoryDomainState,
+  schoolId: string | null,
+  academicPeriodId: string | null,
+  date: string,
+  ignoreId?: string,
+): void {
+  const duplicate = Array.from(store.calendarExceptions.values()).find(
+    (e) =>
+      e.id !== ignoreId &&
+      (e.school_id ?? null) === (schoolId ?? null) &&
+      (e.academic_period_id ?? null) === (academicPeriodId ?? null) &&
+      e.date === date,
+  )
+  if (duplicate) {
+    throw AppError.conflict('Calendar exception already exists for this date and scope.', {
+      reason_code: 'CALENDAR_DUPLICATE_DATE',
+      date,
+    })
+  }
 }
 
 export function createMemoryCalendarException(
   store: MemoryDomainState,
   params: CreateCalendarExceptionParams,
 ): CalendarException {
+  const formattedDate = params.date.slice(0, 10)
+  const isHoliday = params.isHoliday ?? true
+  const schoolId = params.schoolId ?? store.schools[0]?.id ?? null
+  const academicPeriodId = params.academicPeriodId ?? null
+
+  if (isHoliday) {
+    const conflicts = scanMemoryCalendarConflicts(store, formattedDate, formattedDate)
+    if (conflicts.attendanceCount > 0 || conflicts.approvedLeaveCount > 0) {
+      const overrideReason = params.overrideReason?.trim() ?? ''
+      if (!params.overrideConflicts || overrideReason.length < 3) {
+        throw AppError.conflict(
+          'Date conflicts with existing attendance or approved leave records.',
+          {
+            reason_code: 'CALENDAR_CONFLICT',
+            conflicting_dates: conflicts.conflictingDates,
+            attendance_count: conflicts.attendanceCount,
+            approved_leave_count: conflicts.approvedLeaveCount,
+          },
+        )
+      }
+    }
+  }
+
+  assertMemoryCalendarUniqueDate(store, schoolId, academicPeriodId, formattedDate)
+
   const now = new Date().toISOString()
   const id = `cal-exc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
   const exc: CalendarException = {
     id,
-    school_id: params.schoolId ?? store.schools[0]?.id ?? null,
-    academic_period_id: params.academicPeriodId ?? null,
-    date: params.date.slice(0, 10),
+    school_id: schoolId,
+    academic_period_id: academicPeriodId,
+    date: formattedDate,
     reason: params.reason,
-    is_holiday: params.isHoliday ?? true,
+    is_holiday: isHoliday,
+    group_id: params.groupId ?? null,
     created_at: now,
     updated_at: now,
   }
   store.calendarExceptions.set(id, exc)
   return { ...exc }
+}
+
+export function createMemoryCalendarExceptionRange(
+  store: MemoryDomainState,
+  params: CreateCalendarExceptionRangeParams,
+): CreateCalendarExceptionRangeResult {
+  const dates = expandDateRange(params.startDate.slice(0, 10), params.endDate.slice(0, 10), 90)
+  const isHoliday = params.isHoliday ?? true
+  const schoolId = params.schoolId ?? store.schools[0]?.id ?? null
+  const academicPeriodId = params.academicPeriodId ?? null
+
+  let attendanceCount = 0
+  let approvedLeaveCount = 0
+  if (isHoliday) {
+    const conflicts = scanMemoryCalendarConflicts(store, dates[0]!, dates[dates.length - 1]!)
+    attendanceCount = conflicts.attendanceCount
+    approvedLeaveCount = conflicts.approvedLeaveCount
+    if (attendanceCount > 0 || approvedLeaveCount > 0) {
+      const overrideReason = params.overrideReason?.trim() ?? ''
+      if (!params.overrideConflicts || overrideReason.length < 3) {
+        throw AppError.conflict(
+          'Date range conflicts with existing attendance or approved leave records.',
+          {
+            reason_code: 'CALENDAR_CONFLICT',
+            conflicting_dates: conflicts.conflictingDates,
+            attendance_count: attendanceCount,
+            approved_leave_count: approvedLeaveCount,
+          },
+        )
+      }
+    }
+  }
+
+  for (const d of dates) {
+    assertMemoryCalendarUniqueDate(store, schoolId, academicPeriodId, d)
+  }
+
+  const groupId = randomUUID()
+  const now = new Date().toISOString()
+  const items: CalendarException[] = []
+  for (const date of dates) {
+    const id = `cal-exc-${randomUUID()}`
+    const exc: CalendarException = {
+      id,
+      school_id: schoolId,
+      academic_period_id: academicPeriodId,
+      date,
+      reason: params.reason,
+      is_holiday: isHoliday,
+      group_id: groupId,
+      created_at: now,
+      updated_at: now,
+    }
+    store.calendarExceptions.set(id, exc)
+    items.push({ ...exc })
+  }
+
+  return {
+    group_id: groupId,
+    items,
+    override_conflicts: Boolean(
+      params.overrideConflicts && (attendanceCount > 0 || approvedLeaveCount > 0),
+    ),
+    attendance_count: attendanceCount,
+    approved_leave_count: approvedLeaveCount,
+  }
 }
 
 export function updateMemoryCalendarException(
@@ -278,7 +450,15 @@ export function updateMemoryCalendarException(
 ): CalendarException {
   const exc = store.calendarExceptions.get(id)
   if (!exc) throw AppError.notFound('Calendar exception')
-  if (params.date !== undefined) exc.date = params.date.slice(0, 10)
+
+  const nextDate = params.date !== undefined ? params.date.slice(0, 10) : exc.date
+  const nextPeriodId =
+    params.academicPeriodId !== undefined
+      ? params.academicPeriodId
+      : (exc.academic_period_id ?? null)
+  assertMemoryCalendarUniqueDate(store, exc.school_id ?? null, nextPeriodId, nextDate, id)
+
+  exc.date = nextDate
   if (params.reason !== undefined) exc.reason = params.reason
   if (params.isHoliday !== undefined) exc.is_holiday = params.isHoliday
   if (params.academicPeriodId !== undefined) exc.academic_period_id = params.academicPeriodId
@@ -290,4 +470,24 @@ export function updateMemoryCalendarException(
 export function deleteMemoryCalendarException(store: MemoryDomainState, id: string): void {
   if (!store.calendarExceptions.has(id)) throw AppError.notFound('Calendar exception')
   store.calendarExceptions.delete(id)
+}
+
+export interface DeletedCalendarGroupResult {
+  group_id: string
+  deleted_count: number
+}
+
+export function deleteMemoryCalendarExceptionGroup(
+  store: MemoryDomainState,
+  groupId: string,
+): DeletedCalendarGroupResult {
+  let deleted = 0
+  for (const [id, exc] of store.calendarExceptions.entries()) {
+    if (exc.group_id === groupId) {
+      store.calendarExceptions.delete(id)
+      deleted++
+    }
+  }
+  if (deleted === 0) throw AppError.notFound('Calendar exception group')
+  return { group_id: groupId, deleted_count: deleted }
 }

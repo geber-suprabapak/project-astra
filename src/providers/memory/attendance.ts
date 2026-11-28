@@ -1,3 +1,5 @@
+import { AppError } from '../../lib/errors/app-error.js'
+import { resolveCalendarExceptionForDate } from '../shared/academic-batch.js'
 import {
   canRecordAttendanceAction,
   type Absence,
@@ -144,6 +146,19 @@ export function saveMemoryAttendanceRecord(
 ): SaveAttendanceRecordRpcResponse {
   const todayWIB = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
   assertAttendanceAllowed(store.permits, params.userId, todayWIB)
+  const activePeriod = store.academicPeriods.find((p) => p.is_active) ?? null
+  const holidayException = resolveCalendarExceptionForDate(
+    Array.from(store.calendarExceptions.values()),
+    activePeriod?.id,
+    todayWIB,
+  )
+  if (holidayException?.is_holiday) {
+    throw AppError.attendanceBlocked('Attendance is blocked on a scheduled holiday.', {
+      reason_code: 'CALENDAR_HOLIDAY',
+      date: todayWIB,
+      holiday_reason: holidayException.reason,
+    })
+  }
   const current = store.attendancesList.filter(
     (record) => record.user_id === params.userId && record.date === todayWIB,
   )

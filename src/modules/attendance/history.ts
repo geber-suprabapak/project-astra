@@ -2,6 +2,7 @@ import { AppError } from '../../lib/errors/app-error.js'
 import { ErrorCode } from '../../lib/errors/codes.js'
 import type { AppProviders, AttendanceRecord } from '../../providers/types.js'
 import { getLeavePeriodFields } from '../../providers/types.js'
+import { resolveCalendarExceptionForDate } from '../../providers/shared/academic-batch.js'
 
 async function requireApprovedStudent(userId: string, providers: AppProviders): Promise<void> {
   const profile = await providers.domainStore.getUserProfile(userId)
@@ -73,6 +74,8 @@ export async function getAttendanceCalendar(params: {
   const lastDay = new Date(Date.UTC(params.year, params.month, 0)).getUTCDate()
   const endDate = `${params.year}-${String(params.month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
 
+  const activePeriod = await params.providers.domainStore.getActiveAcademicPeriod()
+
   const [attendance, permits, exceptions] = await Promise.all([
     params.providers.domainStore.listAttendances({
       userId: params.userId,
@@ -81,7 +84,11 @@ export async function getAttendanceCalendar(params: {
       limit: 100,
     }),
     params.providers.domainStore.getPermitHistory(params.userId),
-    params.providers.domainStore.listCalendarExceptions({ startDate, endDate }),
+    params.providers.domainStore.listCalendarExceptions({
+      startDate,
+      endDate,
+      academicPeriodId: activePeriod?.id,
+    }),
   ])
   const monthAttendance = attendance.filter(
     (record) => record.date >= startDate && record.date <= endDate,
@@ -147,12 +154,14 @@ export async function getAttendanceCalendar(params: {
     }
   }
 
-  for (const exception of exceptions) {
-    if (exception.is_holiday) {
+  const uniqueExceptionDates = Array.from(new Set(exceptions.map((e) => e.date.slice(0, 10))))
+  for (const date of uniqueExceptionDates) {
+    const resolved = resolveCalendarExceptionForDate(exceptions, activePeriod?.id, date)
+    if (resolved?.is_holiday) {
       items.push({
-        date: exception.date,
+        date: resolved.date,
         status: 'holiday',
-        holiday_reason: exception.reason,
+        holiday_reason: resolved.reason,
       })
     }
   }

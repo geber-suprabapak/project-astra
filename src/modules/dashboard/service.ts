@@ -1,4 +1,8 @@
 import { defaultProviders } from '../../providers/index.js'
+import {
+  addDaysYmd,
+  resolveCalendarExceptionForDate,
+} from '../../providers/shared/academic-batch.js'
 import type { Absence, AppProviders, Schedule } from '../../providers/types.js'
 import { env } from '../../config/env.js'
 
@@ -242,9 +246,9 @@ export function computePrimaryAction(params: {
     return {
       allowed: false,
       type: null,
-      reason_code: 'ATTENDANCE_BLOCKED',
-      label: 'Hari libur / kalender khusus',
-      reason_message: `Today is a scheduled calendar exception/holiday: ${calendarHolidayReason}`,
+      reason_code: 'CALENDAR_HOLIDAY',
+      label: 'Hari Libur',
+      reason_message: calendarHolidayReason,
     }
   }
 
@@ -350,6 +354,11 @@ export interface DashboardResponse {
     active_category: string | null
   }
   primary_action: PrimaryAction
+  upcoming_holidays: Array<{
+    date: string
+    reason: string
+    group_id: string | null
+  }>
   server_time: {
     now: string
     timezone: string
@@ -387,14 +396,38 @@ export async function getDashboard(
     ? await providers.domainStore.getActiveClassEnrollment(userId, activePeriod.id)
     : null
 
-  const calendarException = activePeriod
-    ? await providers.domainStore.getCalendarExceptionByDate(todayWIB, activePeriod.id)
-    : null
+  const upcomingStart = addDaysYmd(todayWIB, 1)
+  const upcomingEnd = addDaysYmd(todayWIB, 14)
 
-  const schedule = await providers.domainStore.getActiveSchedule(dayKey, {
-    classId: activeEnrollment?.class_id,
-    academicPeriodId: activePeriod?.id,
-  })
+  const [calendarException, upcomingExceptions, schedule] = await Promise.all([
+    activePeriod
+      ? providers.domainStore.getCalendarExceptionByDate(todayWIB, activePeriod.id)
+      : Promise.resolve(null),
+    providers.domainStore.listCalendarExceptions({
+      startDate: upcomingStart,
+      endDate: upcomingEnd,
+      academicPeriodId: activePeriod?.id,
+    }),
+    providers.domainStore.getActiveSchedule(dayKey, {
+      classId: activeEnrollment?.class_id,
+      academicPeriodId: activePeriod?.id,
+    }),
+  ])
+
+  const upcomingDates = Array.from(
+    new Set(upcomingExceptions.map((exc) => exc.date.slice(0, 10))),
+  ).sort()
+  const upcomingHolidays: Array<{ date: string; reason: string; group_id: string | null }> = []
+  for (const date of upcomingDates) {
+    const resolved = resolveCalendarExceptionForDate(upcomingExceptions, activePeriod?.id, date)
+    if (resolved?.is_holiday) {
+      upcomingHolidays.push({
+        date: resolved.date,
+        reason: resolved.reason,
+        group_id: resolved.group_id ?? null,
+      })
+    }
+  }
 
   const attendanceStatus = computeAttendanceStatus(absences)
 
@@ -470,6 +503,7 @@ export async function getDashboard(
       active_category: activePermits.length > 0 ? activePermits[0].kategori_izin : null,
     },
     primary_action: primaryAction,
+    upcoming_holidays: upcomingHolidays,
     server_time: {
       now: now.toISOString(),
       timezone: env.businessTimezone,

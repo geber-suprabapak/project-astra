@@ -1,10 +1,16 @@
 import type {
   AcademicPeriod,
+  BatchTransitionCommitParams,
+  BatchTransitionCommitResult,
+  BatchTransitionPreview,
+  BatchTransitionPreviewParams,
   CalendarException,
   ClassEnrollment,
   ClassRoom,
   CreateAcademicPeriodParams,
   CreateCalendarExceptionParams,
+  CreateCalendarExceptionRangeParams,
+  CreateCalendarExceptionRangeResult,
   CreateClassParams,
   CreateLocationParams,
   CreatePasswordResetCodeParams,
@@ -12,6 +18,7 @@ import type {
   EnrollStudentParams,
   ExitStudentEnrollmentParams,
   Location,
+  LockAcademicPeriodParams,
   PasswordResetCode,
   ProfileLifecycleStatus,
   PromoteStudentEnrollmentParams,
@@ -19,6 +26,7 @@ import type {
   StudentBinding,
   StudentRosterRow,
   TransferStudentEnrollmentParams,
+  UnlockAcademicPeriodParams,
   UpdateAcademicPeriodParams,
   UpdateCalendarExceptionParams,
   UpdateClassParams,
@@ -27,8 +35,10 @@ import type {
   UserProfile,
 } from '../types.js'
 import {
+  commitMemoryBatchEnrollmentTransition,
   createMemoryAcademicPeriod,
   createMemoryClass,
+  deleteMemoryClass,
   enrollMemoryStudentInClass,
   exitMemoryStudentEnrollment,
   getMemoryAcademicPeriod,
@@ -37,18 +47,23 @@ import {
   getMemoryClassById,
   getMemoryClasses,
   listMemoryAcademicPeriods,
+  lockMemoryAcademicPeriod,
+  previewMemoryBatchEnrollmentTransition,
   promoteMemoryStudentEnrollment,
   setMemoryActiveAcademicPeriod,
   transferMemoryStudentEnrollment,
+  unlockMemoryAcademicPeriod,
   updateMemoryAcademicPeriod,
   updateMemoryClass,
 } from './academic-enrollment.js'
 import { MemoryDomainStoreBase } from './domain-store-base.js'
 import {
   createMemoryCalendarException,
+  createMemoryCalendarExceptionRange,
   createMemoryLocation,
   createMemorySchedule,
   deleteMemoryCalendarException,
+  deleteMemoryCalendarExceptionGroup,
   deleteMemoryLocation,
   deleteMemorySchedule,
   getMemoryActiveSchedule,
@@ -192,6 +207,11 @@ export class MemoryDomainStoreOperations extends MemoryDomainStoreBase {
   async createCalendarException(params: CreateCalendarExceptionParams): Promise<CalendarException> {
     return createMemoryCalendarException(this, params)
   }
+  async createCalendarExceptionRange(
+    params: CreateCalendarExceptionRangeParams,
+  ): Promise<CreateCalendarExceptionRangeResult> {
+    return createMemoryCalendarExceptionRange(this, params)
+  }
   async updateCalendarException(
     id: string,
     params: UpdateCalendarExceptionParams,
@@ -200,6 +220,11 @@ export class MemoryDomainStoreOperations extends MemoryDomainStoreBase {
   }
   async deleteCalendarException(id: string): Promise<void> {
     deleteMemoryCalendarException(this, id)
+  }
+  async deleteCalendarExceptionGroup(
+    groupId: string,
+  ): Promise<{ group_id: string; deleted_count: number }> {
+    return deleteMemoryCalendarExceptionGroup(this, groupId)
   }
 
   async listAcademicPeriods(filter?: { isActive?: boolean }): Promise<AcademicPeriod[]> {
@@ -223,6 +248,12 @@ export class MemoryDomainStoreOperations extends MemoryDomainStoreBase {
   async setActiveAcademicPeriod(id: string): Promise<AcademicPeriod> {
     return setMemoryActiveAcademicPeriod(this, id)
   }
+  async lockAcademicPeriod(params: LockAcademicPeriodParams): Promise<AcademicPeriod> {
+    return lockMemoryAcademicPeriod(this, params)
+  }
+  async unlockAcademicPeriod(params: UnlockAcademicPeriodParams): Promise<AcademicPeriod> {
+    return unlockMemoryAcademicPeriod(this, params)
+  }
 
   async getClasses(schoolId?: string, academicPeriodId?: string): Promise<ClassRoom[]> {
     return getMemoryClasses(this, schoolId, academicPeriodId)
@@ -235,6 +266,12 @@ export class MemoryDomainStoreOperations extends MemoryDomainStoreBase {
   }
   async updateClass(id: string, params: UpdateClassParams): Promise<ClassRoom> {
     return updateMemoryClass(this, id, params)
+  }
+  async deleteClass(
+    id: string,
+    options?: { overrideLocked?: boolean; reason?: string },
+  ): Promise<void> {
+    deleteMemoryClass(this, id, options)
   }
 
   async getActiveClassEnrollment(
@@ -261,5 +298,15 @@ export class MemoryDomainStoreOperations extends MemoryDomainStoreBase {
   }
   async getStudentEnrollmentHistory(userId: string): Promise<ClassEnrollment[]> {
     return this.listClassEnrollments({ userId })
+  }
+  async previewBatchEnrollmentTransition(
+    params: BatchTransitionPreviewParams,
+  ): Promise<BatchTransitionPreview> {
+    return previewMemoryBatchEnrollmentTransition(this, params)
+  }
+  async commitBatchEnrollmentTransition(
+    params: BatchTransitionCommitParams,
+  ): Promise<BatchTransitionCommitResult> {
+    return commitMemoryBatchEnrollmentTransition(this, params)
   }
 }

@@ -179,7 +179,7 @@ describe('Student Profile and History Unit Tests', () => {
         name: '2026/2027 Ganjil',
         startDate: '2026-07-01',
         endDate: '2026-12-31',
-        isActive: true,
+        isActive: false,
       })
       const class2 = await domainStore.createClass({
         name: 'XII RPL 1',
@@ -191,6 +191,7 @@ describe('Student Profile and History Unit Tests', () => {
         classId: class2.id,
         academicPeriodId: period2.id,
       })
+      await domainStore.setActiveAcademicPeriod(period2.id)
 
       const history = await getStudentEnrollmentHistory('student-1', providers)
       expect(history.length).toBe(2)

@@ -23,6 +23,8 @@ describe.skipIf(!process.env.TEST_POSTGRES_URL)(
         'attendance_attempts',
         'leave_requests',
         'schedules',
+        'academic_periods',
+        'calendar_exceptions',
         'audit_logs',
       ]) {
         await setupSql.unsafe(

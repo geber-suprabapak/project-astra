@@ -6,6 +6,7 @@ import type { AppEnv } from '../../types/context.js'
 import { createAdiwiyataAdminRouter } from '../adiwiyata/admin-routes.js'
 import { registerAcademicEnrollmentRoutes } from './routes/academic-enrollment.js'
 import { registerAttendanceRoutes } from './routes/attendance.js'
+import { registerAuditLogRoutes } from './routes/audit-logs.js'
 import { registerBackupRoutes } from './routes/backup.js'
 import { registerBootstrapRosterRoutes } from './routes/bootstrap-roster.js'
 import { registerLeaveRequestRoutes } from './routes/leave-requests.js'
@@ -34,6 +35,7 @@ export function createAdminRouter(deps: AdminRouterDeps = {}) {
   registerLeaveRequestRoutes(router, deps)
   registerNotificationRoutes(router, deps)
   registerBackupRoutes(router, deps)
+  registerAuditLogRoutes(router, deps)
 
   return router
 }

@@ -23,6 +23,10 @@ export interface AcademicPeriod {
   start_date: string
   end_date: string
   is_active: boolean
+  is_locked?: boolean
+  locked_at?: string | null
+  locked_by?: string | null
+  lock_reason?: string | null
   created_at?: string
   updated_at?: string
 }
@@ -40,6 +44,20 @@ export interface UpdateAcademicPeriodParams {
   startDate?: string
   endDate?: string
   isActive?: boolean
+  overrideLocked?: boolean
+  reason?: string
+}
+
+export interface LockAcademicPeriodParams {
+  id: string
+  reason: string
+  lockedBy: string
+}
+
+export interface UnlockAcademicPeriodParams {
+  id: string
+  reason: string
+  unlockedBy: string
 }
 
 export interface ClassRoom {
@@ -82,6 +100,8 @@ export interface ClassEnrollment {
   academic_period_id: string
   absence_number?: string | null
   status: ClassEnrollmentStatus
+  effective_start_date?: string | null
+  effective_end_date?: string | null
   created_at?: string
   updated_at?: string
   class_name?: string | null
@@ -91,9 +111,14 @@ export interface ClassEnrollment {
 }
 
 export interface EnrollStudentParams {
-  userId: string
+  studentId?: string
+  userId?: string
   classId: string
   academicPeriodId: string
+  absenceNumber?: string | null
+  effectiveDate?: string
+  overrideLocked?: boolean
+  reason?: string
 }
 
 export interface CreateStudentParams {
@@ -103,26 +128,144 @@ export interface CreateStudentParams {
 }
 
 export interface TransferStudentEnrollmentParams {
-  userId: string
+  studentId?: string
+  userId?: string
   fromClassId?: string
   toClassId: string
   academicPeriodId: string
+  absenceNumber?: string | null
+  effectiveDate?: string
+  overrideLocked?: boolean
   reason?: string
 }
 
 export interface PromoteStudentEnrollmentParams {
-  userId: string
+  studentId?: string
+  userId?: string
   fromAcademicPeriodId: string
   toAcademicPeriodId: string
   toClassId: string
+  absenceNumber?: string | null
+  effectiveDate?: string
+  overrideLocked?: boolean
   reason?: string
 }
 
 export interface ExitStudentEnrollmentParams {
-  userId: string
+  studentId?: string
+  userId?: string
   academicPeriodId: string
   status?: 'graduated' | 'archived'
+  effectiveDate?: string
+  overrideLocked?: boolean
   reason?: string
+}
+
+export type BatchTransitionMode = 'promote_to_next_year' | 'continue_semester'
+
+export interface BatchClassMappingInput {
+  from_class_id: string
+  to_class_id: string | null
+  action: 'promote' | 'continue' | 'graduate'
+}
+
+export interface BatchStudentOverrideInput {
+  student_id: string
+  action: 'retain' | 'transfer' | 'exit'
+  to_class_id?: string | null
+  exit_status?: 'graduated' | 'archived'
+  absence_number?: string | null
+  reason?: string
+}
+
+export interface BatchTransitionPreviewParams {
+  fromAcademicPeriodId: string
+  toAcademicPeriodId: string
+  mode: BatchTransitionMode
+  classMappings?: BatchClassMappingInput[]
+  overrides?: BatchStudentOverrideInput[]
+  clearConflictingAbsenceNumbers?: boolean
+  effectiveDate?: string
+}
+
+export interface BatchTransitionCommitParams extends BatchTransitionPreviewParams {
+  sourceHash: string
+  overrideLocked?: boolean
+  reason?: string
+}
+
+export interface BatchTransitionClassMappingItem {
+  from_class_id: string
+  from_class_name: string
+  from_grade: number | null
+  to_class_id: string | null
+  to_class_name: string | null
+  action: 'promote' | 'continue' | 'graduate'
+  student_count: number
+}
+
+export interface BatchTransitionUnmappedClass {
+  class_id: string
+  name: string
+  grade: number | null
+  student_count: number
+}
+
+export interface BatchTransitionConflict {
+  student_id: string
+  nis: string | null
+  full_name: string | null
+  type: string
+  message: string
+}
+
+export interface BatchTransitionPreviewItem {
+  student_id: string
+  user_id: string | null
+  nis: string | null
+  full_name: string | null
+  from_class_id: string
+  from_class_name: string
+  to_class_id: string | null
+  to_class_name: string | null
+  action: 'promote' | 'continue' | 'retain' | 'transfer' | 'graduate' | 'exit'
+  resolved_absence_number: string | null
+  absence_number_cleared: boolean
+  conflict: { type: string; message: string } | null
+}
+
+export interface BatchTransitionSummary {
+  total: number
+  promoted: number
+  continued: number
+  retained: number
+  transferred: number
+  graduated: number
+  exited: number
+  conflicts: number
+  cleared_absence_numbers: number
+}
+
+export interface BatchTransitionPreview {
+  source_hash: string
+  from_period: AcademicPeriod
+  to_period: AcademicPeriod
+  requires_lock_override: boolean
+  summary: BatchTransitionSummary
+  class_mappings: BatchTransitionClassMappingItem[]
+  unmapped_classes: BatchTransitionUnmappedClass[]
+  items: BatchTransitionPreviewItem[]
+  conflicts: BatchTransitionConflict[]
+}
+
+export interface BatchTransitionCommitResult {
+  from_academic_period_id: string
+  to_academic_period_id: string
+  mode: BatchTransitionMode
+  source_hash: string
+  summary: BatchTransitionSummary
+  created_count: number
+  closed_count: number
 }
 
 export interface RosterRowInput {

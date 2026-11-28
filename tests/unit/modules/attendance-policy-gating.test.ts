@@ -74,11 +74,8 @@ describe('Attendance Policy Gating & Priority Matching', () => {
   it('rejects attendance when no active academic period is configured', async () => {
     const { providers } = await setupGatedEnvironment()
 
-    // Deactivate all periods
-    const periods = await providers.domainStore.listAcademicPeriods()
-    for (const p of periods) {
-      await providers.domainStore.updateAcademicPeriod(p.id, { isActive: false })
-    }
+    // Clear configured periods to simulate unconfigured academic period state
+    providers.domainStore.academicPeriods = []
 
     const gate = await runGateChecks(
       {
@@ -162,7 +159,8 @@ describe('Attendance Policy Gating & Priority Matching', () => {
     )
 
     expect(gate.allowed).toBe(false)
-    expect(gate.reasonCode).toBe('ATTENDANCE_BLOCKED')
+    expect(gate.reasonCode).toBe('CALENDAR_HOLIDAY')
+    expect(gate.holidayReason).toBe('Hari Guru Nasional')
     expect(gate.reason).toContain('Hari Guru Nasional')
   })
 

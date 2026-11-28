@@ -34,6 +34,8 @@ import type {
   AttendanceRecord,
   AuditLog,
   AuditLogEntry,
+  AuditLogQueryFilter,
+  AuditLogQueryResult,
   CalendarException,
   ClaimPendingNotificationsParams,
   ClassEnrollment,
@@ -118,6 +120,7 @@ import {
   getMemoryAuditLogs,
   insertMemoryAuditLog,
   isMemorySessionRevoked,
+  queryMemoryAuditLogs,
   revokeMemoryUserSessions,
 } from './rbac-staff.js'
 import {
@@ -310,6 +313,9 @@ export class MemoryDomainStoreBase implements MemoryDomainState {
   async getAuditLogs(entityType?: string, entityId?: string): Promise<AuditLog[]> {
     return getMemoryAuditLogs(this, entityType, entityId)
   }
+  async queryAuditLogs(filter: AuditLogQueryFilter): Promise<AuditLogQueryResult> {
+    return queryMemoryAuditLogs(this, filter)
+  }
   async enqueueNotification(params: EnqueueNotificationParams): Promise<NotificationRecord> {
     return enqueueMemoryNotification(this, params)
   }
@@ -348,6 +354,7 @@ export class MemoryDomainStoreBase implements MemoryDomainState {
     return getMemoryRosterStudentByNis(this, nis)
   }
   async listClassEnrollments(filter?: {
+    studentId?: string
     userId?: string
     classId?: string
     academicPeriodId?: string

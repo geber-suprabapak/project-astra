@@ -12,7 +12,8 @@ import {
   type SaveAttendanceRecordRpcResponse,
 } from '../types.js'
 import { insertNotificationOutboxRow } from './notifications-outbox.js'
-import { getActiveSchedule } from './schedules-locations-calendar.js'
+import { getActiveAcademicPeriod } from './academic-periods.js'
+import { getActiveSchedule, getCalendarExceptionByDate } from './schedules-locations-calendar.js'
 import {
   calculateDistanceMeters,
   findBlockingApprovedLeave,
@@ -185,6 +186,15 @@ export async function saveAttendanceRecord(
             effective_end_date: blocking.effective_end_date,
           })
         }
+        const activePeriod = await getActiveAcademicPeriod(tx)
+        const holidayException = await getCalendarExceptionByDate(tx, todayWIB, activePeriod?.id)
+        if (holidayException?.is_holiday) {
+          throw AppError.attendanceBlocked('Attendance is blocked on a scheduled holiday.', {
+            reason_code: 'CALENDAR_HOLIDAY',
+            date: todayWIB,
+            holiday_reason: holidayException.reason,
+          })
+        }
         const current = await tx<
           Array<{ status: string; action_type: AttendanceActionType | null }>
         >`
@@ -253,6 +263,15 @@ export async function createManualAttendance(
             date: todayWIB,
             effective_start_date: blocking.start_date,
             effective_end_date: blocking.effective_end_date,
+          })
+        }
+        const activePeriod = await getActiveAcademicPeriod(tx)
+        const holidayException = await getCalendarExceptionByDate(tx, todayWIB, activePeriod?.id)
+        if (holidayException?.is_holiday) {
+          throw AppError.attendanceBlocked('Attendance is blocked on a scheduled holiday.', {
+            reason_code: 'CALENDAR_HOLIDAY',
+            date: todayWIB,
+            holiday_reason: holidayException.reason,
           })
         }
         const current = await tx<
